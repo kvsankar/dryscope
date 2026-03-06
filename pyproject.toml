@@ -22,6 +22,9 @@ dependencies = [
     "click>=8.0",
 ]
 
+[project.optional-dependencies]
+verify = ["litellm>=1.0", "tenacity>=8.0"]
+
 [project.urls]
 Homepage = "https://github.com/sankar/dryscope"
 Repository = "https://github.com/sankar/dryscope"

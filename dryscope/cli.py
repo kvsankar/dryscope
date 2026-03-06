@@ -44,20 +44,28 @@ def main(ctx: click.Context) -> None:
 @click.argument("path", type=click.Path(exists=True))
 @click.option("--threshold", "-t", default=0.90, type=float, help="Similarity threshold (0.0-1.0)")
 @click.option("--min-lines", "-m", default=6, type=int, help="Minimum lines for a code unit")
+@click.option("--min-tokens", default=0, type=int, help="Minimum unique normalized tokens for a code unit")
 @click.option("--max-cluster-size", default=15, type=int, help="Drop clusters larger than this")
 @click.option("--exclude", "-e", multiple=True, help="Glob patterns to exclude (e.g. '*/tests/*')")
 @click.option("--exclude-type", multiple=True, help="Base class types to exclude (e.g. TextChoices)")
 @click.option("--format", "-f", "output_format", type=click.Choice(["terminal", "json"]), default="terminal")
 @click.option("--model", default="all-MiniLM-L6-v2", help="Sentence-transformer model name")
+@click.option("--verify", is_flag=True, default=False, help="Use LLM to verify clusters (requires litellm)")
+@click.option("--llm-model", default="gpt-4o-mini", envvar="DRYSCOPE_LLM_MODEL", help="LLM model for --verify (any litellm model)")
+@click.option("--llm-api-key", default=None, help="API key for --verify (overrides provider env var)")
 def scan(
     path: str,
     threshold: float,
     min_lines: int,
+    min_tokens: int,
     max_cluster_size: int,
     exclude: tuple[str, ...],
     exclude_type: tuple[str, ...],
     output_format: str,
     model: str,
+    verify: bool,
+    llm_model: str,
+    llm_api_key: str | None,
 ) -> None:
     """Scan PATH for duplicate code."""
     # Detect project profiles and merge exclusions
@@ -88,6 +96,21 @@ def scan(
     click.echo("Normalizing...", err=True)
     normalized = [normalize(u.source) for u in units]
 
+    # P0: Filter by unique token count after normalization
+    if min_tokens > 0:
+        filtered = [
+            (u, n) for u, n in zip(units, normalized)
+            if len(set(n.split())) >= min_tokens
+        ]
+        removed = len(units) - len(filtered)
+        if removed:
+            click.echo(f"Filtered {removed} units with < {min_tokens} unique tokens.", err=True)
+            units, normalized = zip(*filtered) if filtered else ([], [])
+            units, normalized = list(units), list(normalized)
+        if not units:
+            click.echo("No code units remaining after token filter.", err=True)
+            sys.exit(0)
+
     click.echo(f"Generating embeddings (model: {model})...", err=True)
     embedder = Embedder(model_name=model)
     embeddings = embedder.embed(normalized)
@@ -103,6 +126,36 @@ def scan(
     clusters_idx = cluster_duplicates(len(units), pairs, max_cluster_size=max_cluster_size)
 
     clusters = build_clusters(units, clusters_idx, pairs, normalized_texts=normalized)
+
+    # LLM verification pass
+    if verify:
+        try:
+            import litellm  # noqa: F401
+        except ImportError:
+            click.echo(
+                "Error: --verify requires litellm. Install with: pip install 'dryscope[verify]'",
+                err=True,
+            )
+            sys.exit(1)
+
+        from dryscope.verifier import verify_clusters, VERDICT_NOISE
+
+        click.echo(f"Verifying {len(clusters)} clusters with {llm_model}...", err=True)
+        results = verify_clusters(clusters, model=llm_model, api_key=llm_api_key)
+
+        verified: list = []
+        noise_count = 0
+        for cluster, verdict, reason in results:
+            cluster.verdict = verdict
+            cluster.verdict_reason = reason
+            if verdict == VERDICT_NOISE:
+                noise_count += 1
+            else:
+                verified.append(cluster)
+
+        click.echo(f"LLM filtered {noise_count} noise clusters, {len(verified)} remaining.", err=True)
+        clusters = verified
+
     if output_format == "json":
         click.echo(format_json(clusters))
     else:

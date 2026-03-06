@@ -20,22 +20,42 @@ Run dryscope using its installed binary:
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `-t, --threshold` | `0.85` | Similarity threshold (0.0-1.0). Higher = stricter. Use 0.95 for high-confidence only. |
-| `-m, --min-lines` | `3` | Minimum lines for a code unit to be considered |
+| `-t, --threshold` | `0.90` | Similarity threshold (0.0-1.0). Higher = stricter. |
+| `-m, --min-lines` | `6` | Minimum lines for a code unit to be considered |
+| `--min-tokens` | `0` | Minimum unique normalized tokens (filters trivial units) |
+| `--max-cluster-size` | `15` | Drop clusters larger than this |
+| `-e, --exclude` | | Glob patterns to exclude (e.g. `*/tests/*`) |
+| `--exclude-type` | | Base class types to exclude (e.g. `TextChoices`) |
 | `-f, --format` | `terminal` | Output format: `terminal` or `json` |
 | `--model` | `all-MiniLM-L6-v2` | Sentence-transformer model name |
+| `--verify` | off | Use LLM to verify clusters (requires `dryscope[verify]`) |
+| `--llm-model` | `gpt-4o-mini` | LLM model for verification (any litellm-supported model) |
 
-### Examples
+### Recommended usage
+
+**Always use `--verify` for best results.** Without it, the tool reports all structurally similar code — including framework boilerplate and coincidental matches. The `--verify` flag uses an LLM (default: gpt-4o-mini) to filter noise and label each cluster as `refactor`, `review`, or `noise`. The default model (gpt-4o-mini) provides the best balance of precision and recall — only override it if you have a specific reason to.
 
 ```bash
-# Scan a project with default settings
+# Recommended: scan with LLM verification (uses gpt-4o-mini by default)
+{{DRYSCOPE_BIN}} scan /path/to/project --verify --min-tokens 15
+
+# With a different LLM model
+{{DRYSCOPE_BIN}} scan /path/to/project --verify --llm-model claude-haiku-4-5-20251001
+```
+
+Requires `OPENAI_API_KEY` in the environment (or the appropriate key for your chosen model). Set it in a `.env` file in the project root.
+
+### More examples
+
+```bash
+# Quick scan without LLM verification (offline, free)
 {{DRYSCOPE_BIN}} scan /path/to/project
 
-# Strict threshold, min 5 lines, JSON output
-{{DRYSCOPE_BIN}} scan /path/to/project -t 0.95 -m 5 -f json
+# Strict threshold, JSON output
+{{DRYSCOPE_BIN}} scan /path/to/project --verify -t 0.95 -f json
 
 # Pipe JSON to a file for further analysis
-{{DRYSCOPE_BIN}} scan /path/to/project -f json > duplicates.json
+{{DRYSCOPE_BIN}} scan /path/to/project --verify -f json > duplicates.json
 ```
 
 ## Interpreting results

@@ -28,9 +28,11 @@ class Cluster:
     total_lines: int = 0
     files: list[str] = field(default_factory=list)
     actionability: float = 0.0
+    verdict: str = ""
+    verdict_reason: str = ""
 
     def to_dict(self) -> dict:
-        return {
+        d = {
             "cluster_id": self.cluster_id,
             "tier": self.tier.value,
             "max_similarity": round(self.max_similarity, 4),
@@ -51,6 +53,10 @@ class Cluster:
                 for u in self.units
             ],
         }
+        if self.verdict:
+            d["verdict"] = self.verdict
+            d["verdict_reason"] = self.verdict_reason
+        return d
 
 
 def _classify_tier(
@@ -173,12 +179,14 @@ def _format_cluster(cluster: Cluster) -> list[str]:
     """Format a single cluster for terminal display."""
     lines: list[str] = []
     location = "cross-file" if cluster.is_cross_file else "same-file"
+    verdict_str = f"  [{cluster.verdict}]" if cluster.verdict else ""
     lines.append(
         f"  Cluster {cluster.cluster_id}  "
         f"sim={cluster.max_similarity:.4f}  "
         f"{location}  "
         f"{cluster.total_lines} total lines  "
         f"score={cluster.actionability:.1f}"
+        f"{verdict_str}"
     )
     for unit in cluster.units:
         lines.append(

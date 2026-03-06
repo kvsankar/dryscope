@@ -1,0 +1,198 @@
+"""LLM-based verification of duplicate clusters.
+
+Uses litellm for provider-agnostic LLM calls. Supports any model that litellm
+supports (Anthropic, OpenAI, Azure, Bedrock, Ollama, etc.). Auth is handled
+via environment variables (ANTHROPIC_API_KEY, OPENAI_API_KEY, etc.) or a .env
+file in the current directory.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
+
+from dryscope.reporter import Cluster
+
+
+def _load_dotenv() -> None:
+    """Load .env file, searching current dir then upward to find one."""
+    env_file = None
+    candidate = Path.cwd()
+    while True:
+        if (candidate / ".env").exists():
+            env_file = candidate / ".env"
+            break
+        parent = candidate.parent
+        if parent == candidate:
+            break
+        candidate = parent
+
+    if env_file is None:
+        return
+    for line in env_file.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" in line:
+            key, _, value = line.partition("=")
+            key = key.strip()
+            value = value.strip().strip("'\"")
+            if key and key not in os.environ:
+                os.environ[key] = value
+
+logger = logging.getLogger(__name__)
+
+VERDICT_REFACTOR = "refactor"
+VERDICT_REVIEW = "review"
+VERDICT_NOISE = "noise"
+
+SYSTEM_PROMPT = """\
+You are a code review assistant. You will be shown a cluster of code units \
+that a duplicate detection tool flagged as similar. Your job is to classify \
+whether this cluster represents genuine duplication worth refactoring.
+
+Respond with a JSON object containing exactly two keys:
+- "verdict": one of "refactor", "review", or "noise"
+- "reason": a one-sentence explanation
+
+Definitions:
+- "refactor": These units contain genuinely duplicated logic that should be \
+extracted into a shared function/class/mixin. The similarity is in the actual \
+behavior, not just the structural shape.
+- "review": These units might share refactorable logic, but it's ambiguous. \
+A human should look at them.
+- "noise": These units are only similar because they follow the same \
+framework pattern, language convention, or are structurally trivial. \
+Examples: Django serializers with similar Meta classes, factory-boy factories, \
+exception subclasses, tiny test classes with one method, small config classes. \
+This is NOT duplication worth refactoring.
+
+Be strict. If the similarity is mainly due to framework boilerplate or \
+structural shape rather than shared business logic, classify as "noise"."""
+
+USER_TEMPLATE = """\
+Cluster {cluster_id} — {unit_count} code units, similarity={similarity:.4f}
+
+{units_text}
+
+Classify this cluster. Respond ONLY with the JSON object."""
+
+
+def _format_cluster_for_llm(cluster: Cluster) -> str:
+    """Format a cluster's source code for LLM verification."""
+    parts: list[str] = []
+    for i, unit in enumerate(cluster.units):
+        parts.append(
+            f"--- Unit {i + 1}: {unit.unit_type} '{unit.name}' "
+            f"at {unit.file_path}:{unit.start_line}-{unit.end_line} ---\n"
+            f"{unit.source}"
+        )
+    return "\n\n".join(parts)
+
+
+def _parse_verdict(response_text: str) -> tuple[str, str]:
+    """Parse the LLM response into (verdict, reason)."""
+    text = response_text.strip()
+
+    # Try to extract JSON from the response
+    # Handle cases where the LLM wraps JSON in markdown code blocks
+    if "```" in text:
+        start = text.find("{")
+        end = text.rfind("}") + 1
+        if start >= 0 and end > start:
+            text = text[start:end]
+
+    try:
+        data = json.loads(text)
+        verdict = data.get("verdict", "review").lower()
+        reason = data.get("reason", "")
+    except (json.JSONDecodeError, AttributeError):
+        # Fallback: look for keywords in the response
+        lower = text.lower()
+        if "noise" in lower:
+            verdict = VERDICT_NOISE
+        elif "refactor" in lower:
+            verdict = VERDICT_REFACTOR
+        else:
+            verdict = VERDICT_REVIEW
+        reason = text[:200]
+
+    if verdict not in (VERDICT_REFACTOR, VERDICT_REVIEW, VERDICT_NOISE):
+        verdict = VERDICT_REVIEW
+
+    return verdict, reason
+
+
+def verify_cluster(
+    cluster: Cluster,
+    model: str,
+    api_key: str | None = None,
+) -> tuple[str, str]:
+    """Verify a single cluster using an LLM.
+
+    Returns (verdict, reason).
+    """
+    from litellm import completion
+
+    units_text = _format_cluster_for_llm(cluster)
+    user_msg = USER_TEMPLATE.format(
+        cluster_id=cluster.cluster_id,
+        unit_count=len(cluster.units),
+        similarity=cluster.max_similarity,
+        units_text=units_text,
+    )
+
+    kwargs: dict = dict(
+        model=model,
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": user_msg},
+        ],
+        temperature=0,
+        max_tokens=256,
+        num_retries=3,
+    )
+    if api_key:
+        kwargs["api_key"] = api_key
+
+    response = completion(**kwargs)
+
+    response_text = response.choices[0].message.content
+    return _parse_verdict(response_text)
+
+
+def verify_clusters(
+    clusters: list[Cluster],
+    model: str = "gpt-4o-mini",
+    max_workers: int = 1,
+    api_key: str | None = None,
+) -> list[tuple[Cluster, str, str]]:
+    """Verify all clusters in parallel.
+
+    Returns list of (cluster, verdict, reason).
+    """
+    _load_dotenv()
+    results: list[tuple[Cluster, str, str]] = []
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_cluster = {
+            executor.submit(verify_cluster, cluster, model, api_key): cluster
+            for cluster in clusters
+        }
+
+        for future in as_completed(future_to_cluster):
+            cluster = future_to_cluster[future]
+            try:
+                verdict, reason = future.result()
+            except Exception as e:
+                logger.warning("LLM verification failed for cluster %d: %s", cluster.cluster_id, e)
+                verdict, reason = VERDICT_REVIEW, f"verification error: {e}"
+            results.append((cluster, verdict, reason))
+
+    # Preserve original ordering
+    cluster_order = {id(c): i for i, c in enumerate(clusters)}
+    results.sort(key=lambda r: cluster_order[id(r[0])])
+    return results
