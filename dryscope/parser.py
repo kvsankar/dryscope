@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import fnmatch
+import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -13,7 +15,7 @@ from dryscope.treesitter import create_parser
 # Node types we extract as code units
 UNIT_TYPES = {"function_definition", "class_definition"}
 
-# Directories to skip during scanning
+# Directories to always skip
 EXCLUDED_DIRS = {
     ".venv", "venv", ".env", "env",
     "node_modules", "__pycache__",
@@ -21,6 +23,9 @@ EXCLUDED_DIRS = {
     ".tox", ".nox", ".mypy_cache", ".pytest_cache",
     "site-packages", "dist", "build", "egg-info",
 }
+
+# Regex to extract base class names from the first line of a class definition
+_BASE_CLASS_RE = re.compile(r"class\s+\w+\s*\(([^)]*)\)")
 
 
 @dataclass
@@ -38,6 +43,17 @@ class CodeUnit:
     @property
     def line_count(self) -> int:
         return self.end_line - self.start_line + 1
+
+    @property
+    def base_classes(self) -> list[str]:
+        """Extract base class names from a class definition's first line."""
+        if self.unit_type != "class":
+            return []
+        first_line = self.source.split("\n", 1)[0]
+        m = _BASE_CLASS_RE.search(first_line)
+        if not m:
+            return []
+        return [b.strip().rsplit(".", 1)[-1] for b in m.group(1).split(",") if b.strip()]
 
     def __repr__(self) -> str:
         return f"CodeUnit({self.unit_type} {self.name}, {self.file_path}:{self.start_line}-{self.end_line})"
@@ -97,22 +113,50 @@ def flatten_units(units: list[CodeUnit]) -> list[CodeUnit]:
     return result
 
 
-def _is_excluded(path: Path) -> bool:
-    """Check if any component of the path is in the exclusion set."""
-    return bool(EXCLUDED_DIRS & set(path.parts))
+def _is_excluded(
+    path: Path,
+    extra_patterns: list[str] | None = None,
+    extra_dirs: set[str] | None = None,
+) -> bool:
+    """Check if a path should be excluded."""
+    excluded = EXCLUDED_DIRS | extra_dirs if extra_dirs else EXCLUDED_DIRS
+    if excluded & set(path.parts):
+        return True
+    if extra_patterns:
+        path_str = str(path)
+        for pattern in extra_patterns:
+            if fnmatch.fnmatch(path_str, pattern):
+                return True
+    return False
 
 
-def parse_directory(directory: str | Path, min_lines: int = 3) -> list[CodeUnit]:
+def _should_exclude_unit(unit: CodeUnit, exclude_types: set[str] | None) -> bool:
+    """Check if a code unit should be excluded based on its base class types."""
+    if not exclude_types or unit.unit_type != "class":
+        return False
+    return bool(exclude_types & set(unit.base_classes))
+
+
+def parse_directory(
+    directory: str | Path,
+    min_lines: int = 6,
+    exclude_patterns: list[str] | None = None,
+    exclude_types: set[str] | None = None,
+    exclude_dirs: set[str] | None = None,
+) -> list[CodeUnit]:
     """Parse all Python files in a directory tree and return flattened code units."""
     directory = Path(directory)
     all_units: list[CodeUnit] = []
 
     for py_file in sorted(directory.rglob("*.py")):
-        if _is_excluded(py_file.relative_to(directory)):
+        rel = py_file.relative_to(directory)
+        if _is_excluded(rel, exclude_patterns, exclude_dirs):
             continue
         try:
             flat = flatten_units(parse_file(py_file))
-            all_units.extend(u for u in flat if u.line_count >= min_lines)
+            for u in flat:
+                if u.line_count >= min_lines and not _should_exclude_unit(u, exclude_types):
+                    all_units.append(u)
         except Exception as e:
             print(f"Warning: skipping {py_file}: {e}", file=sys.stderr)
 

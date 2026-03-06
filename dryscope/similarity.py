@@ -55,7 +55,7 @@ class UnionFind:
 
 def find_duplicates(
     embeddings: NDArray[np.float32],
-    threshold: float = 0.85,
+    threshold: float = 0.90,
     line_counts: list[int] | None = None,
     max_size_ratio: float = 3.0,
     normalized_texts: list[str] | None = None,
@@ -66,9 +66,6 @@ def find_duplicates(
     Uses a weighted combination of:
     - Embedding cosine similarity (captures semantic/structural similarity)
     - Token-level Jaccard similarity (captures content overlap)
-
-    This hybrid approach prevents structurally similar but semantically
-    different code (e.g. Django models) from clustering together.
     """
     n = embeddings.shape[0]
     if n < 2:
@@ -80,9 +77,6 @@ def find_duplicates(
     if normalized_texts is not None and token_weight > 0:
         tokenized = [text.split() for text in normalized_texts]
 
-    # Minimum embedding similarity that could yield combined >= threshold.
-    # combined = (1 - w) * embed + w * tok, and tok <= 1.0,
-    # so embed must be >= (threshold - w) / (1 - w) for any chance.
     if tokenized is not None:
         min_embed_sim = (threshold - token_weight) / (1 - token_weight)
     else:
@@ -115,11 +109,12 @@ def find_duplicates(
 def cluster_duplicates(
     n: int,
     pairs: list[DuplicatePair],
+    max_cluster_size: int = 15,
 ) -> list[list[int]]:
     """Group duplicate pairs into clusters using Union-Find.
 
-    Returns a list of clusters, each cluster being a list of indices.
-    Only returns clusters with 2+ members.
+    Clusters exceeding max_cluster_size are dropped (they represent broad
+    structural patterns, not actionable duplication).
     """
     if not pairs:
         return []
@@ -133,4 +128,7 @@ def cluster_duplicates(
         root = uf.find(i)
         clusters.setdefault(root, []).append(i)
 
-    return [members for members in clusters.values() if len(members) > 1]
+    return [
+        members for members in clusters.values()
+        if 2 <= len(members) <= max_cluster_size
+    ]
