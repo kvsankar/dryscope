@@ -80,7 +80,7 @@ def scan(
         profiles, user_patterns, user_types,
     )
 
-    click.echo(f"Parsing Python files in {path}...", err=True)
+    click.echo(f"Parsing source files in {path}...", err=True)
     units = parse_directory(
         path,
         min_lines=min_lines,
@@ -94,7 +94,7 @@ def scan(
     click.echo(f"Found {len(units)} code units.", err=True)
 
     click.echo("Normalizing...", err=True)
-    normalized = [normalize(u.source) for u in units]
+    normalized = [normalize(u.source, lang=u.lang) for u in units]
 
     # P0: Filter by unique token count after normalization
     if min_tokens > 0:
@@ -188,7 +188,7 @@ def install() -> None:
 
     click.echo("Installing dryscope into skill venv...", err=True)
     subprocess.run(
-        ["uv", "pip", "install", "--python", str(venv_dir / "bin" / "python"), str(project_root)],
+        ["uv", "pip", "install", "--python", str(venv_dir / "bin" / "python"), f"{project_root}[verify]"],
         check=True,
     )
 

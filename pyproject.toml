@@ -17,6 +17,7 @@ classifiers = [
 dependencies = [
     "tree-sitter>=0.24",
     "tree-sitter-python>=0.23",
+    "tree-sitter-typescript>=0.23",
     "sentence-transformers>=3.0",
     "numpy>=1.26",
     "click>=8.0",

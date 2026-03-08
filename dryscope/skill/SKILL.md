@@ -1,6 +1,6 @@
 ---
 name: dryscope
-description: Detect duplicate code in Python projects using tree-sitter parsing and embedding-based similarity. Use when the user asks to find duplicate code, detect code clones, check for copy-paste code, find repeated patterns, or DRY violations. Keywords - duplicate, clone, copy-paste, DRY, repetition, similarity, refactor duplicates.
+description: Detect duplicate code in Python and TypeScript/TSX projects using tree-sitter parsing and embedding-based similarity. Use when the user asks to find duplicate code, detect code clones, check for copy-paste code, find repeated patterns, or DRY violations. Keywords - duplicate, clone, copy-paste, DRY, repetition, similarity, refactor duplicates.
 allowed-tools: [Bash, Read, Glob, Grep]
 ---
 
@@ -75,7 +75,7 @@ Requires `OPENAI_API_KEY` in the environment (or the appropriate key for your ch
 
 - `.venv/`, `node_modules/`, `__pycache__/`, `site-packages/`, etc.
 - Code units shorter than `--min-lines`
-- Currently Python only (multi-language planned)
+- Currently supports Python and TypeScript/TSX
 
 ## After running
 

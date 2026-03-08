@@ -12,7 +12,7 @@ from tree_sitter import Node
 from dryscope.treesitter import create_parser
 
 # Keep these identifier names as-is (builtins, common stdlib)
-PRESERVE_NAMES = {
+PRESERVE_NAMES_PYTHON = {
     "self", "cls", "super", "print", "len", "range", "enumerate",
     "zip", "map", "filter", "sorted", "reversed", "list", "dict",
     "set", "tuple", "str", "int", "float", "bool", "None", "True",
@@ -29,9 +29,34 @@ PRESERVE_NAMES = {
     "__gt__", "__le__", "__ge__", "__hash__", "__bool__",
 }
 
+PRESERVE_NAMES_TYPESCRIPT = {
+    "this", "super", "console", "undefined", "null", "true", "false",
+    "NaN", "Infinity", "Array", "Object", "Map", "Set", "WeakMap",
+    "WeakSet", "Promise", "Date", "RegExp", "Error", "TypeError",
+    "RangeError", "SyntaxError", "JSON", "Math", "Number", "String",
+    "Boolean", "Symbol", "BigInt", "parseInt", "parseFloat", "isNaN",
+    "isFinite", "encodeURI", "decodeURI", "setTimeout", "setInterval",
+    "clearTimeout", "clearInterval", "fetch", "Response", "Request",
+    "Headers", "URL", "URLSearchParams", "Buffer", "process",
+    "require", "module", "exports", "constructor",
+}
+
+# Combined set for languages
+_PRESERVE: dict[str, set[str]] = {
+    "python": PRESERVE_NAMES_PYTHON,
+    "typescript": PRESERVE_NAMES_TYPESCRIPT,
+    "tsx": PRESERVE_NAMES_TYPESCRIPT,
+}
+
+# String node types per language
+_STRING_TYPES = {"string", "concatenated_string", "template_string"}
+
+# Comment node types
+_COMMENT_TYPES = {"comment"}
+
 
 def _is_docstring(node: Node) -> bool:
-    """Check if an expression_statement node is a docstring."""
+    """Check if an expression_statement node is a docstring (Python only)."""
     return (
         node.type == "expression_statement"
         and len(node.children) == 1
@@ -39,31 +64,44 @@ def _is_docstring(node: Node) -> bool:
     )
 
 
-def normalize(source: str) -> str:
-    """Normalize Python source code for structural comparison.
+def normalize(source: str, lang: str = "python") -> str:
+    """Normalize source code for structural comparison.
 
     - Replaces identifiers with positional placeholders (VAR_0, VAR_1, ...)
     - Replaces literals with type-based placeholders (STR, INT, FLOAT)
     - Strips comments and docstrings
+    - Strips type annotations (TypeScript)
     """
-    parser = create_parser()
+    parser = create_parser(lang)
     tree = parser.parse(source.encode("utf-8"))
+    preserve = _PRESERVE.get(lang, PRESERVE_NAMES_PYTHON)
 
     id_map: dict[str, str] = {}
     id_counter = 0
     result_parts: list[str] = []
 
+    # TypeScript node types to skip (type annotations don't affect logic)
+    skip_types = set()
+    if lang in ("typescript", "tsx"):
+        skip_types = {
+            "type_annotation", "type_parameters", "type_arguments",
+            "interface_declaration", "type_alias_declaration",
+        }
+
     def _visit(node: Node) -> None:
         nonlocal id_counter
 
-        if _is_docstring(node) or node.type == "comment":
+        if node.type in skip_types:
             return
 
-        # Replace literal nodes wholesale (they have children like string_start/content/end)
-        if node.type in ("string", "concatenated_string"):
+        if _is_docstring(node) or node.type in _COMMENT_TYPES:
+            return
+
+        # Replace literal nodes wholesale
+        if node.type in _STRING_TYPES:
             result_parts.append("STR")
             return
-        if node.type == "integer":
+        if node.type == "integer" or node.type == "number":
             result_parts.append("INT")
             return
         if node.type == "float":
@@ -72,7 +110,7 @@ def normalize(source: str) -> str:
 
         if node.child_count == 0:
             text = node.text.decode("utf-8")
-            if node.type == "identifier" and text not in PRESERVE_NAMES:
+            if node.type in ("identifier", "type_identifier", "property_identifier") and text not in preserve:
                 if text not in id_map:
                     id_map[text] = f"VAR_{id_counter}"
                     id_counter += 1
