@@ -1,0 +1,576 @@
+"""Pipeline orchestrator: runs stages, manages progressive output."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from rich.console import Console
+
+from dryscope.cache import Cache
+from dryscope.docs.chunker import chunk_documents, chunk_file_list, detect_boilerplate_headings
+from dryscope.docs.coding import run_doc_pair_pipeline
+from dryscope.config import Settings
+from dryscope.docs.embeddings import embed_chunks, find_similar_pairs
+from dryscope.docs.models import AnalysisResult, Chunk, Document, OverlapPair
+from dryscope.run_store import RunStore
+
+
+def _chunk_key(chunk: Chunk) -> str:
+    """Create a unique key for a chunk for serialization matching."""
+    return f"{chunk.document_path}:{chunk.line_start}"
+
+
+def _serialize_pairs(pairs: list[OverlapPair]) -> list[dict]:
+    """Serialize overlap pairs for JSON storage."""
+    result = []
+    for p in pairs:
+        result.append({
+            "chunk_a_key": _chunk_key(p.chunk_a),
+            "chunk_b_key": _chunk_key(p.chunk_b),
+            "embedding_similarity": p.embedding_similarity,
+            "shared_codes": p.shared_codes,
+        })
+    return result
+
+
+def _deserialize_pairs(
+    data: list[dict], chunks: list[Chunk],
+) -> list[OverlapPair]:
+    """Deserialize overlap pairs, matching back to in-memory Chunk objects."""
+    chunk_map = {_chunk_key(c): c for c in chunks}
+    pairs = []
+    for d in data:
+        a = chunk_map.get(d["chunk_a_key"])
+        b = chunk_map.get(d["chunk_b_key"])
+        if a is None or b is None:
+            continue
+        pairs.append(OverlapPair(
+            chunk_a=a,
+            chunk_b=b,
+            embedding_similarity=d.get("embedding_similarity"),
+            shared_codes=d.get("shared_codes", []),
+        ))
+    return pairs
+
+
+def _group_pairs_by_doc_pair(
+    pairs: list[OverlapPair],
+) -> dict[tuple[str, str], list[OverlapPair]]:
+    """Group overlap pairs by document pair (sorted paths)."""
+    groups: dict[tuple[str, str], list[OverlapPair]] = {}
+    for p in pairs:
+        a, b = p.chunk_a.document_path, p.chunk_b.document_path
+        key = (min(a, b), max(a, b))
+        groups.setdefault(key, []).append(p)
+    return groups
+
+
+# Pricing per million tokens: (input, output)
+MODEL_PRICING: dict[str, tuple[float, float]] = {
+    "sonnet": (3.0, 15.0),
+    "haiku": (0.25, 1.25),
+    "opus": (15.0, 75.0),
+    "gpt-4o-mini": (0.15, 0.60),
+    "gpt-4": (10.0, 30.0),
+}
+_DEFAULT_PRICING = (3.0, 15.0)
+
+
+def _get_pricing(model: str) -> tuple[float, float]:
+    """Look up (input, output) pricing per million tokens for a model."""
+    model_lower = model.lower()
+    # Check most-specific keys first (e.g. "gpt-4o-mini" before "gpt-4")
+    for key in sorted(MODEL_PRICING, key=len, reverse=True):
+        if key in model_lower:
+            return MODEL_PRICING[key]
+    return _DEFAULT_PRICING
+
+
+def _build_doc_chunks_map(documents: list[Document]) -> dict[str, list[Chunk]]:
+    """Build mapping from document path to its chunks."""
+    return {doc.path: doc.chunks for doc in documents}
+
+
+def estimate_doc_pair_cost(
+    doc_pair_groups: dict[tuple[str, str], list[OverlapPair]],
+    doc_chunks_map: dict[str, list[Chunk]],
+    model: str,
+) -> float:
+    """Estimate LLM cost for doc-pair analysis.
+
+    Each doc pair gets one LLM call. Cost depends on the combined
+    document size (capped at ~32k chars = ~8k tokens per call).
+    """
+    total_input_tokens = 0
+    for (doc_a, doc_b), pairs in doc_pair_groups.items():
+        chars_a = sum(len(c.content) for c in doc_chunks_map.get(doc_a, []))
+        chars_b = sum(len(c.content) for c in doc_chunks_map.get(doc_b, []))
+        # Cap each doc at 16k chars in the prompt
+        capped = min(chars_a, 16000) + min(chars_b, 16000)
+        # Add ~500 chars for prompt template + evidence
+        total_input_tokens += (capped + 500) // 4
+
+    cost_per_m_input, cost_per_m_output = _get_pricing(model)
+
+    total_output_tokens = total_input_tokens * 0.3  # doc-pair responses are concise
+    cost = (total_input_tokens / 1_000_000) * cost_per_m_input
+    cost += (total_output_tokens / 1_000_000) * cost_per_m_output
+    return cost
+
+
+def estimate_cost(num_chunks: int, model: str) -> float:
+    """Rough cost estimate for LLM coding stage.
+
+    Assumes ~300 tokens per chunk average, plus overhead for axial coding
+    and refactoring prompts. Uses approximate pricing.
+    """
+    tokens_per_chunk = 300
+    total_input_tokens = num_chunks * tokens_per_chunk
+    total_input_tokens += 1000 + num_chunks * 100
+
+    cost_per_m_input, cost_per_m_output = _get_pricing(model)
+
+    total_output_tokens = total_input_tokens * 0.5
+    cost = (total_input_tokens / 1_000_000) * cost_per_m_input
+    cost += (total_output_tokens / 1_000_000) * cost_per_m_output
+    return cost
+
+
+def _save_all_reports(
+    run_store: RunStore,
+    result: AnalysisResult,
+    similarity_pairs: list[OverlapPair],
+    suggestions: list[dict] | None,
+    settings: Settings,
+    scan_path: Path,
+    stages_run: list[str] | None = None,
+    topic_clusters: list[dict] | None = None,
+) -> None:
+    """Save report.json, report.md, and report.html to the run directory."""
+    from dryscope.docs.report import render_final_report, render_html, render_markdown
+
+    run_store.save_stage(
+        "report.json",
+        render_final_report(result, similarity_pairs, suggestions, settings, scan_path, stages_run,
+                            topic_clusters=topic_clusters),
+    )
+    md_content = render_markdown(
+        result, similarity_pairs, suggestions,
+        settings=settings, project_root=scan_path,
+        stages_run=stages_run,
+        topic_clusters=topic_clusters,
+    )
+    (run_store.run_dir / "report.md").write_text(md_content)
+    (run_store.run_dir / "report.html").write_text(render_html(md_content))
+
+
+def run_pipeline(
+    scan_path: Path,
+    settings: Settings,
+    stage: str = "full",
+    output_format: str = "terminal",
+    output_file: str | None = None,
+    skip_confirm: bool = False,
+    console: Console | None = None,
+    file_list: list[Path] | None = None,
+    run_store: "RunStore | None" = None,
+) -> AnalysisResult:
+    """Run the analysis pipeline.
+
+    Args:
+        scan_path: Directory to scan for documentation.
+        settings: Merged configuration settings.
+        stage: "similarity" or "full".
+        output_format: "terminal", "markdown", or "json".
+        output_file: Optional file path to write output.
+        skip_confirm: Skip cost confirmation for LLM stage.
+        console: Rich console for output (defaults to stderr).
+
+    Returns:
+        AnalysisResult with all analysis data.
+    """
+    if console is None:
+        console = Console(stderr=True)
+
+    result = AnalysisResult()
+    similarity_pairs: list[OverlapPair] = []
+    suggestions: list[dict] | None = None
+    stages_run: list[str] = []
+
+    # ─── Discover and chunk documents ───
+    with console.status("[bold green]Discovering and chunking documents..."):
+        if file_list is not None:
+            result.documents = chunk_file_list(file_list, scan_path)
+        else:
+            result.documents = chunk_documents(
+                scan_path, settings.include, settings.exclude,
+            )
+        for doc in result.documents:
+            result.chunks.extend(doc.chunks)
+
+    console.print(
+        f"Found [bold]{len(result.documents)}[/bold] documents, "
+        f"[bold]{len(result.chunks)}[/bold] sections"
+    )
+
+    if not result.chunks:
+        console.print("[yellow]No documentation sections found.[/yellow]")
+        return result
+
+    # ─── Stage 1: Similarity ───
+    console.print()
+    console.print("[bold cyan]Stage 1: Semantic Similarity[/bold cyan]")
+
+    cache = None
+    if settings.cache_enabled:
+        cache = Cache(settings.resolved_cache_path)
+
+    similarity_resumed = False
+    if run_store and run_store.stage_exists("stage1_similarity.json"):
+        saved = run_store.load_stage("stage1_similarity.json")
+        if saved:
+            similarity_pairs = _deserialize_pairs(saved.get("pairs", []), result.chunks)
+            if similarity_pairs:
+                similarity_resumed = True
+                console.print(f"[green]Resumed {len(similarity_pairs)} similarity pairs from previous run.[/green]")
+
+    if not similarity_resumed:
+        # Detect boilerplate headings
+        num_docs = len(result.documents)
+        boilerplate_headings = detect_boilerplate_headings(result.chunks, num_docs)
+        if boilerplate_headings:
+            console.print(
+                f"Detected [bold]{len(boilerplate_headings)}[/bold] boilerplate headings "
+                f"(appear in >30% of docs): {', '.join(sorted(boilerplate_headings))}"
+            )
+
+        if settings.min_content_words > 0:
+            short_count = sum(
+                1 for c in result.chunks if len(c.content.split()) < settings.min_content_words
+            )
+            if short_count:
+                console.print(
+                    f"Filtering [bold]{short_count}[/bold] short sections "
+                    f"(<{settings.min_content_words} words)"
+                )
+
+        # Embed all chunks
+        def emb_progress(done: int, total: int) -> None:
+            console.print(f"  Embedding {done}/{total} chunks...", end="\r")
+
+        with console.status("[bold green]Embedding all chunks..."):
+            embeddings = embed_chunks(
+                result.chunks, settings.docs_embedding_model, cache,
+                on_progress=emb_progress, concurrency=settings.concurrency,
+            )
+
+        if cache:
+            cache.commit()
+
+        console.print(f"Embedded [bold]{len(embeddings)}[/bold] chunks")
+
+        # Find similar pairs
+        similarity_pairs = find_similar_pairs(
+            result.chunks, embeddings,
+            threshold=settings.threshold_similarity,
+            min_content_words=settings.min_content_words,
+            boilerplate_headings=boilerplate_headings,
+            include_intra=settings.include_intra,
+            token_weight=settings.token_weight,
+        )
+
+        if run_store:
+            from dryscope.docs.report import serialize_similarity_stage
+            run_store.save_stage(
+                "stage1_similarity.json",
+                serialize_similarity_stage(result, similarity_pairs, settings, scan_path),
+            )
+
+    result.overlaps = similarity_pairs
+    stages_run.append("Similarity")
+
+    console.print(
+        f"Found [bold]{len(similarity_pairs)}[/bold] similar pairs "
+        f"(cosine > {settings.threshold_similarity})"
+    )
+
+    try:
+        if stage == "similarity":
+            if run_store:
+                _save_all_reports(run_store, result, similarity_pairs, suggestions, settings, scan_path, stages_run)
+            _output_results(result, similarity_pairs, suggestions,
+                            output_format, output_file, console, settings, scan_path, stages_run)
+            return result
+
+        # ─── Stage 1b: Intent Overlap Detection ───
+        doc_chunks_map = _build_doc_chunks_map(result.documents)
+        doc_pair_groups = _group_pairs_by_doc_pair(similarity_pairs)
+        intent_evidence: dict[tuple[str, str], list[dict]] = {}
+
+        topic_clusters: list[dict] = []
+
+        if settings.threshold_intent > 0:
+            from dryscope.docs.topics import (
+                cluster_documents_by_topic,
+                embed_topics,
+                find_intent_doc_pairs,
+                run_topic_extraction,
+            )
+
+            intent_resumed = False
+            doc_topics: dict[str, list[str]] = {}
+
+            if run_store and run_store.stage_exists("stage1b_topics.json"):
+                saved = run_store.load_stage("stage1b_topics.json")
+                if saved:
+                    doc_topics = saved.get("doc_topics", {})
+                    for match in saved.get("intent_matches", []):
+                        key = (min(match["doc_a"], match["doc_b"]), max(match["doc_a"], match["doc_b"]))
+                        intent_evidence[key] = match["matched_topics"]
+                    intent_resumed = True
+                    console.print(
+                        f"[green]Resumed intent detection: {len(doc_topics)} documents, "
+                        f"{len(intent_evidence)} intent pairs.[/green]"
+                    )
+
+            if not intent_resumed:
+                console.print()
+                console.print("[bold cyan]Stage 1b: Intent Overlap Detection[/bold cyan]")
+
+                def topic_progress(done: int, total: int) -> None:
+                    console.print(f"  Extracting topics {done}/{total}...", end="\r")
+
+                doc_topics = run_topic_extraction(
+                    doc_chunks_map, settings.model, cache,
+                    backend=settings.backend,
+                    concurrency=settings.concurrency,
+                    on_progress=topic_progress,
+                )
+
+                if cache:
+                    cache.commit()
+
+                total_topics = sum(len(t) for t in doc_topics.values())
+                console.print(f"Extracted [bold]{total_topics}[/bold] topics from {len(doc_topics)} documents")
+
+                # Embed all unique topics
+                all_topics = list({t for topics in doc_topics.values() for t in topics})
+                if all_topics:
+                    topic_embeddings = embed_topics(all_topics, settings.docs_embedding_model, cache)
+
+                    # Find intent doc-pairs
+                    intent_evidence = find_intent_doc_pairs(
+                        doc_topics, topic_embeddings, settings.threshold_intent,
+                    )
+
+                console.print(
+                    f"Found [bold]{len(intent_evidence)}[/bold] intent-overlap document pairs "
+                    f"(topic cosine > {settings.threshold_intent})"
+                )
+
+                # Cluster documents by shared topics
+                if all_topics:
+                    topic_clusters = cluster_documents_by_topic(
+                        doc_topics, topic_embeddings, settings.threshold_intent,
+                    )
+                    if topic_clusters:
+                        console.print(
+                            f"Found [bold]{len(topic_clusters)}[/bold] document clusters by topic"
+                        )
+                        for cluster in topic_clusters:
+                            console.print(
+                                f"  Cluster \"{cluster['label']}\": "
+                                f"{len(cluster['documents'])} docs"
+                            )
+
+                # Save stage1b
+                if run_store:
+                    intent_matches_data = [
+                        {
+                            "doc_a": key[0],
+                            "doc_b": key[1],
+                            "matched_topics": matches,
+                        }
+                        for key, matches in intent_evidence.items()
+                    ]
+                    run_store.save_stage("stage1b_topics.json", {
+                        "metadata": {},
+                        "doc_topics": doc_topics,
+                        "intent_matches": intent_matches_data,
+                    })
+
+            stages_run.append("Intent")
+
+            # Add intent-only doc-pairs to groups (no content overlap, just topics)
+            for key in intent_evidence:
+                if key not in doc_pair_groups:
+                    doc_pair_groups[key] = []
+
+        if not doc_pair_groups:
+            if run_store:
+                _save_all_reports(run_store, result, similarity_pairs, suggestions, settings, scan_path, stages_run,
+                                  topic_clusters=topic_clusters)
+            _output_results(result, similarity_pairs, suggestions,
+                            output_format, output_file, console, settings, scan_path, stages_run,
+                            topic_clusters=topic_clusters)
+            return result
+
+        # ─── Stage 2: LLM Doc-Pair Analysis ───
+        est_cost = estimate_doc_pair_cost(doc_pair_groups, doc_chunks_map, settings.model)
+
+        console.print()
+        console.print("[bold cyan]Stage 2: Document-Pair Analysis (LLM)[/bold cyan]")
+        console.print(
+            f"  Analyzing [bold]{len(doc_pair_groups)}[/bold] document pairs "
+            f"→ ~${est_cost:.2f} ({settings.model})"
+        )
+
+        if est_cost > settings.max_cost:
+            console.print(
+                f"[red]Estimated cost ${est_cost:.2f} exceeds max_cost ${settings.max_cost:.2f}. "
+                f"Skipping LLM stage.[/red]"
+            )
+            if run_store:
+                _save_all_reports(run_store, result, similarity_pairs, suggestions, settings, scan_path, stages_run,
+                                  topic_clusters=topic_clusters)
+            _output_results(result, similarity_pairs, suggestions,
+                            output_format, output_file, console, settings, scan_path, stages_run,
+                            topic_clusters=topic_clusters)
+            return result
+
+        if not skip_confirm:
+            import click
+            if not click.confirm("Proceed?"):
+                console.print("[yellow]Skipping LLM stage.[/yellow]")
+                if run_store:
+                    _save_all_reports(run_store, result, similarity_pairs, suggestions, settings, scan_path, stages_run,
+                                      topic_clusters=topic_clusters)
+                _output_results(result, similarity_pairs, suggestions,
+                                output_format, output_file, console, settings, scan_path, stages_run,
+                                topic_clusters=topic_clusters)
+                return result
+
+        try:
+            import json as _json
+
+            def doc_pair_progress(done: int, total: int) -> None:
+                console.print(f"  Analyzing doc pair {done}/{total}...", end="\r")
+
+            # Load prior doc-pair analyses for resume
+            prior_analyses: dict[str, dict] = {}
+            doc_pairs_path = None
+            if run_store:
+                doc_pairs_path = run_store.run_dir / "stage2_doc_pairs.jsonl"
+                if doc_pairs_path.exists():
+                    for line in doc_pairs_path.read_text().splitlines():
+                        if line.strip():
+                            entry = _json.loads(line)
+                            prior_analyses[entry["pair_key"]] = entry["analysis"]
+                    if prior_analyses:
+                        console.print(
+                            f"[green]Resumed {len(prior_analyses)} doc-pair analyses.[/green]"
+                        )
+
+            # Incremental save callback
+            def on_pair_analyzed(pair_key: str, raw: dict) -> None:
+                if doc_pairs_path:
+                    with open(doc_pairs_path, "a") as f:
+                        f.write(_json.dumps({"pair_key": pair_key, "analysis": raw}) + "\n")
+
+            analyses, codes, categories, suggestions = run_doc_pair_pipeline(
+                doc_pair_groups, doc_chunks_map, settings.model, cache,
+                on_progress=doc_pair_progress,
+                backend=settings.backend,
+                prior_analyses=prior_analyses,
+                on_pair_analyzed=on_pair_analyzed,
+                concurrency=settings.concurrency,
+                intent_evidence=intent_evidence if intent_evidence else None,
+            )
+            result.doc_pair_analyses = analyses
+            result.codes = codes
+            result.categories = categories
+            stages_run.append("LLM Analysis")
+
+            if cache:
+                cache.commit()
+
+            if run_store:
+                from dryscope.docs.report import serialize_coding_stage
+                run_store.save_stage(
+                    "stage2_coding.json",
+                    serialize_coding_stage(codes, categories, suggestions, settings, scan_path, analyses=analyses),
+                )
+        except Exception as e:
+            console.print(f"[yellow]LLM analysis stage failed: {e}[/yellow]")
+            suggestions = None
+
+        if run_store:
+            _save_all_reports(run_store, result, similarity_pairs, suggestions, settings, scan_path, stages_run,
+                              topic_clusters=topic_clusters)
+
+        _output_results(result, similarity_pairs, suggestions,
+                        output_format, output_file, console, settings, scan_path, stages_run,
+                        topic_clusters=topic_clusters)
+        return result
+    finally:
+        if cache:
+            cache.close()
+
+
+def _output_results(
+    result: AnalysisResult,
+    similarity_pairs: list[OverlapPair],
+    suggestions: list[dict] | None,
+    output_format: str,
+    output_file: str | None,
+    console: Console,
+    settings: Settings | None = None,
+    scan_path: Path | None = None,
+    stages_run: list[str] | None = None,
+    topic_clusters: list[dict] | None = None,
+) -> None:
+    """Generate and output the report."""
+    from dryscope.docs.report import render_html, render_json, render_markdown, render_terminal
+
+    if output_format == "terminal":
+        console.print()
+        render_terminal(result, similarity_pairs, suggestions, console,
+                        topic_clusters=topic_clusters)
+    elif output_format == "markdown":
+        content = render_markdown(
+            result, similarity_pairs, suggestions,
+            settings=settings, project_root=scan_path,
+            stages_run=stages_run,
+            topic_clusters=topic_clusters,
+        )
+        if output_file:
+            Path(output_file).write_text(content)
+            console.print(f"Report written to [bold]{output_file}[/bold]")
+        else:
+            stdout_console = Console()
+            stdout_console.print(content)
+    elif output_format == "html":
+        md_content = render_markdown(
+            result, similarity_pairs, suggestions,
+            settings=settings, project_root=scan_path,
+            stages_run=stages_run,
+            topic_clusters=topic_clusters,
+        )
+        content = render_html(md_content)
+        if output_file:
+            Path(output_file).write_text(content)
+            console.print(f"Report written to [bold]{output_file}[/bold]")
+        else:
+            stdout_console = Console()
+            stdout_console.print(content)
+    elif output_format == "json":
+        content = render_json(result, similarity_pairs, suggestions,
+                              settings=settings, project_root=scan_path,
+                              stages_run=stages_run,
+                              topic_clusters=topic_clusters)
+        if output_file:
+            Path(output_file).write_text(content)
+            console.print(f"Report written to [bold]{output_file}[/bold]")
+        else:
+            stdout_console = Console()
+            stdout_console.print(content)

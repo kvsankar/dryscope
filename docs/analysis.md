@@ -38,8 +38,20 @@ No existing tool combines all of:
 The text-based tools (jscpd, CPD) are production-quality but only catch Type 1-2 clones.
 The research tools catch Type 3-4 but are not packaged for practical use.
 
+## Documentation Overlap Detection
+
+The landscape for documentation overlap detection is even sparser:
+
+- **Manual review** — most teams rely on manual auditing of docs for redundancy
+- **Diff-based tools** — git diff and similar tools only catch textual duplication, not semantic overlap
+- **Search-based approaches** — full-text search can find exact phrases but misses paraphrased content
+
+dryscope's docs pipeline fills this gap with embedding-based semantic similarity
+across document sections, combined with LLM topic extraction for intent-level overlap detection.
+
 ## Conclusion
 
 dryscope fills a real gap: a production-quality CLI that uses tree-sitter + embeddings
-to detect semantic code clones across multiple languages, outputting candidate clusters
-suitable for LLM-assisted review.
+to detect semantic code clones across multiple languages, and embedding-based similarity
+to detect documentation overlap. Both pipelines output structured findings suitable
+for LLM-assisted review and automated refactoring agents.

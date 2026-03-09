@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass, field
 from enum import Enum
 
-from dryscope.parser import CodeUnit
+from dryscope.code.parser import CodeUnit
 from dryscope.similarity import DuplicatePair
 
 
@@ -86,7 +87,6 @@ def _compute_actionability(cluster: Cluster) -> float:
     sim_score = cluster.max_similarity
 
     # Log-scale line score: 10 lines = 1.0, 100 lines = 2.0
-    import math
     line_score = math.log10(max(cluster.total_lines, 1))
 
     cross_file_bonus = 1.5 if cluster.is_cross_file else 1.0

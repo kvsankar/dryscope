@@ -14,7 +14,7 @@ import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-from dryscope.reporter import Cluster
+from dryscope.code.reporter import Cluster
 
 
 def _load_dotenv() -> None:
@@ -166,7 +166,7 @@ def verify_cluster(
 
 def verify_clusters(
     clusters: list[Cluster],
-    model: str = "gpt-4o-mini",
+    model: str,
     max_workers: int = 1,
     api_key: str | None = None,
 ) -> list[tuple[Cluster, str, str]]:

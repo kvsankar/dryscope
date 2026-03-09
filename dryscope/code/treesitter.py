@@ -7,6 +7,9 @@ from tree_sitter import Language, Parser
 # Lazy-loaded language objects
 _languages: dict[str, Language] = {}
 
+# Cached parser objects (one per language)
+_parser_cache: dict[str, Parser] = {}
+
 
 def _get_language(lang: str) -> Language:
     """Get a tree-sitter Language object, loading the grammar lazily."""
@@ -26,8 +29,12 @@ def _get_language(lang: str) -> Language:
 
 
 def create_parser(lang: str = "python") -> Parser:
-    """Create a tree-sitter parser for the given language."""
-    return Parser(_get_language(lang))
+    """Create (or return cached) tree-sitter parser for the given language."""
+    if lang in _parser_cache:
+        return _parser_cache[lang]
+    parser = Parser(_get_language(lang))
+    _parser_cache[lang] = parser
+    return parser
 
 
 # File extension to language mapping

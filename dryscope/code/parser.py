@@ -10,7 +10,7 @@ from pathlib import Path
 
 from tree_sitter import Node
 
-from dryscope.treesitter import create_parser, EXT_TO_LANG, SUPPORTED_EXTENSIONS
+from dryscope.code.treesitter import create_parser, EXT_TO_LANG, SUPPORTED_EXTENSIONS
 
 # Node types we extract as code units, per language family
 _FUNCTION_TYPES = {
@@ -201,8 +201,8 @@ def _is_excluded(
     extra_dirs: set[str] | None = None,
 ) -> bool:
     """Check if a path should be excluded."""
-    excluded = EXCLUDED_DIRS | extra_dirs if extra_dirs else EXCLUDED_DIRS
-    if excluded & set(path.parts):
+    excluded = (EXCLUDED_DIRS | extra_dirs) if extra_dirs else EXCLUDED_DIRS
+    if excluded & set(path.parent.parts):
         return True
     if extra_patterns:
         path_str = str(path)

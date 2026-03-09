@@ -1,12 +1,12 @@
 [project]
 name = "dryscope"
 version = "0.1.0"
-description = "Code duplicate detection using tree-sitter and embeddings"
+description = "Code duplicate and documentation overlap detection"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
 authors = [{ name = "Sankar" }]
-keywords = ["duplicate", "clone", "detection", "tree-sitter", "embeddings", "DRY"]
+keywords = ["duplicate", "clone", "detection", "tree-sitter", "embeddings", "DRY", "documentation", "overlap"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -21,10 +21,14 @@ dependencies = [
     "sentence-transformers>=3.0",
     "numpy>=1.26",
     "click>=8.0",
+    "rich>=13.0",
+    "mistune>=3.0",
+    "litellm>=1.0",
+    "tenacity>=8.0",
 ]
 
 [project.optional-dependencies]
-verify = ["litellm>=1.0", "tenacity>=8.0"]
+dev = ["pytest>=7.0", "pytest-cov"]
 
 [project.urls]
 Homepage = "https://github.com/sankar/dryscope"

@@ -9,6 +9,23 @@ import numpy as np
 from numpy.typing import NDArray
 
 
+def cosine_similarity_matrix(vecs_a: np.ndarray, vecs_b: np.ndarray | None = None) -> np.ndarray:
+    """Compute cosine similarity matrix between two sets of vectors.
+
+    If vecs_b is None, computes self-similarity matrix for vecs_a.
+    Handles zero-norm vectors safely.
+    """
+    norms_a = np.linalg.norm(vecs_a, axis=1, keepdims=True)
+    norms_a[norms_a == 0] = 1
+    normed_a = vecs_a / norms_a
+    if vecs_b is None:
+        return normed_a @ normed_a.T
+    norms_b = np.linalg.norm(vecs_b, axis=1, keepdims=True)
+    norms_b[norms_b == 0] = 1
+    normed_b = vecs_b / norms_b
+    return normed_a @ normed_b.T
+
+
 @dataclass
 class DuplicatePair:
     """A pair of code units that are similar."""
@@ -82,26 +99,29 @@ def find_duplicates(
     else:
         min_embed_sim = threshold
 
+    # Get upper triangle indices where embedding similarity exceeds minimum
+    upper_tri = np.triu(sim_matrix, k=1)
+    candidates = np.argwhere(upper_tri >= min_embed_sim)
+
     pairs: list[DuplicatePair] = []
-    for i in range(n):
-        for j in range(i + 1, n):
-            embed_sim = float(sim_matrix[i, j])
-            if embed_sim < min_embed_sim:
+    for idx in candidates:
+        i, j = int(idx[0]), int(idx[1])
+
+        # Size ratio filter
+        if line_counts is not None:
+            lo, hi = sorted((line_counts[i], line_counts[j]))
+            if lo > 0 and hi / lo > max_size_ratio:
                 continue
 
-            if line_counts is not None:
-                lo, hi = sorted((line_counts[i], line_counts[j]))
-                if lo > 0 and hi / lo > max_size_ratio:
-                    continue
+        embed_sim = float(sim_matrix[i, j])
+        if tokenized is not None:
+            tok_sim = _token_similarity(tokenized[i], tokenized[j])
+            combined = (1 - token_weight) * embed_sim + token_weight * tok_sim
+        else:
+            combined = embed_sim
 
-            if tokenized is not None:
-                tok_sim = _token_similarity(tokenized[i], tokenized[j])
-                combined = (1 - token_weight) * embed_sim + token_weight * tok_sim
-            else:
-                combined = embed_sim
-
-            if combined >= threshold:
-                pairs.append(DuplicatePair(idx_a=i, idx_b=j, similarity=combined))
+        if combined >= threshold:
+            pairs.append(DuplicatePair(idx_a=i, idx_b=j, similarity=combined))
 
     return pairs
 

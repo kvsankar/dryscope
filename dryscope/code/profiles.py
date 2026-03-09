@@ -23,7 +23,7 @@ class Profile:
 
 # -- Detector functions --------------------------------------------------------
 # Each returns a Profile if the project matches, None otherwise.
-# Detectors receive the scan target path.
+# Detectors receive the scan target path and pre-read dependency text.
 
 
 def _read_deps(path: Path) -> str:
@@ -38,10 +38,9 @@ def _read_deps(path: Path) -> str:
     return "\n".join(texts)
 
 
-def detect_django(path: Path) -> Profile | None:
+def detect_django(path: Path, deps: str) -> Profile | None:
     """Detect Django projects."""
     has_manage_py = (path / "manage.py").exists()
-    deps = _read_deps(path)
     has_django_dep = "django" in deps
 
     if not (has_manage_py or has_django_dep):
@@ -55,23 +54,8 @@ def detect_django(path: Path) -> Profile | None:
     )
 
 
-def detect_flask(path: Path) -> Profile | None:
-    """Detect Flask projects."""
-    deps = _read_deps(path)
-    if "flask" not in deps:
-        return None
-
-    return Profile(
-        name="flask",
-        exclude_dirs=set(),
-        exclude_patterns=[],
-        exclude_types=set(),
-    )
-
-
-def detect_pytest(path: Path) -> Profile | None:
+def detect_pytest(path: Path, deps: str) -> Profile | None:
     """Detect projects using pytest with factories."""
-    deps = _read_deps(path)
     if "factory-boy" in deps or "factory_boy" in deps:
         return Profile(
             name="pytest-factories",
@@ -85,7 +69,6 @@ def detect_pytest(path: Path) -> Profile | None:
 # Registry of all detectors, in priority order
 DETECTORS = [
     detect_django,
-    detect_flask,
     detect_pytest,
 ]
 
@@ -101,9 +84,11 @@ def detect_profiles(path: str | Path) -> list[Profile]:
             project_root = candidate
             break
 
+    deps = _read_deps(project_root)
+
     profiles: list[Profile] = []
     for detector in DETECTORS:
-        profile = detector(project_root)
+        profile = detector(project_root, deps)
         if profile is not None:
             profiles.append(profile)
 

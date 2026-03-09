@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from tree_sitter import Node
 
-from dryscope.treesitter import create_parser
+from dryscope.code.treesitter import create_parser
 
 # Keep these identifier names as-is (builtins, common stdlib)
 PRESERVE_NAMES_PYTHON = {
