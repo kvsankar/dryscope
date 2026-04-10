@@ -12,7 +12,10 @@ import click
 from dryscope import __version__
 
 SKILL_TEMPLATE = Path(__file__).parent / "skill" / "SKILL.md"
-SKILL_DEST = Path.home() / ".claude" / "skills" / "dryscope"
+SKILL_DESTS = [
+    Path.home() / ".claude" / "skills" / "dryscope",
+    Path.home() / ".codex" / "skills" / "dryscope",
+]
 
 
 def _find_project_root() -> Path:
@@ -387,21 +390,17 @@ def scan(
 
 @main.command()
 def install() -> None:
-    """Install dryscope as a Claude Code skill with its own venv."""
-    claude_dir = Path.home() / ".claude"
-    if not claude_dir.exists():
-        click.echo("~/.claude/ not found. Is Claude Code installed?", err=True)
-        sys.exit(1)
-
+    """Install dryscope as both a Claude Code and Codex skill."""
     if not SKILL_TEMPLATE.exists():
         click.echo(f"SKILL.md template not found at {SKILL_TEMPLATE}", err=True)
         sys.exit(1)
 
     project_root = _find_project_root()
-    venv_dir = SKILL_DEST / ".venv"
+    primary_dest = SKILL_DESTS[0]
+    venv_dir = primary_dest / ".venv"
     dryscope_bin = venv_dir / "bin" / "dryscope"
-
-    SKILL_DEST.mkdir(parents=True, exist_ok=True)
+    for dest in SKILL_DESTS:
+        dest.mkdir(parents=True, exist_ok=True)
 
     click.echo(f"Creating venv at {venv_dir}...", err=True)
     subprocess.run(
@@ -417,19 +416,24 @@ def install() -> None:
 
     template = SKILL_TEMPLATE.read_text()
     rendered = template.replace("{{DRYSCOPE_BIN}}", str(dryscope_bin))
-    (SKILL_DEST / "SKILL.md").write_text(rendered)
+    for dest in SKILL_DESTS:
+        (dest / "SKILL.md").write_text(rendered)
 
-    click.echo(f"Installed dryscope skill to {SKILL_DEST}")
+    for dest in SKILL_DESTS:
+        click.echo(f"Installed dryscope skill to {dest}")
     click.echo(f"Binary: {dryscope_bin}")
 
 
 @main.command()
 def uninstall() -> None:
-    """Remove the dryscope Claude Code skill and its venv."""
-    if SKILL_DEST.exists():
-        shutil.rmtree(SKILL_DEST)
-        click.echo(f"Removed {SKILL_DEST}")
-    else:
+    """Remove the dryscope Claude Code and Codex skills."""
+    removed = False
+    for dest in SKILL_DESTS:
+        if dest.exists():
+            shutil.rmtree(dest)
+            click.echo(f"Removed {dest}")
+            removed = True
+    if not removed:
         click.echo("dryscope skill not installed.", err=True)
 
 

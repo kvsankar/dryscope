@@ -16,7 +16,7 @@ It is designed to reduce how much of a repository a stronger model needs to read
 - **Optional LLM verification** — classifies findings as `refactor`, `review`, or `noise`
 - **Deterministic escalation policy** — keeps `review` findings plus higher-value `refactor` findings for expensive follow-up
 - **Project profiles** — auto-detects Django and pytest-factories, applies smart exclusions
-- **Claude Code skill** — install/uninstall as a Claude Code skill
+- **Agent skills** — install as both a Claude Code and Codex skill
 - **Unified JSON output** — structured `findings[]` schema for agent consumption
 
 ## Positioning
@@ -146,10 +146,10 @@ model = "qwen2.5:3b"
 dryscope scan /path/to/project --verify --backend ollama --llm-model qwen2.5:3b
 ```
 
-## Claude Code Skill
+## Agent Skills
 
 ```bash
-dryscope install    # Install as Claude Code skill
+dryscope install    # Install as both Claude Code and Codex skills
 dryscope uninstall  # Remove the skill
 ```
 
@@ -180,8 +180,8 @@ dryscope scan <path> [OPTIONS]
 
 ```
 dryscope init         # Generate .dryscope.toml
-dryscope install      # Install Claude Code skill
-dryscope uninstall    # Remove Claude Code skill
+dryscope install      # Install Claude Code and Codex skills
+dryscope uninstall    # Remove Claude Code and Codex skills
 dryscope cache stats  # Show cache statistics
 dryscope cache clear  # Clear the cache
 ```
