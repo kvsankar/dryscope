@@ -66,6 +66,7 @@ For large documentation repos, `--docs --verify` now also:
 Backend options:
 - `backend = "cli"` uses `claude -p` and can work with Claude OAuth/session auth
 - `backend = "litellm"` uses provider API keys such as `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`
+- `backend = "ollama"` uses the local Ollama API at `OLLAMA_HOST` or `http://localhost:11434`
 
 ### More examples
 

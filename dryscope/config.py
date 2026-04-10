@@ -42,6 +42,8 @@ model = "claude-haiku-4-5-20251001"
 backend = "cli"
 max_cost = 5.00
 concurrency = 8
+# For backend = "ollama", optionally set:
+# ollama_host = "http://localhost:11434"
 # For backend = "cli", optionally set:
 # cli_strip_api_key = true
 # cli_permission_mode = "bypassPermissions"
@@ -86,6 +88,7 @@ class Settings:
     backend: str = "cli"
     max_cost: float = 5.00
     concurrency: int = 8
+    ollama_host: str | None = None
     cli_strip_api_key: bool = True
     cli_permission_mode: str | None = None
     cli_dangerously_skip_permissions: bool = False
@@ -213,6 +216,8 @@ def load_settings(
             settings.max_cost = llm_cfg["max_cost"]
         if "concurrency" in llm_cfg:
             settings.concurrency = llm_cfg["concurrency"]
+        if "ollama_host" in llm_cfg:
+            settings.ollama_host = llm_cfg["ollama_host"]
         if "cli_strip_api_key" in llm_cfg:
             settings.cli_strip_api_key = llm_cfg["cli_strip_api_key"]
         if "cli_permission_mode" in llm_cfg:

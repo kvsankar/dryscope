@@ -55,10 +55,12 @@ def test_run_code_scan_passes_backend_to_verifier(monkeypatch):
     captured: dict = {}
 
     def fake_verify(clusters, model, max_workers=1, backend="litellm", api_key=None,
+                    ollama_host=None,
                     cli_strip_api_key=True, cli_permission_mode=None,
                     cli_dangerously_skip_permissions=False):
         captured["max_workers"] = max_workers
         captured["backend"] = backend
+        captured["ollama_host"] = ollama_host
         captured["cli_strip_api_key"] = cli_strip_api_key
         captured["cli_permission_mode"] = cli_permission_mode
         captured["cli_dangerously_skip_permissions"] = cli_dangerously_skip_permissions
@@ -86,6 +88,7 @@ def test_run_code_scan_passes_backend_to_verifier(monkeypatch):
     assert clusters is not None
     assert captured["max_workers"] == 4
     assert captured["backend"] == "cli"
+    assert captured["ollama_host"] is None
     assert captured["cli_strip_api_key"] is True
     assert captured["cli_permission_mode"] == "bypassPermissions"
     assert captured["cli_dangerously_skip_permissions"] is True
@@ -135,6 +138,7 @@ def test_run_code_scan_applies_escalation_policy(monkeypatch):
     monkeypatch.setattr(reporter, "build_clusters", fake_build_clusters)
 
     def fake_verify(clusters, model, max_workers=1, backend="litellm", api_key=None,
+                    ollama_host=None,
                     cli_strip_api_key=True, cli_permission_mode=None,
                     cli_dangerously_skip_permissions=False):
         return [

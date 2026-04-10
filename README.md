@@ -118,9 +118,10 @@ intent_skip_without_similarity_min_docs = 100
 
 [llm]
 model = "claude-haiku-4-5-20251001"
-backend = "cli"       # "cli" (claude -p with OAuth) or "litellm" (requires API key)
+backend = "cli"       # "cli" (claude -p), "litellm" (provider API keys), or "ollama" (local Ollama)
 max_cost = 5.00
 concurrency = 8
+# ollama_host = "http://localhost:11434"
 # cli_strip_api_key = true
 # cli_permission_mode = "bypassPermissions"
 # cli_dangerously_skip_permissions = false
@@ -131,6 +132,19 @@ path = "~/.cache/dryscope/cache.db"
 ```
 
 Configuration layers: defaults → `.dryscope.toml` → CLI flags.
+
+Examples:
+
+```toml
+[llm]
+backend = "ollama"
+model = "qwen2.5:3b"
+# ollama_host = "http://localhost:11434"
+```
+
+```bash
+dryscope scan /path/to/project --verify --backend ollama --llm-model qwen2.5:3b
+```
 
 ## Claude Code Skill
 

@@ -59,6 +59,10 @@ class TestSettingsDefaults:
         s = Settings()
         assert s.cli_strip_api_key is True
 
+    def test_default_ollama_host(self):
+        s = Settings()
+        assert s.ollama_host is None
+
     def test_default_code_escalation_policy(self):
         s = Settings()
         assert s.code_escalate_refactor_min_lines == 40
@@ -193,6 +197,16 @@ class TestSections:
         assert s.backend == "litellm"
         assert s.max_cost == 10.0
         assert s.concurrency == 4
+
+    def test_llm_ollama_options_from_toml(self, tmp_path):
+        toml_file = tmp_path / ".dryscope.toml"
+        toml_file.write_text(
+            '[llm]\nbackend = "ollama"\nmodel = "qwen2.5:3b"\nollama_host = "http://127.0.0.1:11434"\n'
+        )
+        s = load_settings(tmp_path)
+        assert s.backend == "ollama"
+        assert s.model == "qwen2.5:3b"
+        assert s.ollama_host == "http://127.0.0.1:11434"
 
     def test_llm_cli_options_from_toml(self, tmp_path):
         toml_file = tmp_path / ".dryscope.toml"

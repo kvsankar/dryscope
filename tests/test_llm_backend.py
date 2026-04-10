@@ -1,6 +1,7 @@
 """Tests for dryscope.llm_backend."""
 
 import os
+import json
 from types import SimpleNamespace
 
 from dryscope import llm_backend
@@ -76,3 +77,38 @@ class TestLiteLLMCompletion:
 
         assert result == "ok"
         assert captured["api_key"] == "secret"
+
+
+class TestOllamaCompletion:
+    def test_ollama_completion_posts_to_local_api(self, monkeypatch):
+        captured: dict = {}
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return json.dumps({"message": {"content": "ok"}}).encode("utf-8")
+
+        def fake_urlopen(request, timeout):
+            captured["url"] = request.full_url
+            captured["body"] = json.loads(request.data.decode("utf-8"))
+            captured["timeout"] = timeout
+            return FakeResponse()
+
+        monkeypatch.setattr(llm_backend.urllib.request, "urlopen", fake_urlopen)
+
+        result = llm_backend.completion(
+            "prompt",
+            "qwen2.5:3b",
+            "ollama",
+            ollama_host="http://localhost:11434",
+        )
+
+        assert result == "ok"
+        assert captured["url"] == "http://localhost:11434/api/chat"
+        assert captured["body"]["model"] == "qwen2.5:3b"
+        assert captured["body"]["messages"][0]["content"] == "prompt"
