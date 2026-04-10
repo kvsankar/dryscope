@@ -34,7 +34,10 @@ EXCLUDED_DIRS = {
     "node_modules", "__pycache__",
     ".git", ".hg", ".svn",
     ".tox", ".nox", ".mypy_cache", ".pytest_cache",
-    "site-packages", "dist", "build", "egg-info",
+    ".ruff_cache", ".cache", ".uv-cache",
+    ".npm", ".yarn", ".pnpm-store",
+    ".next", ".nuxt", ".svelte-kit", ".turbo",
+    "site-packages", "dist", "build", "coverage", "egg-info",
 }
 
 # Regex to extract base class names from the first line of a class definition

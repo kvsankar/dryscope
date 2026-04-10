@@ -96,6 +96,12 @@ class TestIsExcluded:
     def test_venv_excluded(self):
         assert _is_excluded(Path(".venv/lib/site.py")) is True
 
+    def test_uv_cache_excluded(self):
+        assert _is_excluded(Path("dev/.uv-cache/archive-v0/pkg/foo.py")) is True
+
+    def test_next_build_dir_excluded(self):
+        assert _is_excluded(Path(".next/server/app/page.ts")) is True
+
     def test_normal_path_not_excluded(self):
         assert _is_excluded(Path("src/main.py")) is False
 
