@@ -11,3 +11,6 @@ wheels/
 
 # Environment variables (secrets)
 .env
+
+# Generated dryscope run artifacts
+.dryscope/
