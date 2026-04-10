@@ -70,7 +70,7 @@ keep_same_file_refactors = false
 
 [docs]
 include = ["*.md", "*.rst", "*.txt", "*.adoc"]
-exclude = ["node_modules", "venv", ".git", "*.lock"]
+exclude = ["node_modules", "venv", ".git", ".dryscope", "*.lock"]
 threshold_similarity = 0.9
 threshold_intent = 0.8
 min_content_words = 15
@@ -79,6 +79,7 @@ token_weight = 0.3
 embedding_model = "all-MiniLM-L6-v2"
 intent_max_docs = 250
 llm_max_doc_pairs = 250
+intent_skip_without_similarity_min_docs = 100
 
 [llm]
 model = "claude-haiku-4-5-20251001"
@@ -152,8 +153,10 @@ dryscope cache clear  # Clear the cache
 2. **Embed** — sentence-transformers generates section embeddings
 3. **Compare** — hybrid similarity finds cross-document overlap
 4. **Restrict** _(large repos)_ — cap later stages to docs and doc-pairs with the strongest similarity evidence
-5. **Topics** _(full stage)_ — LLM extracts topics, clusters documents by intent overlap
-6. **Analyze** _(full stage)_ — LLM classifies each pair with action recommendations
+5. **Skip Early** _(large negative repos)_ — if stage 1 finds no overlap in a large corpus, the intent stage is skipped instead of spending LLM work on the whole repo
+6. **Topics** _(full stage)_ — LLM extracts topics, clusters documents by intent overlap
+7. **Analyze** _(full stage)_ — LLM classifies each pair with action recommendations
+8. **Group** — related pairwise recommendations are merged into document-family recommendations to reduce output spam
 
 ## Benchmarking
 

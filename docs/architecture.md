@@ -46,6 +46,7 @@ Documentation Files (.md, .rst, .txt, .adoc)
     |                              (similarity stage)
     v
 [Scaling Gates] ──> Limit later stages to strongest docs / doc pairs
+    |              or skip intent entirely on large negative repos
     |
     v
 [Topic Extraction] ──> LLM extracts topics per document
@@ -57,7 +58,7 @@ Documentation Files (.md, .rst, .txt, .adoc)
 [Doc-Pair Analysis] ──> LLM classifies overlap with recommendations
     |                              (full stage)
     v
-[Reporter] ──> terminal / markdown / html / json output
+[Reporter] ──> grouped recommendations + terminal / markdown / html / json output
 ```
 
 ## Core Components
@@ -129,10 +130,14 @@ Documentation Files (.md, .rst, .txt, .adoc)
 
 **Pipeline** (`docs/pipeline.py`)
 - Multi-stage orchestrator: similarity → intent → LLM analysis
-- Large-repo guards: caps intent extraction to docs with strongest similarity evidence and caps LLM doc-pair analysis to strongest pairs
+- Large-repo guards: caps intent extraction to docs with strongest similarity evidence, caps LLM doc-pair analysis to strongest pairs, and skips intent extraction on large negative repos with no stage-1 overlap
 - Cost estimation with model-specific pricing
 - Run persistence via RunStore
 - Progress tracking with rich console
+
+**Report Generation** (`docs/report.py`)
+- Builds prioritized recommendations from overlap pairs
+- Merges dense pairwise overlap families into grouped recommendations so docs with many near-identical siblings do not spam the output
 
 ### Shared (`dryscope/`)
 
