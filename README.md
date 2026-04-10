@@ -1,13 +1,14 @@
 # dryscope
 
-Code duplicate and documentation overlap detection using tree-sitter parsing and embedding-based similarity.
+Code duplicate and documentation overlap detection using tree-sitter parsing, normalization, and embedding-based similarity.
 
 ## Features
 
 - **Code duplicate detection** — Python, TypeScript, and TSX via tree-sitter + sentence-transformers
 - **Documentation overlap detection** — Markdown, RST, and plaintext via embedding similarity + optional LLM analysis
 - **Hybrid similarity** — 70% embedding cosine + 30% token Jaccard with size-ratio filtering
-- **Optional LLM verification** — reduces false positives by classifying findings as `refactor`, `review`, or `noise`
+- **Optional LLM verification** — classifies findings as `refactor`, `review`, or `noise`
+- **Deterministic escalation policy** — keeps `review` findings plus higher-value `refactor` findings for expensive follow-up
 - **Project profiles** — auto-detects Django and pytest-factories, applies smart exclusions
 - **Claude Code skill** — install/uninstall as a Claude Code skill
 - **Unified JSON output** — structured `findings[]` schema for agent consumption
@@ -60,6 +61,10 @@ min_tokens = 0
 max_cluster_size = 15
 threshold = 0.90
 embedding_model = "all-MiniLM-L6-v2"
+escalate_refactor_min_lines = 40
+escalate_refactor_min_actionability = 2.0
+escalate_refactor_min_units = 3
+keep_same_file_refactors = false
 # exclude = ["**/test_*.py"]
 # exclude_type = ["BaseModel"]
 
@@ -78,6 +83,9 @@ model = "claude-haiku-4-5-20251001"
 backend = "cli"       # "cli" (claude -p with OAuth) or "litellm" (requires API key)
 max_cost = 5.00
 concurrency = 8
+# cli_strip_api_key = true
+# cli_permission_mode = "bypassPermissions"
+# cli_dangerously_skip_permissions = false
 
 [cache]
 enabled = true
@@ -112,8 +120,8 @@ dryscope scan <path> [OPTIONS]
 | `-e, --exclude` | | Glob patterns to exclude (code) |
 | `--exclude-type` | | Base class types to exclude (code) |
 | `--embedding-model` | `all-MiniLM-L6-v2` | Sentence-transformer model |
-| `--verify` | off | LLM verification pass |
-| `--llm-model` | `claude-haiku-4-5` | LLM model for verification |
+| `--verify` | off | LLM verification + deterministic escalation policy |
+| `--llm-model` | `claude-haiku-4-5-20251001` | LLM model for verification |
 | `--stage` | `similarity` | Docs pipeline: `similarity` or `full` |
 | `--resume` | off | Resume from latest docs run |
 | `--intra` | off | Include intra-document overlap (docs) |
@@ -135,6 +143,7 @@ dryscope cache clear  # Clear the cache
 4. **Compare** — hybrid similarity (70% cosine + 30% token Jaccard) with size-ratio filtering
 5. **Cluster** — Union-Find groups similar pairs, scored by actionability
 6. **Verify** _(optional)_ — LLM classifies each cluster as `refactor`, `review`, or `noise`
+7. **Escalate** _(with `--verify`)_ — deterministic policy keeps all `review` findings and only higher-value `refactor` findings
 
 ### Docs Pipeline
 1. **Chunk** — split documents into heading-based sections

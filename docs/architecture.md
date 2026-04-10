@@ -24,6 +24,9 @@ Source Files (.py, .ts, .tsx)
 [LLM Verifier] ──> (optional) Classifies clusters as refactor/review/noise
     |
     v
+[Escalation Policy] ──> Keeps review + higher-value refactor clusters
+    |
+    v
 [Reporter] ──> JSON / terminal output with tiered classification
 ```
 
@@ -81,10 +84,17 @@ Documentation Files (.md, .rst, .txt, .adoc)
 - Merges detected profiles with user-provided CLI exclusions
 
 **Verifier** (`code/verifier.py`)
-- Optional LLM-based cluster verification via litellm
+- Optional LLM-based cluster verification via shared LLM backend
 - Classifies clusters as `refactor`, `review`, or `noise`
-- Supports any litellm-compatible provider (OpenAI, Anthropic, Google, Azure, Ollama)
-- Sequential processing with retries to avoid rate limits
+- Supports `litellm` providers plus `claude -p` CLI backend
+- Prompt includes path-aware context for examples/tests/benchmarks and stricter low-payoff heuristics
+- Parallel processing via configured concurrency
+
+**Policy** (`code/policy.py`)
+- Deterministic post-verification gate for expensive follow-up
+- Keeps all `review` findings
+- Keeps `refactor` findings only when they meet stronger line/actionability/cross-file thresholds
+- Prevents small same-file helper duplicates from automatically reaching expensive models
 
 **Reporter** (`code/reporter.py`)
 - Tiered classification: exact, near-identical, structural
@@ -132,6 +142,7 @@ Documentation Files (.md, .rst, .txt, .adoc)
 - Settings dataclass with `[code]`, `[docs]`, `[llm]`, `[cache]` sections
 - 3-layer merge: defaults → `.dryscope.toml` → CLI flags
 - TOML loading with backward compatibility
+- Includes code escalation policy knobs for post-verify filtering
 
 **Cache** (`cache.py`)
 - Thread-safe SQLite cache for embeddings and LLM coding results
@@ -166,6 +177,8 @@ Documentation Files (.md, .rst, .txt, .adoc)
 
 ### M5: LLM Verification ✓
 - Provider-agnostic LLM verification, project profiles, min-tokens filter
+- Shared code/docs backend support for `litellm` and `claude -p`
+- Deterministic escalation policy after verification
 
 ### M6: Docs Pipeline ✓
 - Documentation overlap detection merged from doclens project

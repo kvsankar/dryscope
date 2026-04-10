@@ -31,12 +31,12 @@
 No existing tool combines all of:
 
 1. **tree-sitter** for multi-language parsing (fast, production-grade, incremental)
-2. **Embedding-based similarity** for detecting Type 2-4 clones
+2. **Embedding-based similarity** for detecting Type 2/3 clones and some higher-level structural similarity
 3. **Practical CLI tool** (not a research prototype)
 4. **Cluster output** ready for LLM review
 
 The text-based tools (jscpd, CPD) are production-quality but only catch Type 1-2 clones.
-The research tools catch Type 3-4 but are not packaged for practical use.
+The research tools target Type 3-4 more directly but are not packaged for practical use.
 
 ## Documentation Overlap Detection
 
@@ -51,7 +51,7 @@ across document sections, combined with LLM topic extraction for intent-level ov
 
 ## Conclusion
 
-dryscope fills a real gap: a production-quality CLI that uses tree-sitter + embeddings
-to detect semantic code clones across multiple languages, and embedding-based similarity
-to detect documentation overlap. Both pipelines output structured findings suitable
-for LLM-assisted review and automated refactoring agents.
+dryscope fills a real gap: a practical CLI that uses tree-sitter + normalization +
+embeddings to surface structural duplicate candidates across multiple languages, and
+embedding-based similarity to detect documentation overlap. Both pipelines output
+structured findings suitable for LLM-assisted review and automated refactoring agents.

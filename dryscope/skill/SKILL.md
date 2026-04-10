@@ -1,6 +1,6 @@
 ---
 name: dryscope
-description: Detect duplicate code and documentation overlap in projects using tree-sitter parsing and embedding-based similarity. Use when the user asks to find duplicate code, detect code clones, check for copy-paste code, find repeated patterns, DRY violations, or documentation overlap. Keywords - duplicate, clone, copy-paste, DRY, repetition, similarity, refactor duplicates, documentation overlap, redundant docs, doc overlap.
+description: Detect duplicate code and documentation overlap in projects using tree-sitter parsing, normalization, and embedding-based similarity. Use when the user asks to find duplicate code, detect code clones, check for copy-paste code, find repeated patterns, DRY violations, or documentation overlap. Keywords - duplicate, clone, copy-paste, DRY, repetition, similarity, refactor duplicates, documentation overlap, redundant docs, doc overlap.
 allowed-tools: [Bash, Read, Glob, Grep]
 ---
 
@@ -36,12 +36,12 @@ Runs **dryscope** — a unified tool for detecting code duplicates and documenta
 | `--exclude-type` | | Base class types to exclude (e.g. `TextChoices`) |
 | `-f, --format` | `terminal` | Output format: `terminal` or `json` |
 | `--embedding-model` | `all-MiniLM-L6-v2` | Sentence-transformer model name |
-| `--verify` | off | Use LLM to verify clusters (requires `dryscope[verify]`) |
-| `--llm-model` | `claude-haiku-4-5` | LLM model for verification (any litellm-supported model) |
+| `--verify` | off | Use LLM verification plus deterministic escalation policy |
+| `--llm-model` | `claude-haiku-4-5-20251001` | LLM model for verification |
 
 ### Recommended usage
 
-**Always use `--verify` for best results.** Without it, the tool reports all structurally similar items — including framework boilerplate and coincidental matches. The `--verify` flag uses an LLM (default: claude-haiku-4-5) to filter noise and label each cluster as `refactor`, `review`, or `noise`.
+**Prefer `--verify` for higher-signal results.** Without it, the tool reports all structurally similar items — including framework boilerplate and coincidental matches. The `--verify` flag uses an LLM (default: claude-haiku-4-5) to label each cluster as `refactor`, `review`, or `noise`, then applies a deterministic policy so low-value `refactor` findings do not automatically survive.
 
 ```bash
 # Code duplicates with LLM verification
@@ -54,7 +54,9 @@ Runs **dryscope** — a unified tool for detecting code duplicates and documenta
 {{DRYSCOPE_BIN}} scan /path/to/project --code --docs --verify
 ```
 
-Requires `OPENAI_API_KEY` in the environment (or the appropriate key for your chosen model).
+Backend options:
+- `backend = "cli"` uses `claude -p` and can work with Claude OAuth/session auth
+- `backend = "litellm"` uses provider API keys such as `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`
 
 ### More examples
 
@@ -75,7 +77,7 @@ Requires `OPENAI_API_KEY` in the environment (or the appropriate key for your ch
 ## Interpreting results
 
 ### Code duplicates
-- **Similarity 1.0**: Identical after normalization (Type-1/Type-2 clones) — strong refactoring candidates
+- **Similarity 1.0**: Identical after normalization (Type-1/Type-2 clones) — strong candidates, but still check whether the payoff is meaningful
 - **Similarity 0.95-0.99**: Near-identical structure with minor differences (Type-3 clones)
 - **Similarity 0.85-0.95**: Structurally similar, may be legitimate patterns or true duplicates
 
@@ -87,8 +89,8 @@ Requires `OPENAI_API_KEY` in the environment (or the appropriate key for your ch
 
 - Exact code copies across files (e.g., utility functions copy-pasted)
 - Renamed clones (same logic, different variable/function names)
-- Structural clones (same pattern applied to different entities)
-- Repeated boilerplate (factories, serializers, config classes)
+- Structural clones with shared implementation shape
+- Repeated boilerplate can still appear structurally, but `--verify` is intended to filter much of it back out
 - Overlapping documentation sections across markdown/text files
 - Redundant explanations that could be consolidated
 
