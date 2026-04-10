@@ -40,6 +40,7 @@ Optional filters:
 python benchmarks/run_public_benchmark.py --group public-moderate
 python benchmarks/run_public_benchmark.py --group public-low-star
 python benchmarks/run_public_benchmark.py --group public-claude-signal-2025
+python benchmarks/run_public_benchmark.py --group public-new-languages
 ```
 
 Outputs are written to `/tmp/dryscope-public-benchmark-results` by default.
@@ -53,3 +54,22 @@ Labels are intentionally simple:
 - `uncertain`
 
 The labels are stored against normalized unit signatures using repo-relative paths, so they remain stable across different clone locations.
+
+## New-Language Group
+
+The `public-new-languages` group is a representative regression pack for newly
+added code languages:
+
+- JavaScript / JSX:
+  - `axios`
+  - `downshift`
+- Java:
+  - `jsoup`
+- Go:
+  - `cobra`
+  - `chi`
+
+This group is intentionally not the heaviest possible set. During exploratory
+testing, some popular Java libraries behaved more like stress benchmarks than
+routine regression checks. Those are better kept as separate one-off scale
+tests than added to the default public pack.

@@ -49,6 +49,31 @@
       "name": "svelte-claude-skills",
       "url": "https://github.com/spences10/svelte-claude-skills.git",
       "group": "public-claude-signal-2025"
+    },
+    {
+      "name": "axios",
+      "url": "https://github.com/axios/axios.git",
+      "group": "public-new-languages"
+    },
+    {
+      "name": "downshift",
+      "url": "https://github.com/downshift-js/downshift.git",
+      "group": "public-new-languages"
+    },
+    {
+      "name": "jsoup",
+      "url": "https://github.com/jhy/jsoup.git",
+      "group": "public-new-languages"
+    },
+    {
+      "name": "cobra",
+      "url": "https://github.com/spf13/cobra.git",
+      "group": "public-new-languages"
+    },
+    {
+      "name": "chi",
+      "url": "https://github.com/go-chi/chi.git",
+      "group": "public-new-languages"
     }
   ]
 }
