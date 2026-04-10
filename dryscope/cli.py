@@ -148,6 +148,7 @@ def _run_code_scan(
     # LLM verification pass
     if verify:
         from dryscope.code.verifier import verify_clusters, VERDICT_NOISE
+        from dryscope.code.policy import EscalationPolicy, should_escalate_cluster
 
         click.echo(f"Verifying {len(clusters)} clusters with {llm_model}...", err=True)
         results = verify_clusters(
@@ -163,15 +164,28 @@ def _run_code_scan(
 
         verified: list = []
         noise_count = 0
+        policy_drop_count = 0
+        policy = EscalationPolicy(
+            refactor_min_lines=settings.code_escalate_refactor_min_lines,
+            refactor_min_actionability=settings.code_escalate_refactor_min_actionability,
+            refactor_min_units=settings.code_escalate_refactor_min_units,
+            keep_same_file_refactors=settings.code_keep_same_file_refactors,
+        )
         for cluster, verdict, reason in results:
             cluster.verdict = verdict
             cluster.verdict_reason = reason
             if verdict == VERDICT_NOISE:
                 noise_count += 1
-            else:
+            elif should_escalate_cluster(cluster, policy):
                 verified.append(cluster)
+            else:
+                policy_drop_count += 1
 
-        click.echo(f"LLM filtered {noise_count} noise clusters, {len(verified)} remaining.", err=True)
+        click.echo(
+            f"LLM filtered {noise_count} noise clusters, policy dropped {policy_drop_count} "
+            f"low-priority verified clusters, {len(verified)} remaining.",
+            err=True,
+        )
         clusters = verified
 
     return clusters

@@ -1,0 +1,152 @@
+{
+  "labels": [
+    {
+      "repo": "MonkeyType",
+      "label": "real_refactor_candidate",
+      "units": [
+        { "path": "demo/inbox.py", "name": "CommentsAggregator" },
+        { "path": "demo/inbox.py", "name": "FollowersAggregator" }
+      ]
+    },
+    {
+      "repo": "MonkeyType",
+      "label": "uncertain",
+      "units": [
+        { "path": "monkeytype/compat.py", "name": "name_of_generic" },
+        { "path": "monkeytype/compat.py", "name": "qualname_of_generic" }
+      ]
+    },
+    {
+      "repo": "tsdoc",
+      "label": "not_worth_refactoring",
+      "units": [
+        { "path": "tsdoc/src/parser/NodeParser.ts", "name": "_backtrackAndCreateErrorRange" },
+        { "path": "tsdoc/src/parser/NodeParser.ts", "name": "_backtrackAndCreateErrorRangeForFailure" }
+      ]
+    },
+    {
+      "repo": "tsdoc",
+      "label": "not_worth_refactoring",
+      "units": [
+        { "path": "tsdoc/src/parser/NodeParser.ts", "name": "constructor" },
+        { "path": "tsdoc/src/parser/TokenSequence.ts", "name": "constructor" }
+      ]
+    },
+    {
+      "repo": "tsdoc",
+      "label": "not_worth_refactoring",
+      "units": [
+        { "path": "tsdoc/src/beta/DeclarationReference.ts", "name": "unescapeComponentString" },
+        { "path": "tsdoc/src/beta/DeclarationReference.ts", "name": "unescapeModuleSourceString" }
+      ]
+    },
+    {
+      "repo": "tsdoc",
+      "label": "not_worth_refactoring",
+      "units": [
+        { "path": "tsdoc/src/beta/DeclarationReference.ts", "name": "escapeComponentString" },
+        { "path": "tsdoc/src/beta/DeclarationReference.ts", "name": "escapeModuleSourceString" }
+      ]
+    },
+    {
+      "repo": "vue-loader",
+      "label": "not_worth_refactoring",
+      "units": [
+        { "path": "src/pluginWebpack4.ts", "name": "cloneRule" },
+        { "path": "src/pluginWebpack4.ts", "name": "cloneRuleForRenderFn" }
+      ]
+    },
+    {
+      "repo": "PptxGenJS",
+      "label": "not_worth_refactoring",
+      "units": [
+        { "path": "src/gen-utils.ts", "name": "correctShadowOptions" },
+        { "path": "src/gen-xml.ts", "name": "correctShadowOptions" }
+      ]
+    },
+    {
+      "repo": "sparkhub",
+      "label": "not_worth_refactoring",
+      "units": [
+        { "path": "src/app/demo-site/[cid]/page.tsx", "name": "fetchContactData" },
+        { "path": "src/app/demo-site/page.tsx", "name": "fetchContactData" }
+      ]
+    },
+    {
+      "repo": "sparkhub",
+      "label": "real_refactor_candidate",
+      "units": [
+        { "path": "src/app/api/logo-express/status/route.ts", "name": "GET" },
+        { "path": "src/app/api/photo/status/route.ts", "name": "GET" },
+        { "path": "src/app/api/post-reseaux/status/route.ts", "name": "GET" }
+      ]
+    },
+    {
+      "repo": "sparkhub",
+      "label": "not_worth_refactoring",
+      "units": [
+        { "path": "src/lib/supabase/server.ts", "name": "createAdminClient" },
+        { "path": "src/lib/supabase/server.ts", "name": "createClient" }
+      ]
+    },
+    {
+      "repo": "sparkhub",
+      "label": "not_worth_refactoring",
+      "units": [
+        { "path": "src/lib/smart-crawler/crawlers/facebook-crawler.ts", "name": "crawlFacebook" },
+        { "path": "src/lib/smart-crawler/crawlers/instagram-crawler.ts", "name": "crawlInstagram" },
+        { "path": "src/lib/smart-crawler/crawlers/linkedin-crawler.ts", "name": "crawlLinkedin" },
+        { "path": "src/lib/smart-crawler/crawlers/web-crawler.ts", "name": "crawlWebsite" }
+      ]
+    },
+    {
+      "repo": "sparkhub",
+      "label": "not_worth_refactoring",
+      "units": [
+        { "path": "src/app/api/mini-site/generate/route.ts", "name": "slugify" },
+        { "path": "src/app/api/mini-site/save/route.ts", "name": "slugify" },
+        { "path": "src/app/(dashboard)/outils/mini-site/mini-site-form.tsx", "name": "slugify" }
+      ]
+    },
+    {
+      "repo": "Personal-Knowledge-Vault",
+      "label": "not_worth_refactoring",
+      "units": [
+        { "path": "_library/Projects.py", "name": "get_ProjectConfig_as_dict" },
+        { "path": "_library/Tools.py", "name": "get_ProjectConfig_as_dict" }
+      ]
+    },
+    {
+      "repo": "Personal-Knowledge-Vault",
+      "label": "real_refactor_candidate",
+      "units": [
+        { "path": "_library/Summary.py", "name": "actuals_graph" },
+        { "path": "build-projectSummary.py", "name": "actuals_graph" }
+      ]
+    },
+    {
+      "repo": "Personal-Knowledge-Vault",
+      "label": "real_refactor_candidate",
+      "units": [
+        { "path": "_library/Summary.py", "name": "progress_graph" },
+        { "path": "build-projectSummary.py", "name": "progress_graph" }
+      ]
+    },
+    {
+      "repo": "Personal-Knowledge-Vault",
+      "label": "uncertain",
+      "units": [
+        { "path": "_library/Notes.py", "name": "get_stringValue_from_noteBody" },
+        { "path": "_library/Tools.py", "name": "get_stringValue_from_noteBody" }
+      ]
+    },
+    {
+      "repo": "Personal-Knowledge-Vault",
+      "label": "not_worth_refactoring",
+      "units": [
+        { "path": "_library/Notes.py", "name": "get_project_tags" },
+        { "path": "_library/Tools.py", "name": "get_project_tags" }
+      ]
+    }
+  ]
+}

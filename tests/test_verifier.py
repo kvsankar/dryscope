@@ -91,6 +91,76 @@ def test_run_code_scan_passes_backend_to_verifier(monkeypatch):
     assert captured["cli_dangerously_skip_permissions"] is True
 
 
+def test_run_code_scan_applies_escalation_policy(monkeypatch):
+    import dryscope.code.normalizer as normalizer
+    import dryscope.code.parser as parser
+    import dryscope.code.reporter as reporter
+    import dryscope.code.verifier as verifier
+    import dryscope.similarity as similarity
+    import dryscope.code.embedder as embedder
+    import dryscope.code.profiles as profiles
+
+    monkeypatch.setattr(parser, "parse_directory", lambda *args, **kwargs: _make_units())
+    monkeypatch.setattr(normalizer, "normalize", lambda source, lang="python": source)
+    monkeypatch.setattr(embedder, "Embedder", DummyEmbedder)
+    monkeypatch.setattr(profiles, "detect_profiles", lambda path: [])
+    monkeypatch.setattr(profiles, "merge_profiles", lambda p, up, ut: (None, None, None))
+    monkeypatch.setattr(similarity, "find_duplicates", lambda *args, **kwargs: [])
+    monkeypatch.setattr(similarity, "cluster_duplicates", lambda *args, **kwargs: [[0], [1]])
+
+    def fake_build_clusters(units, cluster_indices, pairs, normalized_texts=None):
+        return [
+            Cluster(
+                cluster_id=0,
+                units=[units[0]],
+                max_similarity=0.99,
+                tier=Tier.EXACT,
+                is_cross_file=False,
+                total_lines=2,
+                files=[units[0].file_path],
+                actionability=1.0,
+            ),
+            Cluster(
+                cluster_id=1,
+                units=[units[1]],
+                max_similarity=0.92,
+                tier=Tier.STRUCTURAL,
+                is_cross_file=False,
+                total_lines=2,
+                files=[units[1].file_path],
+                actionability=1.0,
+            ),
+        ]
+
+    monkeypatch.setattr(reporter, "build_clusters", fake_build_clusters)
+
+    def fake_verify(clusters, model, max_workers=1, backend="litellm", api_key=None,
+                    cli_strip_api_key=True, cli_permission_mode=None,
+                    cli_dangerously_skip_permissions=False):
+        return [
+            (clusters[0], "refactor", "low-priority same-file helper"),
+            (clusters[1], "review", "needs inspection"),
+        ]
+
+    monkeypatch.setattr(verifier, "verify_clusters", fake_verify)
+
+    settings = Settings()
+
+    clusters = _run_code_scan(
+        path=".",
+        settings=settings,
+        exclude=(),
+        exclude_type=(),
+        verify=True,
+        llm_api_key=None,
+        lang=None,
+    )
+
+    assert clusters is not None
+    assert len(clusters) == 1
+    assert clusters[0].verdict == "review"
+
+
 def test_format_cluster_context_marks_examples_tests_and_benches():
     from dryscope.code.verifier import _format_cluster_context
 

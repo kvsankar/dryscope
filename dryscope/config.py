@@ -17,6 +17,10 @@ min_tokens = 0
 max_cluster_size = 15
 threshold = 0.90
 embedding_model = "all-MiniLM-L6-v2"
+escalate_refactor_min_lines = 40
+escalate_refactor_min_actionability = 2.0
+escalate_refactor_min_units = 3
+keep_same_file_refactors = false
 # exclude = ["**/test_*.py"]
 # exclude_type = ["BaseModel"]
 
@@ -56,6 +60,10 @@ class Settings:
     code_max_cluster_size: int = 15
     code_threshold: float = 0.90
     code_embedding_model: str = "all-MiniLM-L6-v2"
+    code_escalate_refactor_min_lines: int = 40
+    code_escalate_refactor_min_actionability: float = 2.0
+    code_escalate_refactor_min_units: int = 3
+    code_keep_same_file_refactors: bool = False
 
     # Docs settings
     include: list[str] = field(default_factory=lambda: list(DEFAULT_INCLUDE))
@@ -154,6 +162,14 @@ def load_settings(
             settings.code_threshold = code_cfg["threshold"]
         if "embedding_model" in code_cfg:
             settings.code_embedding_model = code_cfg["embedding_model"]
+        if "escalate_refactor_min_lines" in code_cfg:
+            settings.code_escalate_refactor_min_lines = code_cfg["escalate_refactor_min_lines"]
+        if "escalate_refactor_min_actionability" in code_cfg:
+            settings.code_escalate_refactor_min_actionability = code_cfg["escalate_refactor_min_actionability"]
+        if "escalate_refactor_min_units" in code_cfg:
+            settings.code_escalate_refactor_min_units = code_cfg["escalate_refactor_min_units"]
+        if "keep_same_file_refactors" in code_cfg:
+            settings.code_keep_same_file_refactors = code_cfg["keep_same_file_refactors"]
 
         # Docs section
         if "include" in docs_cfg:

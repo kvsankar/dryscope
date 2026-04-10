@@ -1,0 +1,54 @@
+{
+  "repos": [
+    {
+      "name": "MonkeyType",
+      "url": "https://github.com/Instagram/MonkeyType.git",
+      "group": "public-moderate"
+    },
+    {
+      "name": "silverbullet",
+      "url": "https://github.com/silverbulletmd/silverbullet.git",
+      "group": "public-moderate"
+    },
+    {
+      "name": "opennextjs-aws",
+      "url": "https://github.com/opennextjs/opennextjs-aws.git",
+      "group": "public-moderate"
+    },
+    {
+      "name": "tsdoc",
+      "url": "https://github.com/microsoft/tsdoc.git",
+      "group": "public-moderate"
+    },
+    {
+      "name": "vue-loader",
+      "url": "https://github.com/vuejs/vue-loader.git",
+      "group": "public-moderate"
+    },
+    {
+      "name": "PptxGenJS",
+      "url": "https://github.com/gitbrent/PptxGenJS.git",
+      "group": "public-moderate"
+    },
+    {
+      "name": "sparkhub",
+      "url": "https://github.com/presi971-prog/sparkhub.git",
+      "group": "public-low-star"
+    },
+    {
+      "name": "Personal-Knowledge-Vault",
+      "url": "https://github.com/dndgnet/Personal-Knowledge-Vault.git",
+      "group": "public-low-star"
+    },
+    {
+      "name": "pocket-pick",
+      "url": "https://github.com/disler/pocket-pick.git",
+      "group": "public-claude-signal-2025"
+    },
+    {
+      "name": "svelte-claude-skills",
+      "url": "https://github.com/spences10/svelte-claude-skills.git",
+      "group": "public-claude-signal-2025"
+    }
+  ]
+}

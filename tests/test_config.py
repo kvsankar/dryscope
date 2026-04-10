@@ -55,6 +55,13 @@ class TestSettingsDefaults:
         s = Settings()
         assert s.cli_strip_api_key is True
 
+    def test_default_code_escalation_policy(self):
+        s = Settings()
+        assert s.code_escalate_refactor_min_lines == 40
+        assert s.code_escalate_refactor_min_actionability == 2.0
+        assert s.code_escalate_refactor_min_units == 3
+        assert s.code_keep_same_file_refactors is False
+
 
 # ── load_settings ───────────────────────────────────────────────────────
 
@@ -138,11 +145,19 @@ class TestSections:
         toml_file = tmp_path / ".dryscope.toml"
         toml_file.write_text(
             '[code]\nmin_lines = 8\nthreshold = 0.88\nembedding_model = "custom-model"\n'
+            'escalate_refactor_min_lines = 25\n'
+            'escalate_refactor_min_actionability = 1.5\n'
+            'escalate_refactor_min_units = 4\n'
+            'keep_same_file_refactors = true\n'
         )
         s = load_settings(tmp_path)
         assert s.code_min_lines == 8
         assert s.code_threshold == 0.88
         assert s.code_embedding_model == "custom-model"
+        assert s.code_escalate_refactor_min_lines == 25
+        assert s.code_escalate_refactor_min_actionability == 1.5
+        assert s.code_escalate_refactor_min_units == 4
+        assert s.code_keep_same_file_refactors is True
 
     def test_docs_section_from_toml(self, tmp_path):
         toml_file = tmp_path / ".dryscope.toml"

@@ -143,6 +143,12 @@ dryscope cache clear  # Clear the cache
 4. **Topics** _(full stage)_ — LLM extracts topics, clusters documents by intent overlap
 5. **Analyze** _(full stage)_ — LLM classifies each pair with action recommendations
 
+## Benchmarking
+
+`dryscope` includes a checked-in public benchmark pack under [benchmarks/README.md](/home/sankar/sankar/projects/dryscope/benchmarks/README.md).
+
+It only references public repositories and reviewed public labels. Private repo evaluation should remain local and out of the checked-in benchmark files.
+
 ## License
 
 MIT
