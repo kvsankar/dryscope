@@ -33,6 +33,10 @@ class TestSettingsDefaults:
         s = Settings()
         assert s.include == list(DEFAULT_INCLUDE)
 
+    def test_default_exclude_includes_dryscope_artifacts(self):
+        s = Settings()
+        assert ".dryscope" in s.exclude
+
     def test_default_cache_enabled(self):
         s = Settings()
         assert s.cache_enabled is True

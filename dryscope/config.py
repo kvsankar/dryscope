@@ -8,7 +8,7 @@ from pathlib import Path
 
 
 DEFAULT_INCLUDE = ["*.md", "*.rst", "*.txt", "*.adoc"]
-DEFAULT_EXCLUDE = ["node_modules", "venv", ".git", "*.lock"]
+DEFAULT_EXCLUDE = ["node_modules", "venv", ".git", ".dryscope", "*.lock"]
 
 DEFAULT_CONFIG_TOML = """\
 [code]
@@ -26,7 +26,7 @@ keep_same_file_refactors = false
 
 [docs]
 include = ["*.md", "*.rst", "*.txt", "*.adoc"]
-exclude = ["node_modules", "venv", ".git", "*.lock"]
+exclude = ["node_modules", "venv", ".git", ".dryscope", "*.lock"]
 threshold_similarity = 0.9
 threshold_intent = 0.8
 min_content_words = 15
