@@ -147,6 +147,23 @@
         { "path": "_library/Notes.py", "name": "get_project_tags" },
         { "path": "_library/Tools.py", "name": "get_project_tags" }
       ]
+    },
+    {
+      "repo": "downshift",
+      "label": "uncertain",
+      "units": [
+        { "path": "src/hooks/utils.js", "name": "getDefaultHighlightedIndex" },
+        { "path": "src/hooks/utils.js", "name": "getInitialHighlightedIndex" }
+      ]
+    },
+    {
+      "repo": "jsoup",
+      "label": "real_refactor_candidate",
+      "units": [
+        { "path": "src/main/java/org/jsoup/nodes/Element.java", "name": "getElementsByAttributeValueMatching" },
+        { "path": "src/main/java/org/jsoup/nodes/Element.java", "name": "getElementsMatchingText" },
+        { "path": "src/main/java/org/jsoup/nodes/Element.java", "name": "getElementsMatchingOwnText" }
+      ]
     }
   ]
 }

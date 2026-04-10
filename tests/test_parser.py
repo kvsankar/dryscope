@@ -280,6 +280,20 @@ class TestParseJava:
         calc = [u for u in units if u.name == "Calculator"][0]
         assert calc.base_classes == ["BaseCalc"]
 
+    def test_parse_java_method_name_not_return_type(self, tmp_path):
+        sample = tmp_path / "Sample.java"
+        sample.write_text(
+            "public class Sample {\n"
+            "  public String render() {\n"
+            '    return \"ok\";\n'
+            "  }\n"
+            "}\n"
+        )
+        units = flatten_units(parse_file(sample))
+        names = [u.name for u in units]
+        assert "render" in names
+        assert "String" not in [u.name for u in units if u.unit_type == "method"]
+
 
 class TestParseGo:
     def test_parse_go_functions_and_types(self):

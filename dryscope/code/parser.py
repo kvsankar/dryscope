@@ -117,6 +117,10 @@ def _get_name(node: Node) -> str:
         for child in node.children:
             if child.type == "type_spec":
                 return _get_name(child)
+    if node.type == "method_declaration":
+        for child in node.children:
+            if child.type in ("identifier", "field_identifier", "property_identifier"):
+                return child.text.decode("utf-8")
     for child in node.children:
         if child.type in ("identifier", "type_identifier", "property_identifier", "field_identifier"):
             return child.text.decode("utf-8")
