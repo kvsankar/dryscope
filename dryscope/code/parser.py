@@ -15,17 +15,20 @@ from dryscope.code.treesitter import create_parser, EXT_TO_LANG, SUPPORTED_EXTEN
 # Node types we extract as code units, per language family
 _FUNCTION_TYPES = {
     "function_definition",       # Python
+    "function",                  # JavaScript function expression / declaration nodes
     "function_declaration",      # TypeScript
     "generator_function_declaration",  # TypeScript
+    "generator_function",        # JavaScript
     "method_definition",         # TypeScript class methods
 }
 
 _CLASS_TYPES = {
     "class_definition",          # Python
+    "class",                     # JavaScript class expression / declaration nodes
     "class_declaration",         # TypeScript
 }
 
-# Arrow functions assigned to variables: const foo = () => {}
+# Arrow / function expressions assigned to variables: const foo = () => {}
 _ARROW_DECLARATOR = "variable_declarator"
 
 # Directories to always skip
@@ -44,6 +47,10 @@ EXCLUDED_DIRS = {
 _BASE_CLASS_RE = re.compile(r"class\s+\w+\s*\(([^)]*)\)")
 # TypeScript: class Foo extends Bar implements Baz
 _TS_EXTENDS_RE = re.compile(r"class\s+\w+(?:<[^>]*>)?\s+extends\s+([\w.]+)")
+
+
+def _is_js_family(lang: str) -> bool:
+    return lang in {"javascript", "jsx", "typescript", "tsx"}
 
 
 @dataclass
@@ -93,9 +100,9 @@ def _get_name(node: Node) -> str:
 
 
 def _is_arrow_function(node: Node) -> bool:
-    """Check if a variable_declarator contains an arrow function."""
+    """Check if a variable_declarator contains an arrow or function expression."""
     for child in node.children:
-        if child.type == "arrow_function":
+        if child.type in {"arrow_function", "function", "generator_function"}:
             return True
     return False
 
@@ -113,6 +120,12 @@ def _extract_units(
         # Handle export_statement: unwrap to find the declaration inside
         if child.type == "export_statement":
             units.extend(_extract_units(child, file_path, lang, parent_is_class))
+            continue
+
+        # JS/TS variable declarations that contain function expressions
+        # should be handled via the declarator path below, not as anonymous
+        # function nodes.
+        if child.type in {"function", "generator_function"} and _is_js_family(lang):
             continue
 
         # Functions and class methods
@@ -152,15 +165,15 @@ def _extract_units(
             )
             # Extract methods from class body (TS only — Python methods
             # are included in the class source and not split out)
-            if lang != "python":
+            if _is_js_family(lang):
                 for body_child in child.children:
                     if body_child.type == "class_body":
                         unit.children = _extract_units(body_child, file_path, lang, parent_is_class=True)
             units.append(unit)
             continue
 
-        # Arrow functions: const foo = () => {}
-        if child.type == "lexical_declaration" and lang != "python":
+        # Arrow/functions assigned to variables: const foo = () => {}
+        if child.type in {"lexical_declaration", "variable_declaration"} and _is_js_family(lang):
             for declarator in child.children:
                 if declarator.type == _ARROW_DECLARATOR and _is_arrow_function(declarator):
                     name = _get_name(declarator)

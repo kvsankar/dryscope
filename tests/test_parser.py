@@ -16,6 +16,7 @@ FIXTURES = Path(__file__).parent / "fixtures"
 SAMPLE_A = FIXTURES / "sample_a.py"
 SAMPLE_B = FIXTURES / "sample_b.py"
 SAMPLE_TS = FIXTURES / "sample.ts"
+SAMPLE_JS = FIXTURES / "sample.js"
 
 
 # ── parse_file ──────────────────────────────────────────────────────────
@@ -218,3 +219,35 @@ class TestParseTypeScript:
         units = parse_file(SAMPLE_TS)
         for u in units:
             assert u.lang == "typescript"
+
+
+class TestParseJavaScript:
+    def test_parse_js_file_extracts_functions(self):
+        units = parse_file(SAMPLE_JS)
+        names = [u.name for u in units]
+        assert "greet" in names
+        greet = [u for u in units if u.name == "greet"][0]
+        assert greet.unit_type == "function"
+
+    def test_parse_js_arrow_function(self):
+        units = parse_file(SAMPLE_JS)
+        names = [u.name for u in units]
+        assert "double" in names
+        double = [u for u in units if u.name == "double"][0]
+        assert double.unit_type == "function"
+
+    def test_parse_js_class_and_methods(self):
+        units = parse_file(SAMPLE_JS)
+        names = [u.name for u in units]
+        assert "Calculator" in names
+        all_units = flatten_units(units)
+        all_names = [u.name for u in all_units]
+        assert "add" in all_names
+        assert "subtract" in all_names
+        add_unit = [u for u in all_units if u.name == "add"][0]
+        assert add_unit.unit_type == "method"
+
+    def test_parse_js_lang_is_javascript(self):
+        units = parse_file(SAMPLE_JS)
+        for u in units:
+            assert u.lang == "javascript"

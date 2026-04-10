@@ -44,6 +44,8 @@ PRESERVE_NAMES_TYPESCRIPT = {
 # Combined set for languages
 _PRESERVE: dict[str, set[str]] = {
     "python": PRESERVE_NAMES_PYTHON,
+    "javascript": PRESERVE_NAMES_TYPESCRIPT,
+    "jsx": PRESERVE_NAMES_TYPESCRIPT,
     "typescript": PRESERVE_NAMES_TYPESCRIPT,
     "tsx": PRESERVE_NAMES_TYPESCRIPT,
 }

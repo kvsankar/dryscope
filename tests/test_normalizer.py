@@ -89,3 +89,25 @@ class TestNormalizeTypeScript:
         result = normalize(code, lang="typescript")
         assert "STR" in result
         assert "Hello" not in result
+
+
+class TestNormalizeJavaScript:
+    def test_js_preserved_names(self):
+        code = "this.x = console.log(undefined)"
+        result = normalize(code, lang="javascript")
+        assert "this" in result
+        assert "console" in result
+        assert "undefined" in result
+
+    def test_js_template_string_replaced(self):
+        code = "const msg = `Hello, ${name}!`;"
+        result = normalize(code, lang="javascript")
+        assert "STR" in result
+        assert "Hello" not in result
+
+    def test_js_structurally_identical_functions_normalize_same(self):
+        code_a = "function greet(name) { const msg = name; return msg; }"
+        code_b = "function hello(person) { const text = person; return text; }"
+        norm_a = normalize(code_a, lang='javascript')
+        norm_b = normalize(code_b, lang='javascript')
+        assert norm_a == norm_b

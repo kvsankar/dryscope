@@ -17,6 +17,12 @@ def _get_language(lang: str) -> Language:
         if lang == "python":
             import tree_sitter_python as tspython
             _languages[lang] = Language(tspython.language())
+        elif lang == "javascript":
+            import tree_sitter_javascript as tsjavascript
+            _languages[lang] = Language(tsjavascript.language())
+        elif lang == "jsx":
+            import tree_sitter_javascript as tsjavascript
+            _languages[lang] = Language(tsjavascript.language())
         elif lang == "typescript":
             import tree_sitter_typescript as tstype
             _languages[lang] = Language(tstype.language_typescript())
@@ -40,6 +46,8 @@ def create_parser(lang: str = "python") -> Parser:
 # File extension to language mapping
 EXT_TO_LANG: dict[str, str] = {
     ".py": "python",
+    ".js": "javascript",
+    ".jsx": "jsx",
     ".ts": "typescript",
     ".tsx": "tsx",
 }
