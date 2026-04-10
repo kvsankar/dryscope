@@ -15,6 +15,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from dryscope.code.reporter import Cluster
+from dryscope.llm_backend import completion as llm_completion
 
 
 def _load_dotenv() -> None:
@@ -129,14 +130,16 @@ def _parse_verdict(response_text: str) -> tuple[str, str]:
 def verify_cluster(
     cluster: Cluster,
     model: str,
+    backend: str = "litellm",
     api_key: str | None = None,
+    cli_strip_api_key: bool = True,
+    cli_permission_mode: str | None = None,
+    cli_dangerously_skip_permissions: bool = False,
 ) -> tuple[str, str]:
     """Verify a single cluster using an LLM.
 
     Returns (verdict, reason).
     """
-    from litellm import completion
-
     units_text = _format_cluster_for_llm(cluster)
     user_msg = USER_TEMPLATE.format(
         cluster_id=cluster.cluster_id,
@@ -145,22 +148,20 @@ def verify_cluster(
         units_text=units_text,
     )
 
-    kwargs: dict = dict(
-        model=model,
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": user_msg},
-        ],
-        temperature=0,
-        max_tokens=256,
-        num_retries=3,
+    prompt = (
+        f"{SYSTEM_PROMPT}\n\n"
+        f"{user_msg}"
     )
-    if api_key:
-        kwargs["api_key"] = api_key
 
-    response = completion(**kwargs)
-
-    response_text = response.choices[0].message.content
+    response_text = llm_completion(
+        prompt,
+        model,
+        backend,
+        api_key=api_key,
+        cli_strip_api_key=cli_strip_api_key,
+        cli_permission_mode=cli_permission_mode,
+        cli_dangerously_skip_permissions=cli_dangerously_skip_permissions,
+    )
     return _parse_verdict(response_text)
 
 
@@ -168,7 +169,11 @@ def verify_clusters(
     clusters: list[Cluster],
     model: str,
     max_workers: int = 1,
+    backend: str = "litellm",
     api_key: str | None = None,
+    cli_strip_api_key: bool = True,
+    cli_permission_mode: str | None = None,
+    cli_dangerously_skip_permissions: bool = False,
 ) -> list[tuple[Cluster, str, str]]:
     """Verify all clusters in parallel.
 
@@ -179,7 +184,16 @@ def verify_clusters(
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_cluster = {
-            executor.submit(verify_cluster, cluster, model, api_key): cluster
+            executor.submit(
+                verify_cluster,
+                cluster,
+                model,
+                backend,
+                api_key,
+                cli_strip_api_key,
+                cli_permission_mode,
+                cli_dangerously_skip_permissions,
+            ): cluster
             for cluster in clusters
         }
 

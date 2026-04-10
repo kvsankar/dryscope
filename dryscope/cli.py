@@ -150,7 +150,16 @@ def _run_code_scan(
         from dryscope.code.verifier import verify_clusters, VERDICT_NOISE
 
         click.echo(f"Verifying {len(clusters)} clusters with {llm_model}...", err=True)
-        results = verify_clusters(clusters, model=llm_model, api_key=llm_api_key)
+        results = verify_clusters(
+            clusters,
+            model=llm_model,
+            max_workers=settings.concurrency,
+            backend=settings.backend,
+            api_key=llm_api_key,
+            cli_strip_api_key=settings.cli_strip_api_key,
+            cli_permission_mode=settings.cli_permission_mode,
+            cli_dangerously_skip_permissions=settings.cli_dangerously_skip_permissions,
+        )
 
         verified: list = []
         noise_count = 0

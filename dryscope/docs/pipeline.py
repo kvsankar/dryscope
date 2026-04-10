@@ -345,6 +345,9 @@ def run_pipeline(
                     backend=settings.backend,
                     concurrency=settings.concurrency,
                     on_progress=topic_progress,
+                    cli_strip_api_key=settings.cli_strip_api_key,
+                    cli_permission_mode=settings.cli_permission_mode,
+                    cli_dangerously_skip_permissions=settings.cli_dangerously_skip_permissions,
                 )
 
                 if cache:
@@ -485,6 +488,9 @@ def run_pipeline(
                 on_pair_analyzed=on_pair_analyzed,
                 concurrency=settings.concurrency,
                 intent_evidence=intent_evidence if intent_evidence else None,
+                cli_strip_api_key=settings.cli_strip_api_key,
+                cli_permission_mode=settings.cli_permission_mode,
+                cli_dangerously_skip_permissions=settings.cli_dangerously_skip_permissions,
             )
             result.doc_pair_analyses = analyses
             result.codes = codes

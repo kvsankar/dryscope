@@ -51,6 +51,10 @@ class TestSettingsDefaults:
         s = Settings()
         assert s.concurrency == 8
 
+    def test_default_cli_strip_api_key(self):
+        s = Settings()
+        assert s.cli_strip_api_key is True
+
 
 # ── load_settings ───────────────────────────────────────────────────────
 
@@ -160,6 +164,18 @@ class TestSections:
         assert s.backend == "litellm"
         assert s.max_cost == 10.0
         assert s.concurrency == 4
+
+    def test_llm_cli_options_from_toml(self, tmp_path):
+        toml_file = tmp_path / ".dryscope.toml"
+        toml_file.write_text(
+            '[llm]\nbackend = "cli"\ncli_strip_api_key = false\ncli_permission_mode = "bypassPermissions"\n'
+            'cli_dangerously_skip_permissions = true\n'
+        )
+        s = load_settings(tmp_path)
+        assert s.backend == "cli"
+        assert s.cli_strip_api_key is False
+        assert s.cli_permission_mode == "bypassPermissions"
+        assert s.cli_dangerously_skip_permissions is True
 
     def test_cache_section_from_toml(self, tmp_path):
         toml_file = tmp_path / ".dryscope.toml"

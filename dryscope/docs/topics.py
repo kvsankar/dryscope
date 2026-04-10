@@ -25,6 +25,9 @@ def extract_topics(
     model: str,
     cache: Cache | None,
     backend: str = "litellm",
+    cli_strip_api_key: bool = True,
+    cli_permission_mode: str | None = None,
+    cli_dangerously_skip_permissions: bool = False,
 ) -> list[str]:
     """Extract granular topic phrases from a document via LLM.
 
@@ -57,7 +60,17 @@ Example: ["pre-commit hook configuration", "ESLint rule setup", "Python type che
 
 JSON array:"""
 
-    text = call_llm_cached(model, prompt, cache, cache_key, TOPICS_VERSION, backend)
+    text = call_llm_cached(
+        model,
+        prompt,
+        cache,
+        cache_key,
+        TOPICS_VERSION,
+        backend,
+        cli_strip_api_key=cli_strip_api_key,
+        cli_permission_mode=cli_permission_mode,
+        cli_dangerously_skip_permissions=cli_dangerously_skip_permissions,
+    )
 
     try:
         text = _strip_code_fences(text)
@@ -258,6 +271,9 @@ def run_topic_extraction(
     concurrency: int = 1,
     on_progress: "callable | None" = None,
     prior_topics: dict[str, list[str]] | None = None,
+    cli_strip_api_key: bool = True,
+    cli_permission_mode: str | None = None,
+    cli_dangerously_skip_permissions: bool = False,
 ) -> dict[str, list[str]]:
     """Orchestrate parallel topic extraction across all documents.
 
@@ -288,7 +304,16 @@ def run_topic_extraction(
 
     def _extract_one(doc_path: str) -> tuple[str, list[str]]:
         chunks = documents[doc_path]
-        topics = extract_topics(doc_path, chunks, model, cache, backend)
+        topics = extract_topics(
+            doc_path,
+            chunks,
+            model,
+            cache,
+            backend,
+            cli_strip_api_key=cli_strip_api_key,
+            cli_permission_mode=cli_permission_mode,
+            cli_dangerously_skip_permissions=cli_dangerously_skip_permissions,
+        )
         return doc_path, topics
 
     if concurrency > 1 and pending:

@@ -33,6 +33,9 @@ def call_llm_cached(
     cache_key: str,
     prompt_version: str,
     backend: str = "litellm",
+    cli_strip_api_key: bool = True,
+    cli_permission_mode: str | None = None,
+    cli_dangerously_skip_permissions: bool = False,
 ) -> str:
     """Call LLM with caching."""
     if cache is not None:
@@ -40,7 +43,14 @@ def call_llm_cached(
         if cached is not None:
             return cached
 
-    text = completion(prompt, model, backend)
+    text = completion(
+        prompt,
+        model,
+        backend,
+        cli_strip_api_key=cli_strip_api_key,
+        cli_permission_mode=cli_permission_mode,
+        cli_dangerously_skip_permissions=cli_dangerously_skip_permissions,
+    )
 
     if cache is not None:
         cache.set_coding(cache_key, model, prompt_version, text)
@@ -128,6 +138,9 @@ def analyze_doc_pair(
     cache: "Cache | None",
     backend: str = "litellm",
     intent_evidence: list[dict] | None = None,
+    cli_strip_api_key: bool = True,
+    cli_permission_mode: str | None = None,
+    cli_dangerously_skip_permissions: bool = False,
 ) -> dict:
     """Analyze overlap between two documents via a single LLM call.
 
@@ -218,7 +231,17 @@ Guidelines:
     ).hexdigest()[:16]
     cache_key = f"docpair|{sorted_paths}|{pair_hash}"
 
-    text = call_llm_cached(model, prompt, cache, cache_key, DOC_PAIR_VERSION, backend)
+    text = call_llm_cached(
+        model,
+        prompt,
+        cache,
+        cache_key,
+        DOC_PAIR_VERSION,
+        backend,
+        cli_strip_api_key=cli_strip_api_key,
+        cli_permission_mode=cli_permission_mode,
+        cli_dangerously_skip_permissions=cli_dangerously_skip_permissions,
+    )
 
     try:
         text = _strip_code_fences(text)
@@ -370,6 +393,9 @@ def run_doc_pair_pipeline(
     on_pair_analyzed: "callable | None" = None,
     concurrency: int = 1,
     intent_evidence: dict[tuple[str, str], list[dict]] | None = None,
+    cli_strip_api_key: bool = True,
+    cli_permission_mode: str | None = None,
+    cli_dangerously_skip_permissions: bool = False,
 ) -> tuple[list[DocPairAnalysis], list[Code], list[Category], list[dict]]:
     """Run doc-pair level LLM analysis pipeline.
 
@@ -420,6 +446,9 @@ def run_doc_pair_pipeline(
             doc_a, doc_b, doc_a_chunks, doc_b_chunks,
             pairs, model, cache, backend,
             intent_evidence=pair_intent,
+            cli_strip_api_key=cli_strip_api_key,
+            cli_permission_mode=cli_permission_mode,
+            cli_dangerously_skip_permissions=cli_dangerously_skip_permissions,
         )
         return f"{doc_a}|{doc_b}", raw
 
