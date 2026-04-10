@@ -118,7 +118,7 @@ intent_skip_without_similarity_min_docs = 100
 
 [llm]
 model = "claude-haiku-4-5-20251001"
-backend = "cli"       # "cli" (claude -p), "litellm" (provider API keys), or "ollama" (local Ollama)
+backend = "cli"       # "cli" (claude -p), "codex-cli", "litellm" (provider API keys), or "ollama" (local Ollama)
 max_cost = 5.00
 concurrency = 8
 # ollama_host = "http://localhost:11434"
@@ -145,6 +145,22 @@ model = "qwen2.5:3b"
 ```bash
 dryscope scan /path/to/project --verify --backend ollama --llm-model qwen2.5:3b
 ```
+
+```toml
+[llm]
+backend = "codex-cli"
+# Use the Codex default model, or set one your Codex auth supports.
+model = "gpt-5.4"
+```
+
+```bash
+dryscope scan /path/to/project --verify --backend codex-cli --llm-model gpt-5.4
+```
+
+`codex-cli` shells out to `codex exec`. On this machine, explicit mini models like
+`gpt-4o-mini` were rejected under ChatGPT-account Codex auth, while the default
+Codex model worked. If you want mini models through Codex CLI, use API-key login
+with `codex login --with-api-key` if your account supports them.
 
 ## Agent Skills
 

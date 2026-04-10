@@ -44,6 +44,9 @@ max_cost = 5.00
 concurrency = 8
 # For backend = "ollama", optionally set:
 # ollama_host = "http://localhost:11434"
+# For backend = "codex-cli", the configured model is passed to `codex exec -m`
+# if your Codex auth supports it. With ChatGPT-account auth, the default Codex
+# model may be the only supported option.
 # For backend = "cli", optionally set:
 # cli_strip_api_key = true
 # cli_permission_mode = "bypassPermissions"

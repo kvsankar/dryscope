@@ -1,10 +1,11 @@
-"""LLM backend abstraction: litellm, CLI (claude -p), or Ollama."""
+"""LLM backend abstraction: litellm, CLI backends, or Ollama."""
 
 from __future__ import annotations
 
 import json
 import os
 import subprocess
+import tempfile
 import urllib.error
 import urllib.request
 
@@ -25,7 +26,7 @@ def completion(
     Args:
         prompt: The user message to send.
         model: Model name (used by litellm backend, ignored by cli).
-        backend: "litellm" or "cli".
+        backend: "litellm", "cli", "codex-cli", or "ollama".
         api_key: Optional provider API key for litellm.
         ollama_host: Optional Ollama base URL. Defaults to ``OLLAMA_HOST`` or
             ``http://localhost:11434``.
@@ -44,6 +45,8 @@ def completion(
             cli_permission_mode=cli_permission_mode,
             cli_dangerously_skip_permissions=cli_dangerously_skip_permissions,
         )
+    if backend == "codex-cli":
+        return _codex_cli_completion(prompt, model)
     if backend == "ollama":
         return _ollama_completion(prompt, model, ollama_host=ollama_host)
     return _litellm_completion(prompt, model, api_key=api_key)
@@ -149,3 +152,49 @@ def _ollama_completion(
         if isinstance(content, str):
             return content
     raise RuntimeError(f"ollama API returned unexpected response: {payload!r}")
+
+
+def _codex_cli_completion(prompt: str, model: str | None = None) -> str:
+    """Call LLM via ``codex exec`` in non-interactive mode."""
+    with tempfile.NamedTemporaryFile(mode="w+", delete=False) as out_file:
+        out_path = out_file.name
+
+    cmd = [
+        "codex",
+        "exec",
+        "--skip-git-repo-check",
+        "--sandbox",
+        "read-only",
+        "--output-last-message",
+        out_path,
+    ]
+    if model:
+        cmd.extend(["-m", model])
+    cmd.append("-")
+
+    try:
+        result = subprocess.run(
+            cmd,
+            input=prompt,
+            capture_output=True,
+            text=True,
+            timeout=180,
+        )
+        if result.returncode != 0:
+            stderr = result.stderr.strip() or result.stdout.strip()
+            raise RuntimeError(
+                f"codex exec failed (exit {result.returncode}): {stderr}"
+            )
+
+        content = ""
+        if os.path.exists(out_path):
+            with open(out_path, "r", encoding="utf-8") as handle:
+                content = handle.read().strip()
+        if content:
+            return content
+        raise RuntimeError("codex exec produced no final message")
+    finally:
+        try:
+            os.unlink(out_path)
+        except OSError:
+            pass

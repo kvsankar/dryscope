@@ -112,3 +112,45 @@ class TestOllamaCompletion:
         assert captured["url"] == "http://localhost:11434/api/chat"
         assert captured["body"]["model"] == "qwen2.5:3b"
         assert captured["body"]["messages"][0]["content"] == "prompt"
+
+
+class TestCodexCliCompletion:
+    def test_codex_cli_completion_reads_output_file(self, monkeypatch, tmp_path):
+        captured: dict = {}
+        out_file = tmp_path / "out.txt"
+
+        class FakeTmpFile:
+            name = str(out_file)
+
+            def __enter__(self):
+                out_file.write_text("")
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        def fake_named_tempfile(mode="w+", delete=False):
+            return FakeTmpFile()
+
+        def fake_run(cmd, input, capture_output, text, timeout):
+            captured["cmd"] = cmd
+            captured["input"] = input
+            out_file.write_text("ok")
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        monkeypatch.setattr(llm_backend.tempfile, "NamedTemporaryFile", fake_named_tempfile)
+        monkeypatch.setattr(llm_backend.subprocess, "run", fake_run)
+
+        result = llm_backend.completion(
+            "prompt",
+            "gpt-5.4",
+            "codex-cli",
+        )
+
+        assert result == "ok"
+        assert captured["cmd"][:4] == ["codex", "exec", "--skip-git-repo-check", "--sandbox"]
+        assert "read-only" in captured["cmd"]
+        assert "--output-last-message" in captured["cmd"]
+        assert "-m" in captured["cmd"]
+        assert "gpt-5.4" in captured["cmd"]
+        assert captured["input"] == "prompt"

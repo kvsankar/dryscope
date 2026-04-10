@@ -272,7 +272,7 @@ def _run_docs_scan(
 @click.option("--min-words", default=None, type=int, help="Minimum words per doc section")
 @click.option("--threshold-intent", default=None, type=float, help="Intent overlap threshold (docs)")
 @click.option("--concurrency", default=None, type=int, help="Max parallel LLM calls (docs)")
-@click.option("--backend", type=click.Choice(["litellm", "cli", "ollama"]), default=None, help="LLM backend for --verify")
+@click.option("--backend", type=click.Choice(["litellm", "cli", "codex-cli", "ollama"]), default=None, help="LLM backend for --verify")
 @click.option("--token-weight", default=None, type=float, help="Token Jaccard weight in hybrid similarity")
 @click.pass_context
 def scan(
