@@ -1,6 +1,12 @@
 # dryscope
 
-Code duplicate and documentation overlap detection using tree-sitter parsing, normalization, and embedding-based similarity.
+Find duplicate code and overlapping documentation before handing work to an expensive model.
+
+`dryscope` is a narrowing tool:
+- for code, it surfaces structural duplicate candidates and filters them down to a shortlist
+- for docs, it finds overlapping sections and groups repeated document families into consolidation recommendations
+
+It is designed to reduce how much of a repository a stronger model needs to read, not to replace the stronger model entirely.
 
 ## Features
 
@@ -12,6 +18,18 @@ Code duplicate and documentation overlap detection using tree-sitter parsing, no
 - **Project profiles** — auto-detects Django and pytest-factories, applies smart exclusions
 - **Claude Code skill** — install/uninstall as a Claude Code skill
 - **Unified JSON output** — structured `findings[]` schema for agent consumption
+
+## Positioning
+
+`dryscope` is best used as:
+- a code duplicate candidate generator
+- a documentation overlap detector
+- a prefilter before a stronger model does deeper refactoring or docs consolidation work
+
+It is not positioned as:
+- a perfect semantic clone detector
+- a final refactor oracle
+- a complete replacement for human or stronger-model judgment
 
 ## Installation
 
@@ -43,6 +61,23 @@ dryscope scan /path/to/project --verify
 # Stricter threshold
 dryscope scan /path/to/project -t 0.95 --min-tokens 15
 ```
+
+## Real-World Examples
+
+Public examples from recent validation passes:
+
+- `kvsankar/sattosat`
+  - code scan produced a 2-item shortlist
+  - one clear refactor candidate survived: duplicated TLE epoch parsing logic across two scripts and one library module
+  - docs scan produced 0 recommendations
+
+- `stellar/stellar-docs`
+  - docs scan found real overlap in repeated sequence-diagram flows
+  - grouped recommendation output reduced noisy pairwise suggestions into a compact 4-item shortlist
+
+- `gethomepage/homepage`
+  - docs scan found 0 overlap pairs
+  - the pipeline exited early instead of spending LLM work on a large negative repo
 
 ## Configuration
 
@@ -157,6 +192,18 @@ dryscope cache clear  # Clear the cache
 6. **Topics** _(full stage)_ — LLM extracts topics, clusters documents by intent overlap
 7. **Analyze** _(full stage)_ — LLM classifies each pair with action recommendations
 8. **Group** — related pairwise recommendations are merged into document-family recommendations to reduce output spam
+
+## What Good Output Looks Like
+
+For code:
+- a small shortlist of `refactor` and `review` findings
+- exact or near-exact helpers extracted across files
+- borderline same-file or low-payoff duplicates left as `review`
+
+For docs:
+- 0 recommendations on clean negative repos
+- a few grouped recommendations on docs-heavy repos
+- one family recommendation for many near-identical sibling docs, rather than many pairwise duplicates
 
 ## Benchmarking
 

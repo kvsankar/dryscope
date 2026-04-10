@@ -8,6 +8,10 @@ allowed-tools: [Bash, Read, Glob, Grep]
 
 Runs **dryscope** — a unified tool for detecting code duplicates and documentation overlap. It uses tree-sitter to parse code into units (functions, classes, methods), normalizes them, generates embeddings, and clusters similar items together. For docs, it detects overlapping or redundant documentation sections.
 
+The intended use is narrowing:
+- use `dryscope` to find candidate duplicates or overlapping docs
+- then let a stronger model or a human decide what to refactor or consolidate
+
 ## How to use
 
 ```bash
@@ -89,6 +93,7 @@ Backend options:
 ### Documentation overlap
 - **High similarity**: Redundant sections that should be consolidated or cross-referenced
 - **Moderate similarity**: Related content that may benefit from reorganization
+- **Grouped recommendations**: A family of near-identical docs can now appear as one grouped recommendation instead of many pairwise duplicates
 
 ## What it detects
 
@@ -112,3 +117,5 @@ Summarize the findings for the user, highlighting:
 2. **Structural clones** that could benefit from abstraction
 3. **Redundant documentation** that should be consolidated
 4. **Legitimate patterns** that look similar but serve different purposes
+
+If the repo is docs-heavy and the tool returns no recommendations, say that explicitly. A clean negative result is a useful outcome, not a failure.

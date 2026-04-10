@@ -8,6 +8,12 @@ It exists to turn exploratory testing into a repeatable workflow:
 - `public_labels.json` stores reviewed labels for a subset of findings
 - `run_public_benchmark.py` clones the public repos, runs `dryscope`, and scores any findings that match the stored labels
 
+This benchmark pack is intentionally conservative:
+- it is for repeatable public regression checks
+- it is not a dump of every public repo used during exploratory testing
+
+Additional public repos may still appear in README examples or blog posts if they were used as one-off validation cases.
+
 ## Privacy Rule
 
 Only public repositories belong in this directory.

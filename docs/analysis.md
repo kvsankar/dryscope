@@ -28,7 +28,7 @@
 
 ## Gap Analysis
 
-No existing tool combines all of:
+No widely used tool combines all of:
 
 1. **tree-sitter** for multi-language parsing (fast, production-grade, incremental)
 2. **Embedding-based similarity** for detecting Type 2/3 clones and some higher-level structural similarity
@@ -46,12 +46,28 @@ The landscape for documentation overlap detection is even sparser:
 - **Diff-based tools** — git diff and similar tools only catch textual duplication, not semantic overlap
 - **Search-based approaches** — full-text search can find exact phrases but misses paraphrased content
 
-dryscope's docs pipeline fills this gap with embedding-based semantic similarity
-across document sections, combined with LLM topic extraction for intent-level overlap detection.
+dryscope's docs pipeline addresses this gap with embedding-based section similarity,
+LLM topic extraction for intent-level overlap detection, and grouped recommendations
+for repeated document families.
 
 ## Conclusion
 
-dryscope fills a real gap: a practical CLI that uses tree-sitter + normalization +
-embeddings to surface structural duplicate candidates across multiple languages, and
-embedding-based similarity to detect documentation overlap. Both pipelines output
-structured findings suitable for LLM-assisted review and automated refactoring agents.
+dryscope fills a real gap, but in a narrower and more practical sense than
+"semantic clone detector" might suggest.
+
+What it does well:
+- surfaces structural duplicate candidates across multiple languages
+- filters code findings into a smaller shortlist for stronger follow-up
+- detects documentation overlap and collapses noisy pairwise overlaps into grouped recommendations
+
+What it does not claim to do:
+- perfectly detect Type 4 semantic clones
+- decide every refactor automatically
+- replace deeper review by a stronger model or a human
+
+The product value is that it reduces search space. In recent public validation:
+- `kvsankar/sattosat` produced one clear code refactor candidate and no docs noise
+- `stellar/stellar-docs` produced a compact grouped docs shortlist
+- `gethomepage/homepage` exited early as a large negative docs case
+
+That is the right bar for dryscope: high-signal narrowing before expensive follow-up.

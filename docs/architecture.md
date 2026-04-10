@@ -138,6 +138,7 @@ Documentation Files (.md, .rst, .txt, .adoc)
 **Report Generation** (`docs/report.py`)
 - Builds prioritized recommendations from overlap pairs
 - Merges dense pairwise overlap families into grouped recommendations so docs with many near-identical siblings do not spam the output
+- Produces compact recommendation sets on repos like `stellar-docs`, where raw pairwise overlap would otherwise be noisy
 
 ### Shared (`dryscope/`)
 
