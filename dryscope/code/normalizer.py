@@ -41,9 +41,19 @@ PRESERVE_NAMES_TYPESCRIPT = {
     "require", "module", "exports", "constructor",
 }
 
+PRESERVE_NAMES_JAVA = {
+    "this", "super", "null", "true", "false",
+    "String", "Object", "Class", "System", "Math",
+    "Integer", "Long", "Double", "Float", "Boolean",
+    "List", "Map", "Set", "HashMap", "ArrayList", "HashSet",
+    "RuntimeException", "IllegalArgumentException", "IllegalStateException",
+    "Exception", "Error",
+}
+
 # Combined set for languages
 _PRESERVE: dict[str, set[str]] = {
     "python": PRESERVE_NAMES_PYTHON,
+    "java": PRESERVE_NAMES_JAVA,
     "javascript": PRESERVE_NAMES_TYPESCRIPT,
     "jsx": PRESERVE_NAMES_TYPESCRIPT,
     "typescript": PRESERVE_NAMES_TYPESCRIPT,

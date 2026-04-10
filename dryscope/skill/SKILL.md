@@ -110,7 +110,7 @@ Backend options:
 
 - `.venv/`, `node_modules/`, `__pycache__/`, `site-packages/`, etc.
 - Code units shorter than `--min-lines`
-- Supported code languages: Python, JavaScript, JSX, TypeScript, TSX
+- Supported code languages: Python, Java, JavaScript, JSX, TypeScript, TSX
 
 ## After running
 

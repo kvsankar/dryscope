@@ -111,3 +111,19 @@ class TestNormalizeJavaScript:
         norm_a = normalize(code_a, lang='javascript')
         norm_b = normalize(code_b, lang='javascript')
         assert norm_a == norm_b
+
+
+class TestNormalizeJava:
+    def test_java_preserved_names(self):
+        code = "this.value = System.out.println(null);"
+        result = normalize(code, lang="java")
+        assert "this" in result
+        assert "System" in result
+        assert "null" in result
+
+    def test_java_structurally_identical_methods_normalize_same(self):
+        code_a = "public int add(int a, int b) { int sum = a + b; return sum; }"
+        code_b = "public int plus(int x, int y) { int total = x + y; return total; }"
+        norm_a = normalize(code_a, lang="java")
+        norm_b = normalize(code_b, lang="java")
+        assert norm_a == norm_b

@@ -17,6 +17,7 @@ SAMPLE_A = FIXTURES / "sample_a.py"
 SAMPLE_B = FIXTURES / "sample_b.py"
 SAMPLE_TS = FIXTURES / "sample.ts"
 SAMPLE_JS = FIXTURES / "sample.js"
+SAMPLE_JAVA = FIXTURES / "sample.java"
 
 
 # ── parse_file ──────────────────────────────────────────────────────────
@@ -251,3 +252,29 @@ class TestParseJavaScript:
         units = parse_file(SAMPLE_JS)
         for u in units:
             assert u.lang == "javascript"
+
+
+class TestParseJava:
+    def test_parse_java_class_and_methods(self):
+        units = parse_file(SAMPLE_JAVA)
+        names = [u.name for u in units]
+        assert "Calculator" in names
+        all_units = flatten_units(units)
+        all_names = [u.name for u in all_units]
+        assert "add" in all_names
+        assert "subtract" in all_names
+
+    def test_parse_java_methods_are_methods(self):
+        units = flatten_units(parse_file(SAMPLE_JAVA))
+        add_unit = [u for u in units if u.name == "add"][0]
+        assert add_unit.unit_type == "method"
+
+    def test_parse_java_lang_is_java(self):
+        units = parse_file(SAMPLE_JAVA)
+        for u in units:
+            assert u.lang == "java"
+
+    def test_java_class_base_classes(self):
+        units = parse_file(SAMPLE_JAVA)
+        calc = [u for u in units if u.name == "Calculator"][0]
+        assert calc.base_classes == ["BaseCalc"]

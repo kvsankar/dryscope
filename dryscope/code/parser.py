@@ -16,6 +16,8 @@ from dryscope.code.treesitter import create_parser, EXT_TO_LANG, SUPPORTED_EXTEN
 _FUNCTION_TYPES = {
     "function_definition",       # Python
     "function",                  # JavaScript function expression / declaration nodes
+    "method_declaration",        # Java methods
+    "constructor_declaration",   # Java constructors
     "function_declaration",      # TypeScript
     "generator_function_declaration",  # TypeScript
     "generator_function",        # JavaScript
@@ -25,7 +27,7 @@ _FUNCTION_TYPES = {
 _CLASS_TYPES = {
     "class_definition",          # Python
     "class",                     # JavaScript class expression / declaration nodes
-    "class_declaration",         # TypeScript
+    "class_declaration",         # Java / TypeScript
 }
 
 # Arrow / function expressions assigned to variables: const foo = () => {}
@@ -47,10 +49,15 @@ EXCLUDED_DIRS = {
 _BASE_CLASS_RE = re.compile(r"class\s+\w+\s*\(([^)]*)\)")
 # TypeScript: class Foo extends Bar implements Baz
 _TS_EXTENDS_RE = re.compile(r"class\s+\w+(?:<[^>]*>)?\s+extends\s+([\w.]+)")
+_JAVA_EXTENDS_RE = re.compile(r"class\s+\w+(?:<[^>]*>)?\s+extends\s+([\w.]+)")
 
 
 def _is_js_family(lang: str) -> bool:
     return lang in {"javascript", "jsx", "typescript", "tsx"}
+
+
+def _is_java_family(lang: str) -> bool:
+    return lang == "java"
 
 
 @dataclass
@@ -81,6 +88,11 @@ class CodeUnit:
             if not m:
                 return []
             return [b.strip().rsplit(".", 1)[-1] for b in m.group(1).split(",") if b.strip()]
+        if self.lang == "java":
+            m = _JAVA_EXTENDS_RE.search(first_line)
+            if not m:
+                return []
+            return [m.group(1).rsplit(".", 1)[-1]]
         else:
             m = _TS_EXTENDS_RE.search(first_line)
             if not m:
@@ -131,7 +143,7 @@ def _extract_units(
         # Functions and class methods
         if child.type in _FUNCTION_TYPES:
             name = _get_name(child)
-            if child.type == "method_definition" or parent_is_class:
+            if child.type in {"method_definition", "method_declaration", "constructor_declaration"} or parent_is_class:
                 unit_type = "method"
             else:
                 unit_type = "function"
@@ -165,7 +177,7 @@ def _extract_units(
             )
             # Extract methods from class body (TS only — Python methods
             # are included in the class source and not split out)
-            if _is_js_family(lang):
+            if _is_js_family(lang) or _is_java_family(lang):
                 for body_child in child.children:
                     if body_child.type == "class_body":
                         unit.children = _extract_units(body_child, file_path, lang, parent_is_class=True)
