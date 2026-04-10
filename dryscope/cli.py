@@ -251,7 +251,7 @@ def _run_docs_scan(
 # Mode flags
 @click.option("--code/--no-code", default=None, help="Scan for code duplicates")
 @click.option("--docs/--no-docs", default=None, help="Scan for documentation overlap")
-@click.option("--lang", type=click.Choice(["python", "java", "js", "jsx", "ts", "tsx"]), default=None, help="Filter to specific language (code mode)")
+@click.option("--lang", type=click.Choice(["python", "go", "java", "js", "jsx", "ts", "tsx"]), default=None, help="Filter to specific language (code mode)")
 # Shared options
 @click.option("--threshold", "-t", default=0.90, type=click.FloatRange(0.0, 1.0), help="Similarity threshold (0.0-1.0)")
 @click.option("--format", "-f", "output_format", type=click.Choice(["terminal", "json", "markdown", "html"]), default="terminal")

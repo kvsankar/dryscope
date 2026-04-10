@@ -18,6 +18,7 @@ SAMPLE_B = FIXTURES / "sample_b.py"
 SAMPLE_TS = FIXTURES / "sample.ts"
 SAMPLE_JS = FIXTURES / "sample.js"
 SAMPLE_JAVA = FIXTURES / "sample.java"
+SAMPLE_GO = FIXTURES / "sample.go"
 
 
 # ── parse_file ──────────────────────────────────────────────────────────
@@ -278,3 +279,22 @@ class TestParseJava:
         units = parse_file(SAMPLE_JAVA)
         calc = [u for u in units if u.name == "Calculator"][0]
         assert calc.base_classes == ["BaseCalc"]
+
+
+class TestParseGo:
+    def test_parse_go_functions_and_types(self):
+        units = parse_file(SAMPLE_GO)
+        names = [u.name for u in units]
+        assert "Calculator" in names
+        assert "Add" in names
+        assert "Subtract" in names
+
+    def test_parse_go_method_is_method(self):
+        units = parse_file(SAMPLE_GO)
+        sub = [u for u in units if u.name == "Subtract"][0]
+        assert sub.unit_type == "method"
+
+    def test_parse_go_lang_is_go(self):
+        units = parse_file(SAMPLE_GO)
+        for u in units:
+            assert u.lang == "go"

@@ -10,7 +10,7 @@ It is designed to reduce how much of a repository a stronger model needs to read
 
 ## Features
 
-- **Code duplicate detection** — Python, Java, JavaScript, JSX, TypeScript, and TSX via tree-sitter + sentence-transformers
+- **Code duplicate detection** — Python, Go, Java, JavaScript, JSX, TypeScript, and TSX via tree-sitter + sentence-transformers
 - **Documentation overlap detection** — Markdown, RST, and plaintext via embedding similarity + optional LLM analysis
 - **Hybrid similarity** — 70% embedding cosine + 30% token Jaccard with size-ratio filtering
 - **Optional LLM verification** — classifies findings as `refactor`, `review`, or `noise`

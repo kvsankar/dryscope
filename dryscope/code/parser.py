@@ -16,9 +16,9 @@ from dryscope.code.treesitter import create_parser, EXT_TO_LANG, SUPPORTED_EXTEN
 _FUNCTION_TYPES = {
     "function_definition",       # Python
     "function",                  # JavaScript function expression / declaration nodes
+    "function_declaration",      # Go / TypeScript
     "method_declaration",        # Java methods
     "constructor_declaration",   # Java constructors
-    "function_declaration",      # TypeScript
     "generator_function_declaration",  # TypeScript
     "generator_function",        # JavaScript
     "method_definition",         # TypeScript class methods
@@ -28,6 +28,7 @@ _CLASS_TYPES = {
     "class_definition",          # Python
     "class",                     # JavaScript class expression / declaration nodes
     "class_declaration",         # Java / TypeScript
+    "type_declaration",          # Go
 }
 
 # Arrow / function expressions assigned to variables: const foo = () => {}
@@ -50,6 +51,7 @@ _BASE_CLASS_RE = re.compile(r"class\s+\w+\s*\(([^)]*)\)")
 # TypeScript: class Foo extends Bar implements Baz
 _TS_EXTENDS_RE = re.compile(r"class\s+\w+(?:<[^>]*>)?\s+extends\s+([\w.]+)")
 _JAVA_EXTENDS_RE = re.compile(r"class\s+\w+(?:<[^>]*>)?\s+extends\s+([\w.]+)")
+_GO_TYPE_RE = re.compile(r"type\s+(\w+)\s+")
 
 
 def _is_js_family(lang: str) -> bool:
@@ -58,6 +60,10 @@ def _is_js_family(lang: str) -> bool:
 
 def _is_java_family(lang: str) -> bool:
     return lang == "java"
+
+
+def _is_go_family(lang: str) -> bool:
+    return lang == "go"
 
 
 @dataclass
@@ -93,6 +99,8 @@ class CodeUnit:
             if not m:
                 return []
             return [m.group(1).rsplit(".", 1)[-1]]
+        if self.lang == "go":
+            return []
         else:
             m = _TS_EXTENDS_RE.search(first_line)
             if not m:
@@ -105,8 +113,12 @@ class CodeUnit:
 
 def _get_name(node: Node) -> str:
     """Extract the name identifier from a function/class definition node."""
+    if node.type == "type_declaration":
+        for child in node.children:
+            if child.type == "type_spec":
+                return _get_name(child)
     for child in node.children:
-        if child.type in ("identifier", "type_identifier", "property_identifier"):
+        if child.type in ("identifier", "type_identifier", "property_identifier", "field_identifier"):
             return child.text.decode("utf-8")
     return "<anonymous>"
 
@@ -180,6 +192,10 @@ def _extract_units(
             if _is_js_family(lang) or _is_java_family(lang):
                 for body_child in child.children:
                     if body_child.type == "class_body":
+                        unit.children = _extract_units(body_child, file_path, lang, parent_is_class=True)
+            elif _is_go_family(lang):
+                for body_child in child.children:
+                    if body_child.type == "type_spec":
                         unit.children = _extract_units(body_child, file_path, lang, parent_is_class=True)
             units.append(unit)
             continue

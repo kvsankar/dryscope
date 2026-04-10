@@ -50,9 +50,18 @@ PRESERVE_NAMES_JAVA = {
     "Exception", "Error",
 }
 
+PRESERVE_NAMES_GO = {
+    "nil", "true", "false",
+    "len", "cap", "append", "copy", "make", "new", "delete",
+    "panic", "recover", "print", "println",
+    "string", "int", "int64", "float64", "bool", "byte", "rune",
+    "error",
+}
+
 # Combined set for languages
 _PRESERVE: dict[str, set[str]] = {
     "python": PRESERVE_NAMES_PYTHON,
+    "go": PRESERVE_NAMES_GO,
     "java": PRESERVE_NAMES_JAVA,
     "javascript": PRESERVE_NAMES_TYPESCRIPT,
     "jsx": PRESERVE_NAMES_TYPESCRIPT,

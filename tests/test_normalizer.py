@@ -127,3 +127,17 @@ class TestNormalizeJava:
         norm_a = normalize(code_a, lang="java")
         norm_b = normalize(code_b, lang="java")
         assert norm_a == norm_b
+
+
+class TestNormalizeGo:
+    def test_go_preserved_names(self):
+        code = "return len(items)"
+        result = normalize(code, lang="go")
+        assert "len" in result
+
+    def test_go_structurally_identical_functions_normalize_same(self):
+        code_a = "func Add(a int, b int) int { sum := a + b; return sum }"
+        code_b = "func Plus(x int, y int) int { total := x + y; return total }"
+        norm_a = normalize(code_a, lang="go")
+        norm_b = normalize(code_b, lang="go")
+        assert norm_a == norm_b

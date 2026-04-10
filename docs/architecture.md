@@ -66,7 +66,7 @@ Documentation Files (.md, .rst, .txt, .adoc)
 ### Code Pipeline (`dryscope/code/`)
 
 **Parser** (`code/parser.py`)
-- tree-sitter extraction of CodeUnit dataclasses from Python, Java, and JavaScript/TypeScript families
+- tree-sitter extraction of CodeUnit dataclasses from Python, Go, Java, and JavaScript/TypeScript families
 - Handles: functions, methods, classes, arrow functions, exported declarations
 - Python classes include methods in source; TypeScript extracts methods separately
 
@@ -184,7 +184,7 @@ Documentation Files (.md, .rst, .txt, .adoc)
 - Parse, normalize, embed, cluster, report via CLI
 
 ### M4: Multi-language ✓
-- Java/JavaScript/JSX/TypeScript/TSX support (parsing, normalization, arrow functions)
+- Go/Java/JavaScript/JSX/TypeScript/TSX support (parsing, normalization, arrow functions)
 
 ### M5: LLM Verification ✓
 - Provider-agnostic LLM verification, project profiles, min-tokens filter
