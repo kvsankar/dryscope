@@ -153,6 +153,11 @@ dryscope install    # Install as both Claude Code and Codex skills
 dryscope uninstall  # Remove the skill
 ```
 
+`dryscope install` creates a shared skill venv under
+`$XDG_DATA_HOME/dryscope/skill-venv` or `~/.local/share/dryscope/skill-venv`,
+then renders `SKILL.md` into both `~/.claude/skills/dryscope` and
+`~/.codex/skills/dryscope`.
+
 ## CLI Reference
 
 ```

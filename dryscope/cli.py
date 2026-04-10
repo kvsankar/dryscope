@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -16,6 +17,7 @@ SKILL_DESTS = [
     Path.home() / ".claude" / "skills" / "dryscope",
     Path.home() / ".codex" / "skills" / "dryscope",
 ]
+SHARED_SKILL_VENV = Path(os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local" / "share"))) / "dryscope" / "skill-venv"
 
 
 def _find_project_root() -> Path:
@@ -396,11 +398,11 @@ def install() -> None:
         sys.exit(1)
 
     project_root = _find_project_root()
-    primary_dest = SKILL_DESTS[0]
-    venv_dir = primary_dest / ".venv"
+    venv_dir = SHARED_SKILL_VENV
     dryscope_bin = venv_dir / "bin" / "dryscope"
     for dest in SKILL_DESTS:
         dest.mkdir(parents=True, exist_ok=True)
+    venv_dir.parent.mkdir(parents=True, exist_ok=True)
 
     click.echo(f"Creating venv at {venv_dir}...", err=True)
     subprocess.run(
@@ -433,6 +435,10 @@ def uninstall() -> None:
             shutil.rmtree(dest)
             click.echo(f"Removed {dest}")
             removed = True
+    if SHARED_SKILL_VENV.exists():
+        shutil.rmtree(SHARED_SKILL_VENV)
+        click.echo(f"Removed {SHARED_SKILL_VENV}")
+        removed = True
     if not removed:
         click.echo("dryscope skill not installed.", err=True)
 
