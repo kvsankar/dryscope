@@ -133,8 +133,8 @@ def _should_skip_intent_extraction(
     """Skip full-corpus intent extraction when there is no similarity evidence."""
     return (
         not doc_pair_groups
-        and settings.docs_intent_max_docs > 0
-        and len(doc_chunks_map) > settings.docs_intent_max_docs
+        and settings.docs_intent_skip_without_similarity_min_docs > 0
+        and len(doc_chunks_map) >= settings.docs_intent_skip_without_similarity_min_docs
     )
 
 
@@ -416,6 +416,7 @@ def run_pipeline(
                         "Skipping intent extraction because there is no stage-1 similarity evidence "
                         f"and the corpus is large ([bold]{len(doc_chunks_map)}[/bold] docs)."
                     )
+                    intent_doc_chunks_map = {}
                     doc_topics = {}
                 elif settings.docs_intent_max_docs > 0 and len(doc_chunks_map) > settings.docs_intent_max_docs:
                     ranked_docs = _rank_doc_paths_by_similarity_evidence(doc_pair_groups)

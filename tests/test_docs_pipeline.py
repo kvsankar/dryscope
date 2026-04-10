@@ -61,7 +61,7 @@ def test_restrict_doc_pair_groups_by_allowed_docs_and_max_pairs() -> None:
 
 
 def test_should_skip_intent_extraction_for_large_corpus_without_similarity_pairs() -> None:
-    settings = Settings(docs_intent_max_docs=2)
+    settings = Settings(docs_intent_skip_without_similarity_min_docs=3)
     doc_chunks_map = {
         "/docs/a.md": [Chunk("/docs/a.md", ["A"], "one two three", 1, 2)],
         "/docs/b.md": [Chunk("/docs/b.md", ["B"], "one two three", 1, 2)],
@@ -72,7 +72,7 @@ def test_should_skip_intent_extraction_for_large_corpus_without_similarity_pairs
 
 
 def test_should_not_skip_intent_extraction_when_similarity_pairs_exist() -> None:
-    settings = Settings(docs_intent_max_docs=2)
+    settings = Settings(docs_intent_skip_without_similarity_min_docs=3)
     doc_chunks_map = {
         "/docs/a.md": [Chunk("/docs/a.md", ["A"], "one two three", 1, 2)],
         "/docs/b.md": [Chunk("/docs/b.md", ["B"], "one two three", 1, 2)],
@@ -83,3 +83,14 @@ def test_should_not_skip_intent_extraction_when_similarity_pairs_exist() -> None
     ])
 
     assert _should_skip_intent_extraction(doc_chunks_map, groups, settings) is False
+
+
+def test_should_not_skip_intent_extraction_for_small_negative_repo() -> None:
+    settings = Settings(docs_intent_skip_without_similarity_min_docs=4)
+    doc_chunks_map = {
+        "/docs/a.md": [Chunk("/docs/a.md", ["A"], "one two three", 1, 2)],
+        "/docs/b.md": [Chunk("/docs/b.md", ["B"], "one two three", 1, 2)],
+        "/docs/c.md": [Chunk("/docs/c.md", ["C"], "one two three", 1, 2)],
+    }
+
+    assert _should_skip_intent_extraction(doc_chunks_map, {}, settings) is False

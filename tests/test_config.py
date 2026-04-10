@@ -70,6 +70,7 @@ class TestSettingsDefaults:
         s = Settings()
         assert s.docs_intent_max_docs == 250
         assert s.docs_llm_max_doc_pairs == 250
+        assert s.docs_intent_skip_without_similarity_min_docs == 100
 
 
 # ── load_settings ───────────────────────────────────────────────────────
@@ -172,7 +173,7 @@ class TestSections:
         toml_file = tmp_path / ".dryscope.toml"
         toml_file.write_text(
             '[docs]\ninclude = ["*.rst"]\nthreshold_similarity = 0.75\nmin_content_words = 25\n'
-            'intent_max_docs = 42\nllm_max_doc_pairs = 99\n'
+            'intent_max_docs = 42\nllm_max_doc_pairs = 99\nintent_skip_without_similarity_min_docs = 12\n'
         )
         s = load_settings(tmp_path)
         assert s.include == ["*.rst"]
@@ -180,6 +181,7 @@ class TestSections:
         assert s.min_content_words == 25
         assert s.docs_intent_max_docs == 42
         assert s.docs_llm_max_doc_pairs == 99
+        assert s.docs_intent_skip_without_similarity_min_docs == 12
 
     def test_llm_section_from_toml(self, tmp_path):
         toml_file = tmp_path / ".dryscope.toml"

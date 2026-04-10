@@ -35,6 +35,7 @@ token_weight = 0.3
 embedding_model = "all-MiniLM-L6-v2"
 intent_max_docs = 250
 llm_max_doc_pairs = 250
+intent_skip_without_similarity_min_docs = 100
 
 [llm]
 model = "claude-haiku-4-5-20251001"
@@ -78,6 +79,7 @@ class Settings:
     docs_embedding_model: str = "all-MiniLM-L6-v2"
     docs_intent_max_docs: int = 250
     docs_llm_max_doc_pairs: int = 250
+    docs_intent_skip_without_similarity_min_docs: int = 100
 
     # LLM settings
     model: str = "claude-haiku-4-5-20251001"
@@ -199,6 +201,8 @@ def load_settings(
             settings.docs_intent_max_docs = docs_cfg["intent_max_docs"]
         if "llm_max_doc_pairs" in docs_cfg:
             settings.docs_llm_max_doc_pairs = docs_cfg["llm_max_doc_pairs"]
+        if "intent_skip_without_similarity_min_docs" in docs_cfg:
+            settings.docs_intent_skip_without_similarity_min_docs = docs_cfg["intent_skip_without_similarity_min_docs"]
 
         # LLM section
         if "model" in llm_cfg:
