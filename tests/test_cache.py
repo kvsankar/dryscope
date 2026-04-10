@@ -129,3 +129,23 @@ class TestContextManager:
         assert result is not None
         assert result == pytest.approx([1.0, 2.0])
         c2.close()
+
+
+class TestConcurrentConnections:
+    def test_two_cache_instances_can_write_same_db(self, tmp_path):
+        db_path = tmp_path / "shared_cache.db"
+        c1 = Cache(db_path)
+        c2 = Cache(db_path)
+        try:
+            c1.set_embedding("a", "m", [1.0])
+            c2.set_embedding("b", "m", [2.0])
+            c1.set_coding("c", "m", "v1", "resp")
+            c2.set_coding("d", "m", "v1", "resp2")
+
+            assert c1.get_embedding("b", "m") == pytest.approx([2.0])
+            assert c2.get_embedding("a", "m") == pytest.approx([1.0])
+            assert c1.get_coding("d", "m", "v1") == "resp2"
+            assert c2.get_coding("c", "m", "v1") == "resp"
+        finally:
+            c1.close()
+            c2.close()

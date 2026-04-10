@@ -62,7 +62,7 @@ class TopicAnalysis:
     """A single overlap topic identified between two documents."""
 
     name: str                  # kebab-case topic label
-    canonical: str             # path of canonical document
+    canonical: str | None      # path of canonical document, if specified
     action_for_other: str      # "consolidate" | "link" | "brief-reference" | "keep"
     reason: str
     chunks_a: list[Chunk] = field(default_factory=list)

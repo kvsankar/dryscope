@@ -16,8 +16,10 @@ from dryscope.config import Settings
 from dryscope.docs.models import AnalysisResult, Category, Code, DocPairAnalysis, OverlapPair
 
 
-def _short_path(path: str) -> str:
-    """Return just the filename from a path."""
+def _short_path(path: str | None) -> str:
+    """Return just the filename from a path, or a placeholder if missing."""
+    if not path:
+        return "(unspecified)"
     return Path(path).name
 
 
@@ -697,8 +699,10 @@ def _inject_recommendation_slider(html: str) -> str:
 # ─── LLM-Friendly Output Helpers ───────────────────────────────────────
 
 
-def _relative_path(path: str, root: Path) -> str:
+def _relative_path(path: str | None, root: Path) -> str | None:
     """Absolute path → relative to project root. Falls back to original if not under root."""
+    if not path:
+        return None
     try:
         return str(Path(path).relative_to(root))
     except ValueError:

@@ -6,6 +6,7 @@ import hashlib
 import json
 import sqlite3
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -34,11 +35,46 @@ class Cache:
     def __init__(self, db_path: Path) -> None:
         self.db_path = db_path
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
+        self.conn = sqlite3.connect(
+            str(self.db_path),
+            check_same_thread=False,
+            timeout=30.0,
+            isolation_level=None,
+        )
         self._hits = 0
         self._misses = 0
         self._lock = threading.Lock()
+        self._configure_connection()
         self._init_db()
+
+    def _configure_connection(self) -> None:
+        """Tune SQLite for concurrent readers/writers across processes."""
+        self.conn.execute("PRAGMA busy_timeout=30000")
+        # Switching journal mode can race with another process opening the same
+        # cache. Retry briefly, then continue: an already-initialized cache can
+        # still be used even if this connection could not flip the mode itself.
+        attempts = 5
+        for attempt in range(attempts):
+            try:
+                self.conn.execute("PRAGMA journal_mode=WAL")
+                break
+            except sqlite3.OperationalError as exc:
+                if "locked" not in str(exc).lower() or attempt == attempts - 1:
+                    break
+                time.sleep(0.1 * (attempt + 1))
+        self.conn.execute("PRAGMA synchronous=NORMAL")
+
+    def _execute_write(self, sql: str, params: tuple[object, ...]) -> None:
+        """Execute a write with simple retry for transient lock contention."""
+        attempts = 5
+        for attempt in range(attempts):
+            try:
+                self.conn.execute(sql, params)
+                return
+            except sqlite3.OperationalError as exc:
+                if "locked" not in str(exc).lower() or attempt == attempts - 1:
+                    raise
+                time.sleep(0.1 * (attempt + 1))
 
     def _init_db(self) -> None:
         self.conn.execute("""
@@ -69,7 +105,7 @@ class Cache:
         """Store an embedding vector in the cache."""
         key = _make_key(content, model, "embedding_v1")
         with self._lock:
-            self.conn.execute(
+            self._execute_write(
                 "INSERT OR REPLACE INTO cache (key, kind, value) VALUES (?, 'embedding', ?)",
                 (key, json.dumps(vector)),
             )
@@ -92,7 +128,7 @@ class Cache:
         """Store an LLM coding response in the cache."""
         key = _make_key(content, model, prompt_version)
         with self._lock:
-            self.conn.execute(
+            self._execute_write(
                 "INSERT OR REPLACE INTO cache (key, kind, value) VALUES (?, 'coding', ?)",
                 (key, response),
             )
