@@ -6,7 +6,9 @@ from dryscope.docs.pipeline import (
     _group_pairs_by_doc_pair,
     _rank_doc_paths_by_similarity_evidence,
     _restrict_doc_pair_groups,
+    _should_skip_intent_extraction,
 )
+from dryscope.config import Settings
 
 
 def _pair(doc_a: str, doc_b: str, line_a: int, line_b: int, similarity: float) -> OverlapPair:
@@ -56,3 +58,28 @@ def test_restrict_doc_pair_groups_by_allowed_docs_and_max_pairs() -> None:
         ("/docs/a.md", "/docs/b.md"),
         ("/docs/a.md", "/docs/c.md"),
     ]
+
+
+def test_should_skip_intent_extraction_for_large_corpus_without_similarity_pairs() -> None:
+    settings = Settings(docs_intent_max_docs=2)
+    doc_chunks_map = {
+        "/docs/a.md": [Chunk("/docs/a.md", ["A"], "one two three", 1, 2)],
+        "/docs/b.md": [Chunk("/docs/b.md", ["B"], "one two three", 1, 2)],
+        "/docs/c.md": [Chunk("/docs/c.md", ["C"], "one two three", 1, 2)],
+    }
+
+    assert _should_skip_intent_extraction(doc_chunks_map, {}, settings) is True
+
+
+def test_should_not_skip_intent_extraction_when_similarity_pairs_exist() -> None:
+    settings = Settings(docs_intent_max_docs=2)
+    doc_chunks_map = {
+        "/docs/a.md": [Chunk("/docs/a.md", ["A"], "one two three", 1, 2)],
+        "/docs/b.md": [Chunk("/docs/b.md", ["B"], "one two three", 1, 2)],
+        "/docs/c.md": [Chunk("/docs/c.md", ["C"], "one two three", 1, 2)],
+    }
+    groups = _group_pairs_by_doc_pair([
+        _pair("/docs/a.md", "/docs/b.md", 1, 1, 0.99),
+    ])
+
+    assert _should_skip_intent_extraction(doc_chunks_map, groups, settings) is False

@@ -4,8 +4,17 @@ from __future__ import annotations
 
 import os
 import sys
+from pathlib import Path
 import numpy as np
 from numpy.typing import NDArray
+
+
+def _has_local_huggingface_cache(model_name: str) -> bool:
+    """Return True if the sentence-transformer model already exists in HF cache."""
+    safe_name = model_name.replace("/", "--")
+    cache_dir = Path.home() / ".cache" / "huggingface" / "hub" / f"models--{safe_name}"
+    snapshots = cache_dir / "snapshots"
+    return snapshots.exists() and any(snapshots.iterdir())
 
 
 class Embedder:
@@ -23,7 +32,17 @@ class Embedder:
         os.dup2(devnull_fd, 1)
         os.dup2(devnull_fd, 2)
         try:
-            self.model = SentenceTransformer(model_name, device="cpu")
+            kwargs = {"device": "cpu"}
+            if _has_local_huggingface_cache(model_name):
+                kwargs["local_files_only"] = True
+            try:
+                self.model = SentenceTransformer(model_name, **kwargs)
+            except Exception:
+                if kwargs.get("local_files_only"):
+                    kwargs.pop("local_files_only", None)
+                    self.model = SentenceTransformer(model_name, **kwargs)
+                else:
+                    raise
         finally:
             os.dup2(saved_stdout_fd, 1)
             os.dup2(saved_stderr_fd, 2)

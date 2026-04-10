@@ -125,6 +125,19 @@ def _restrict_doc_pair_groups(
     return dict(items)
 
 
+def _should_skip_intent_extraction(
+    doc_chunks_map: dict[str, list[Chunk]],
+    doc_pair_groups: dict[tuple[str, str], list[OverlapPair]],
+    settings: Settings,
+) -> bool:
+    """Skip full-corpus intent extraction when there is no similarity evidence."""
+    return (
+        not doc_pair_groups
+        and settings.docs_intent_max_docs > 0
+        and len(doc_chunks_map) > settings.docs_intent_max_docs
+    )
+
+
 # Pricing per million tokens: (input, output)
 MODEL_PRICING: dict[str, tuple[float, float]] = {
     "sonnet": (3.0, 15.0),
@@ -398,7 +411,13 @@ def run_pipeline(
                 console.print("[bold cyan]Stage 1b: Intent Overlap Detection[/bold cyan]")
 
                 intent_doc_chunks_map = doc_chunks_map
-                if settings.docs_intent_max_docs > 0 and len(doc_chunks_map) > settings.docs_intent_max_docs:
+                if _should_skip_intent_extraction(doc_chunks_map, doc_pair_groups, settings):
+                    console.print(
+                        "Skipping intent extraction because there is no stage-1 similarity evidence "
+                        f"and the corpus is large ([bold]{len(doc_chunks_map)}[/bold] docs)."
+                    )
+                    doc_topics = {}
+                elif settings.docs_intent_max_docs > 0 and len(doc_chunks_map) > settings.docs_intent_max_docs:
                     ranked_docs = _rank_doc_paths_by_similarity_evidence(doc_pair_groups)
                     if ranked_docs:
                         allowed_docs = set(ranked_docs[:settings.docs_intent_max_docs])
@@ -409,70 +428,71 @@ def run_pipeline(
                             "with the strongest similarity evidence"
                         )
 
-                def topic_progress(done: int, total: int) -> None:
-                    console.print(f"  Extracting topics {done}/{total}...", end="\r")
+                if intent_doc_chunks_map:
+                    def topic_progress(done: int, total: int) -> None:
+                        console.print(f"  Extracting topics {done}/{total}...", end="\r")
 
-                doc_topics = run_topic_extraction(
-                    intent_doc_chunks_map, settings.model, cache,
-                    backend=settings.backend,
-                    concurrency=settings.concurrency,
-                    on_progress=topic_progress,
-                    cli_strip_api_key=settings.cli_strip_api_key,
-                    cli_permission_mode=settings.cli_permission_mode,
-                    cli_dangerously_skip_permissions=settings.cli_dangerously_skip_permissions,
-                )
-
-                if cache:
-                    cache.commit()
-
-                total_topics = sum(len(t) for t in doc_topics.values())
-                console.print(f"Extracted [bold]{total_topics}[/bold] topics from {len(doc_topics)} documents")
-
-                # Embed all unique topics
-                all_topics = list({t for topics in doc_topics.values() for t in topics})
-                if all_topics:
-                    topic_embeddings = embed_topics(all_topics, settings.docs_embedding_model, cache)
-
-                    # Find intent doc-pairs
-                    intent_evidence = find_intent_doc_pairs(
-                        doc_topics, topic_embeddings, settings.threshold_intent,
+                    doc_topics = run_topic_extraction(
+                        intent_doc_chunks_map, settings.model, cache,
+                        backend=settings.backend,
+                        concurrency=settings.concurrency,
+                        on_progress=topic_progress,
+                        cli_strip_api_key=settings.cli_strip_api_key,
+                        cli_permission_mode=settings.cli_permission_mode,
+                        cli_dangerously_skip_permissions=settings.cli_dangerously_skip_permissions,
                     )
 
-                console.print(
-                    f"Found [bold]{len(intent_evidence)}[/bold] intent-overlap document pairs "
-                    f"(topic cosine > {settings.threshold_intent})"
-                )
+                    if cache:
+                        cache.commit()
 
-                # Cluster documents by shared topics
-                if all_topics:
-                    topic_clusters = cluster_documents_by_topic(
-                        doc_topics, topic_embeddings, settings.threshold_intent,
-                    )
-                    if topic_clusters:
-                        console.print(
-                            f"Found [bold]{len(topic_clusters)}[/bold] document clusters by topic"
+                    total_topics = sum(len(t) for t in doc_topics.values())
+                    console.print(f"Extracted [bold]{total_topics}[/bold] topics from {len(doc_topics)} documents")
+
+                    # Embed all unique topics
+                    all_topics = list({t for topics in doc_topics.values() for t in topics})
+                    if all_topics:
+                        topic_embeddings = embed_topics(all_topics, settings.docs_embedding_model, cache)
+
+                        # Find intent doc-pairs
+                        intent_evidence = find_intent_doc_pairs(
+                            doc_topics, topic_embeddings, settings.threshold_intent,
                         )
-                        for cluster in topic_clusters:
-                            console.print(
-                                f"  Cluster \"{cluster['label']}\": "
-                                f"{len(cluster['documents'])} docs"
-                            )
 
-                # Save stage1b
-                if run_store:
-                    intent_matches_data = [
-                        {
-                            "doc_a": key[0],
-                            "doc_b": key[1],
-                            "matched_topics": matches,
-                        }
-                        for key, matches in intent_evidence.items()
-                    ]
-                    run_store.save_stage("stage1b_topics.json", {
-                        "metadata": {},
-                        "doc_topics": doc_topics,
-                        "intent_matches": intent_matches_data,
-                    })
+                    console.print(
+                        f"Found [bold]{len(intent_evidence)}[/bold] intent-overlap document pairs "
+                        f"(topic cosine > {settings.threshold_intent})"
+                    )
+
+                    # Cluster documents by shared topics
+                    if all_topics:
+                        topic_clusters = cluster_documents_by_topic(
+                            doc_topics, topic_embeddings, settings.threshold_intent,
+                        )
+                        if topic_clusters:
+                            console.print(
+                                f"Found [bold]{len(topic_clusters)}[/bold] document clusters by topic"
+                            )
+                            for cluster in topic_clusters:
+                                console.print(
+                                    f"  Cluster \"{cluster['label']}\": "
+                                    f"{len(cluster['documents'])} docs"
+                                )
+
+                    # Save stage1b
+                    if run_store:
+                        intent_matches_data = [
+                            {
+                                "doc_a": key[0],
+                                "doc_b": key[1],
+                                "matched_topics": matches,
+                            }
+                            for key, matches in intent_evidence.items()
+                        ]
+                        run_store.save_stage("stage1b_topics.json", {
+                            "metadata": {},
+                            "doc_topics": doc_topics,
+                            "intent_matches": intent_matches_data,
+                        })
 
             stages_run.append("Intent")
 
