@@ -3,8 +3,8 @@
 from pathlib import Path
 
 from dryscope.config import Settings
-from dryscope.docs.models import AnalysisResult, Chunk, DocPairAnalysis, Document, TopicAnalysis
-from dryscope.docs.report import render_json, render_markdown, serialize_coding_stage
+from dryscope.docs.models import AnalysisResult, Chunk, DocPairAnalysis, Document, OverlapPair, TopicAnalysis
+from dryscope.docs.report import build_recommendations, render_json, render_markdown, serialize_coding_stage
 
 
 def _make_analysis() -> tuple[AnalysisResult, list[DocPairAnalysis]]:
@@ -67,3 +67,38 @@ def test_serialize_coding_stage_handles_missing_canonical() -> None:
     topic = payload["doc_pair_analyses"][0]["topics"][0]
     assert topic["canonical"] is None
     assert topic["action_for_other"] == "keep"
+
+
+def _pair(doc_a: str, doc_b: str, line_a: int, line_b: int, similarity: float) -> OverlapPair:
+    return OverlapPair(
+        chunk_a=Chunk(doc_a, ["Flow"], "repeat me please", line_a, line_a + 3),
+        chunk_b=Chunk(doc_b, ["Flow"], "repeat me please", line_b, line_b + 3),
+        embedding_similarity=similarity,
+    )
+
+
+def test_build_recommendations_merges_dense_file_family() -> None:
+    pair1 = _pair("/tmp/project/docs/flows/a.txt", "/tmp/project/docs/flows/b.txt", 1, 1, 0.99)
+    pair2 = _pair("/tmp/project/docs/flows/a.txt", "/tmp/project/docs/flows/c.txt", 10, 1, 0.98)
+    pair3 = _pair("/tmp/project/docs/flows/b.txt", "/tmp/project/docs/flows/c.txt", 10, 10, 0.97)
+    recs = build_recommendations(
+        [pair1, pair2, pair3],
+        suggestions=None,
+        project_root=Path("/tmp/project"),
+    )
+
+    assert len(recs) == 1
+    assert len(recs[0]["affected_files"]) == 3
+    assert "family of 3 documents" in recs[0]["action_detail"]
+
+
+def test_build_recommendations_keeps_simple_pairwise_overlap() -> None:
+    pair1 = _pair("/tmp/project/docs/a.txt", "/tmp/project/docs/b.txt", 1, 1, 0.99)
+    recs = build_recommendations(
+        [pair1],
+        suggestions=None,
+        project_root=Path("/tmp/project"),
+    )
+
+    assert len(recs) == 1
+    assert len(recs[0]["affected_files"]) == 2

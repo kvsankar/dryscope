@@ -881,6 +881,125 @@ def _suggest_action(overlap_type: str, pair: OverlapPair) -> str:
 _MAX_RAW_SCORE = 80  # 1.0×60 + 15 coding + 5 section
 
 
+def _merge_sections(sections: list[dict]) -> list[dict]:
+    """Deduplicate section references while preserving order."""
+    seen: set[tuple[tuple[str, ...], tuple[int, int]]] = set()
+    merged: list[dict] = []
+    for section in sections:
+        heading = tuple(section.get("sections", []))
+        line_range_raw = section.get("line_range", [])
+        if len(line_range_raw) == 2:
+            line_range = (line_range_raw[0], line_range_raw[1])
+        else:
+            line_range = (-1, -1)
+        key = (heading, line_range)
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(section)
+    return merged
+
+
+def _recommendation_family_key(rec: dict) -> tuple[str, str, str, str]:
+    """Key for grouping related pairwise recommendations into doc families."""
+    files = [f["file"] for f in rec["affected_files"]]
+    dirs = [str(Path(f).parent) for f in files]
+    common_dir = dirs[0] if len(set(dirs)) == 1 else ""
+    suffixes = sorted({Path(f).suffix for f in files})
+    suffix_key = ",".join(suffixes)
+    return (
+        rec["suggested_action"],
+        rec["overlap_type"],
+        common_dir,
+        suffix_key,
+    )
+
+
+def _merge_related_recommendations(recommendations: list[dict]) -> list[dict]:
+    """Merge dense families of pairwise recommendations into grouped recs."""
+    buckets: dict[tuple[str, str, str, str], list[dict]] = defaultdict(list)
+    for rec in recommendations:
+        buckets[_recommendation_family_key(rec)].append(rec)
+
+    merged_output: list[dict] = []
+    for recs in buckets.values():
+        remaining = list(recs)
+        while remaining:
+            seed = remaining.pop(0)
+            seed_files = {f["file"] for f in seed["affected_files"]}
+            cluster = [seed]
+
+            changed = True
+            while changed:
+                changed = False
+                next_remaining: list[dict] = []
+                current_files = {f["file"] for rec in cluster for f in rec["affected_files"]}
+                for rec in remaining:
+                    rec_files = {f["file"] for f in rec["affected_files"]}
+                    if current_files & rec_files:
+                        cluster.append(rec)
+                        changed = True
+                    else:
+                        next_remaining.append(rec)
+                remaining = next_remaining
+
+            cluster_files = {f["file"] for rec in cluster for f in rec["affected_files"]}
+            if len(cluster) < 2 or len(cluster_files) < 3:
+                merged_output.extend(cluster)
+                continue
+
+            sections_by_file: dict[str, list[dict]] = defaultdict(list)
+            best_similarity = 0.0
+            best_score = 0
+            for rec in cluster:
+                best_similarity = max(best_similarity, rec.get("embedding_similarity") or 0.0)
+                best_score = max(best_score, rec.get("priority_score") or 0)
+                for file_entry in rec["affected_files"]:
+                    sections_by_file[file_entry["file"]].extend(file_entry.get("sections", []))
+
+            affected_files = [
+                {"file": file, "sections": _merge_sections(sections)}
+                for file, sections in sorted(sections_by_file.items())
+            ]
+            action = seed["suggested_action"]
+            overlap_type = seed["overlap_type"]
+            group_score = min(100, max(best_score, best_score + min(15, 3 * (len(cluster_files) - 2))))
+            file_list = ", ".join(f"`{Path(f).name}`" for f in sorted(cluster_files)[:4])
+            if len(cluster_files) > 4:
+                file_list += f", and {len(cluster_files) - 4} more"
+            if action == "consolidate":
+                detail = (
+                    f"A family of {len(cluster_files)} documents shares highly similar content "
+                    f"across {len(cluster)} pairwise overlaps ({file_list}). "
+                    "Consider extracting a shared canonical reference and replacing repeated copies with links."
+                )
+            elif action == "link":
+                detail = (
+                    f"A family of {len(cluster_files)} documents repeats the same structural or reference material "
+                    f"across {len(cluster)} pairwise overlaps ({file_list}). "
+                    "Consider one shared include/reference instead of repeating the content pairwise."
+                )
+            else:
+                detail = (
+                    f"A family of {len(cluster_files)} documents overlaps across {len(cluster)} pairwise matches "
+                    f"({file_list}). Consider keeping one canonical explanation and replacing the rest with brief references."
+                )
+
+            merged_output.append({
+                "priority_score": group_score,
+                "affected_files": affected_files,
+                "overlap_type": overlap_type,
+                "embedding_similarity": round(best_similarity, 4),
+                "suggested_action": action,
+                "action_detail": detail,
+            })
+
+    merged_output.sort(key=lambda r: r["priority_score"], reverse=True)
+    for i, rec in enumerate(merged_output, 1):
+        rec["priority_rank"] = i
+    return merged_output
+
+
 def build_recommendations(
     similarity_pairs: list[OverlapPair],
     suggestions: list[dict] | None,
@@ -980,12 +1099,7 @@ def build_recommendations(
             "action_detail": detail,
         })
 
-    # Sort by priority score descending, assign ranks
-    recommendations.sort(key=lambda r: r["priority_score"], reverse=True)
-    for i, rec in enumerate(recommendations, 1):
-        rec["priority_rank"] = i
-
-    return recommendations
+    return _merge_related_recommendations(recommendations)
 
 
 # ─── Final Report ───────────────────────────────────────────────────────
