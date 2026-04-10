@@ -77,6 +77,8 @@ min_content_words = 15
 include_intra = false
 token_weight = 0.3
 embedding_model = "all-MiniLM-L6-v2"
+intent_max_docs = 250
+llm_max_doc_pairs = 250
 
 [llm]
 model = "claude-haiku-4-5-20251001"
@@ -149,8 +151,9 @@ dryscope cache clear  # Clear the cache
 1. **Chunk** — split documents into heading-based sections
 2. **Embed** — sentence-transformers generates section embeddings
 3. **Compare** — hybrid similarity finds cross-document overlap
-4. **Topics** _(full stage)_ — LLM extracts topics, clusters documents by intent overlap
-5. **Analyze** _(full stage)_ — LLM classifies each pair with action recommendations
+4. **Restrict** _(large repos)_ — cap later stages to docs and doc-pairs with the strongest similarity evidence
+5. **Topics** _(full stage)_ — LLM extracts topics, clusters documents by intent overlap
+6. **Analyze** _(full stage)_ — LLM classifies each pair with action recommendations
 
 ## Benchmarking
 

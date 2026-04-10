@@ -43,6 +43,8 @@ Runs **dryscope** — a unified tool for detecting code duplicates and documenta
 
 **Prefer `--verify` for higher-signal results.** Without it, the tool reports all structurally similar items — including framework boilerplate and coincidental matches. The `--verify` flag uses an LLM (default: claude-haiku-4-5) to label each cluster as `refactor`, `review`, or `noise`, then applies a deterministic policy so low-value `refactor` findings do not automatically survive.
 
+For large documentation repos, `--docs --verify` now also caps intent extraction and doc-pair analysis to the strongest similarity candidates by default, so later stages do not try to read every document in a handbook-sized corpus.
+
 ```bash
 # Code duplicates with LLM verification
 {{DRYSCOPE_BIN}} scan /path/to/project --code --verify --min-tokens 15

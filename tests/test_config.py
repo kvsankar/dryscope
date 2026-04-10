@@ -62,6 +62,11 @@ class TestSettingsDefaults:
         assert s.code_escalate_refactor_min_units == 3
         assert s.code_keep_same_file_refactors is False
 
+    def test_default_docs_scale_limits(self):
+        s = Settings()
+        assert s.docs_intent_max_docs == 250
+        assert s.docs_llm_max_doc_pairs == 250
+
 
 # ── load_settings ───────────────────────────────────────────────────────
 
@@ -163,11 +168,14 @@ class TestSections:
         toml_file = tmp_path / ".dryscope.toml"
         toml_file.write_text(
             '[docs]\ninclude = ["*.rst"]\nthreshold_similarity = 0.75\nmin_content_words = 25\n'
+            'intent_max_docs = 42\nllm_max_doc_pairs = 99\n'
         )
         s = load_settings(tmp_path)
         assert s.include == ["*.rst"]
         assert s.threshold_similarity == 0.75
         assert s.min_content_words == 25
+        assert s.docs_intent_max_docs == 42
+        assert s.docs_llm_max_doc_pairs == 99
 
     def test_llm_section_from_toml(self, tmp_path):
         toml_file = tmp_path / ".dryscope.toml"

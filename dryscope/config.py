@@ -33,6 +33,8 @@ min_content_words = 15
 include_intra = false
 token_weight = 0.3
 embedding_model = "all-MiniLM-L6-v2"
+intent_max_docs = 250
+llm_max_doc_pairs = 250
 
 [llm]
 model = "claude-haiku-4-5-20251001"
@@ -74,6 +76,8 @@ class Settings:
     include_intra: bool = False
     token_weight: float = 0.3
     docs_embedding_model: str = "all-MiniLM-L6-v2"
+    docs_intent_max_docs: int = 250
+    docs_llm_max_doc_pairs: int = 250
 
     # LLM settings
     model: str = "claude-haiku-4-5-20251001"
@@ -191,6 +195,10 @@ def load_settings(
             settings.token_weight = docs_cfg["token_weight"]
         if "embedding_model" in docs_cfg:
             settings.docs_embedding_model = docs_cfg["embedding_model"]
+        if "intent_max_docs" in docs_cfg:
+            settings.docs_intent_max_docs = docs_cfg["intent_max_docs"]
+        if "llm_max_doc_pairs" in docs_cfg:
+            settings.docs_llm_max_doc_pairs = docs_cfg["llm_max_doc_pairs"]
 
         # LLM section
         if "model" in llm_cfg:

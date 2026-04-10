@@ -65,6 +65,66 @@ def _group_pairs_by_doc_pair(
     return groups
 
 
+def _rank_doc_paths_by_similarity_evidence(
+    doc_pair_groups: dict[tuple[str, str], list[OverlapPair]],
+) -> list[str]:
+    """Rank docs by how much strong similarity evidence they participate in."""
+    scores: dict[str, tuple[float, int]] = {}
+    for (doc_a, doc_b), pairs in doc_pair_groups.items():
+        pair_count = len(pairs)
+        max_similarity = max((p.embedding_similarity or 0.0) for p in pairs) if pairs else 0.0
+        pair_score = (max_similarity * 100.0) + pair_count
+        for doc in (doc_a, doc_b):
+            total_score, total_pairs = scores.get(doc, (0.0, 0))
+            scores[doc] = (total_score + pair_score, total_pairs + pair_count)
+
+    ranked = sorted(
+        scores.items(),
+        key=lambda item: (-item[1][0], -item[1][1], item[0]),
+    )
+    return [doc for doc, _ in ranked]
+
+
+def _filter_doc_chunks_map(
+    doc_chunks_map: dict[str, list[Chunk]],
+    allowed_docs: set[str],
+) -> dict[str, list[Chunk]]:
+    """Keep only documents allowed to proceed to later stages."""
+    return {
+        doc_path: chunks
+        for doc_path, chunks in doc_chunks_map.items()
+        if doc_path in allowed_docs
+    }
+
+
+def _restrict_doc_pair_groups(
+    doc_pair_groups: dict[tuple[str, str], list[OverlapPair]],
+    *,
+    allowed_docs: set[str] | None = None,
+    max_pairs: int = 0,
+) -> dict[tuple[str, str], list[OverlapPair]]:
+    """Restrict doc-pair groups by allowed docs and/or strongest pair budget."""
+    items = list(doc_pair_groups.items())
+    if allowed_docs is not None:
+        items = [
+            (key, pairs)
+            for key, pairs in items
+            if key[0] in allowed_docs and key[1] in allowed_docs
+        ]
+
+    if max_pairs > 0 and len(items) > max_pairs:
+        items.sort(
+            key=lambda item: (
+                -max((p.embedding_similarity or 0.0) for p in item[1]) if item[1] else 0.0,
+                -len(item[1]),
+                item[0],
+            )
+        )
+        items = items[:max_pairs]
+
+    return dict(items)
+
+
 # Pricing per million tokens: (input, output)
 MODEL_PRICING: dict[str, tuple[float, float]] = {
     "sonnet": (3.0, 15.0),
@@ -337,11 +397,23 @@ def run_pipeline(
                 console.print()
                 console.print("[bold cyan]Stage 1b: Intent Overlap Detection[/bold cyan]")
 
+                intent_doc_chunks_map = doc_chunks_map
+                if settings.docs_intent_max_docs > 0 and len(doc_chunks_map) > settings.docs_intent_max_docs:
+                    ranked_docs = _rank_doc_paths_by_similarity_evidence(doc_pair_groups)
+                    if ranked_docs:
+                        allowed_docs = set(ranked_docs[:settings.docs_intent_max_docs])
+                        intent_doc_chunks_map = _filter_doc_chunks_map(doc_chunks_map, allowed_docs)
+                        console.print(
+                            "Limiting intent extraction to "
+                            f"[bold]{len(intent_doc_chunks_map)}[/bold] documents "
+                            "with the strongest similarity evidence"
+                        )
+
                 def topic_progress(done: int, total: int) -> None:
                     console.print(f"  Extracting topics {done}/{total}...", end="\r")
 
                 doc_topics = run_topic_extraction(
-                    doc_chunks_map, settings.model, cache,
+                    intent_doc_chunks_map, settings.model, cache,
                     backend=settings.backend,
                     concurrency=settings.concurrency,
                     on_progress=topic_progress,
@@ -408,6 +480,18 @@ def run_pipeline(
             for key in intent_evidence:
                 if key not in doc_pair_groups:
                     doc_pair_groups[key] = []
+
+        if settings.docs_llm_max_doc_pairs > 0 and len(doc_pair_groups) > settings.docs_llm_max_doc_pairs:
+            original_count = len(doc_pair_groups)
+            doc_pair_groups = _restrict_doc_pair_groups(
+                doc_pair_groups,
+                max_pairs=settings.docs_llm_max_doc_pairs,
+            )
+            console.print(
+                "Limiting LLM doc-pair analysis to "
+                f"[bold]{len(doc_pair_groups)}[/bold] of [bold]{original_count}[/bold] pairs "
+                "with the strongest similarity evidence"
+            )
 
         if not doc_pair_groups:
             if run_store:

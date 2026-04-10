@@ -45,6 +45,9 @@ Documentation Files (.md, .rst, .txt, .adoc)
 [Similarity] ──> Cross-document section pairs above threshold
     |                              (similarity stage)
     v
+[Scaling Gates] ──> Limit later stages to strongest docs / doc pairs
+    |
+    v
 [Topic Extraction] ──> LLM extracts topics per document
     |
     v
@@ -126,6 +129,7 @@ Documentation Files (.md, .rst, .txt, .adoc)
 
 **Pipeline** (`docs/pipeline.py`)
 - Multi-stage orchestrator: similarity → intent → LLM analysis
+- Large-repo guards: caps intent extraction to docs with strongest similarity evidence and caps LLM doc-pair analysis to strongest pairs
 - Cost estimation with model-specific pricing
 - Run persistence via RunStore
 - Progress tracking with rich console
@@ -146,6 +150,7 @@ Documentation Files (.md, .rst, .txt, .adoc)
 
 **Cache** (`cache.py`)
 - Thread-safe SQLite cache for embeddings and LLM coding results
+- WAL + busy-timeout tuning for concurrent docs/code runs
 - Context manager support with batch commit on exit
 
 **LLM Backend** (`llm_backend.py`)
