@@ -4,6 +4,7 @@ import numpy as np
 
 from dryscope.cli import _run_code_scan
 from dryscope.code.parser import CodeUnit
+from dryscope.code.reporter import Cluster, Tier
 from dryscope.config import Settings
 
 
@@ -88,3 +89,91 @@ def test_run_code_scan_passes_backend_to_verifier(monkeypatch):
     assert captured["cli_strip_api_key"] is True
     assert captured["cli_permission_mode"] == "bypassPermissions"
     assert captured["cli_dangerously_skip_permissions"] is True
+
+
+def test_format_cluster_context_marks_examples_tests_and_benches():
+    from dryscope.code.verifier import _format_cluster_context
+
+    cluster = Cluster(
+        cluster_id=0,
+        units=[
+            CodeUnit(
+                name="a",
+                unit_type="function",
+                source="function a() {}",
+                file_path="examples/app/test_a.bench.ts",
+                start_line=1,
+                end_line=1,
+                lang="typescript",
+            ),
+            CodeUnit(
+                name="b",
+                unit_type="function",
+                source="function b() {}",
+                file_path="examples/app/test_b.bench.ts",
+                start_line=1,
+                end_line=1,
+                lang="typescript",
+            ),
+        ],
+        max_similarity=0.99,
+        tier=Tier.EXACT,
+        is_cross_file=True,
+        total_lines=2,
+        files=["examples/app/test_a.bench.ts", "examples/app/test_b.bench.ts"],
+        actionability=1.0,
+    )
+
+    context = _format_cluster_context(cluster)
+
+    assert "example/demo/sample" in context
+    assert "test/spec" in context
+    assert "benchmark" in context
+
+
+def test_verify_cluster_includes_context_in_prompt(monkeypatch):
+    import dryscope.code.verifier as verifier
+
+    captured: dict = {}
+
+    def fake_completion(prompt, model, backend, **kwargs):
+        captured["prompt"] = prompt
+        return '{"verdict":"noise","reason":"example duplication"}'
+
+    monkeypatch.setattr(verifier, "llm_completion", fake_completion)
+
+    cluster = Cluster(
+        cluster_id=3,
+        units=[
+            CodeUnit(
+                name="Page",
+                unit_type="function",
+                source="export function Page() { return null; }",
+                file_path="examples/app-router/page.tsx",
+                start_line=1,
+                end_line=1,
+                lang="tsx",
+            ),
+            CodeUnit(
+                name="Page",
+                unit_type="function",
+                source="export function Page() { return null; }",
+                file_path="examples/app-pages-router/page.tsx",
+                start_line=1,
+                end_line=1,
+                lang="tsx",
+            ),
+        ],
+        max_similarity=1.0,
+        tier=Tier.EXACT,
+        is_cross_file=True,
+        total_lines=2,
+        files=["examples/app-pages-router/page.tsx", "examples/app-router/page.tsx"],
+        actionability=1.0,
+    )
+
+    verdict, reason = verifier.verify_cluster(cluster, model="test-model", backend="litellm")
+
+    assert verdict == "noise"
+    assert reason == "example duplication"
+    assert "Context: all units are in example/demo/sample paths" in captured["prompt"]

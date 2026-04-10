@@ -72,14 +72,62 @@ exception subclasses, tiny test classes with one method, small config classes. \
 This is NOT duplication worth refactoring.
 
 Be strict. If the similarity is mainly due to framework boilerplate or \
-structural shape rather than shared business logic, classify as "noise"."""
+structural shape rather than shared business logic, classify as "noise".
+
+Intentional duplication in examples, demos, benchmarks, mirrored fixtures, or \
+parallel framework/router variants is usually "noise" unless it exposes a \
+substantive shared runtime helper that the project would realistically want to \
+extract."""
 
 USER_TEMPLATE = """\
 Cluster {cluster_id} — {unit_count} code units, similarity={similarity:.4f}
 
+{context_text}
+
 {units_text}
 
 Classify this cluster. Respond ONLY with the JSON object."""
+
+
+_EXAMPLE_MARKERS = {"example", "examples", "demo", "demos", "sample", "samples"}
+_TEST_MARKERS = {"test", "tests", "spec", "specs", "__tests__"}
+_BENCH_MARKERS = {"bench", "benches", "benchmark", "benchmarks"}
+
+
+def _path_markers(path: str) -> set[str]:
+    """Return path-role markers inferred from the file path."""
+    path_obj = Path(path)
+    parts = {part.lower() for part in path_obj.parts}
+    filename = path_obj.name.lower()
+    markers: set[str] = set()
+    if parts & _EXAMPLE_MARKERS:
+        markers.add("example")
+    if parts & _TEST_MARKERS or any(token in filename for token in (".test.", ".spec.", "test_", "_test")):
+        markers.add("test")
+    if parts & _BENCH_MARKERS or any(token in filename for token in (".bench.", ".benchmark.")):
+        markers.add("benchmark")
+    return markers
+
+
+def _format_cluster_context(cluster: Cluster) -> str:
+    """Summarize path-based context that affects refactor value."""
+    unit_markers = [_path_markers(unit.file_path) for unit in cluster.units]
+    notes: list[str] = []
+
+    if unit_markers and all("example" in markers for markers in unit_markers):
+        notes.append(
+            "- Context: all units are in example/demo/sample paths; mirrored example code is often intentional."
+        )
+    if unit_markers and all("test" in markers for markers in unit_markers):
+        notes.append(
+            "- Context: all units are in test/spec paths; shared test scaffolding is lower priority than production logic."
+        )
+    if unit_markers and all("benchmark" in markers for markers in unit_markers):
+        notes.append(
+            "- Context: all units are in benchmark paths; bench helpers are usually low-value refactor targets."
+        )
+
+    return "\n".join(notes) if notes else "No special path context."
 
 
 def _format_cluster_for_llm(cluster: Cluster) -> str:
@@ -145,6 +193,7 @@ def verify_cluster(
         cluster_id=cluster.cluster_id,
         unit_count=len(cluster.units),
         similarity=cluster.max_similarity,
+        context_text=_format_cluster_context(cluster),
         units_text=units_text,
     )
 
