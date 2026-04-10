@@ -177,3 +177,11 @@ def test_verify_cluster_includes_context_in_prompt(monkeypatch):
     assert verdict == "noise"
     assert reason == "example duplication"
     assert "Context: all units are in example/demo/sample paths" in captured["prompt"]
+
+
+def test_system_prompt_includes_general_low_value_duplication_rules():
+    from dryscope.code.verifier import SYSTEM_PROMPT
+
+    assert 'same-file helper pairs' in SYSTEM_PROMPT
+    assert 'compatibility layers, adapter variants' in SYSTEM_PROMPT
+    assert 'different validation rules, escaping rules, or domain semantics' in SYSTEM_PROMPT

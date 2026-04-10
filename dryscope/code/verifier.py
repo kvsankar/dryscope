@@ -74,6 +74,15 @@ This is NOT duplication worth refactoring.
 Be strict. If the similarity is mainly due to framework boilerplate or \
 structural shape rather than shared business logic, classify as "noise".
 
+Bias toward "noise" when the duplicated code is small, low-payoff, or mainly \
+would save a few lines while adding indirection.
+Bias toward "noise" or "review" for same-file helper pairs unless the \
+duplicated logic is substantial and clearly reduces maintenance risk.
+Bias toward "noise" for compatibility layers, adapter variants, or mirrored \
+implementations that are intentionally separate.
+Bias toward "noise" when public API helpers look similar but intentionally \
+encode different validation rules, escaping rules, or domain semantics.
+
 Intentional duplication in examples, demos, benchmarks, mirrored fixtures, or \
 parallel framework/router variants is usually "noise" unless it exposes a \
 substantive shared runtime helper that the project would realistically want to \
