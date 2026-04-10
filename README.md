@@ -133,18 +133,39 @@ path = "~/.cache/dryscope/cache.db"
 
 Configuration layers: defaults → `.dryscope.toml` → CLI flags.
 
-Examples:
+## LLM Backend Configuration
+
+`dryscope` supports four verification backends:
+
+- `cli`
+  - shells out to `claude -p`
+  - good when you use Claude CLI with OAuth/session auth
+- `codex-cli`
+  - shells out to `codex exec`
+  - good when you use Codex CLI directly
+- `litellm`
+  - uses provider APIs through LiteLLM
+  - good for OpenAI, Anthropic, Gemini, Azure OpenAI, Bedrock, OpenRouter, and other LiteLLM-supported providers
+- `ollama`
+  - uses the local Ollama HTTP API
+  - good for local/private verification without a cloud provider
+
+### Claude CLI
 
 ```toml
 [llm]
-backend = "ollama"
-model = "qwen2.5:3b"
-# ollama_host = "http://localhost:11434"
+backend = "cli"
+model = "claude-haiku-4-5-20251001"
+# cli_strip_api_key = true
+# cli_permission_mode = "bypassPermissions"
+# cli_dangerously_skip_permissions = false
 ```
 
 ```bash
-dryscope scan /path/to/project --verify --backend ollama --llm-model qwen2.5:3b
+dryscope scan /path/to/project --verify --backend cli --llm-model claude-haiku-4-5-20251001
 ```
+
+### Codex CLI
 
 ```toml
 [llm]
@@ -161,6 +182,47 @@ dryscope scan /path/to/project --verify --backend codex-cli --llm-model gpt-5.4
 `gpt-4o-mini` were rejected under ChatGPT-account Codex auth, while the default
 Codex model worked. If you want mini models through Codex CLI, use API-key login
 with `codex login --with-api-key` if your account supports them.
+
+### LiteLLM Providers
+
+Use `litellm` when you want hosted provider APIs.
+
+OpenAI example:
+
+```toml
+[llm]
+backend = "litellm"
+model = "gpt-4o"
+```
+
+```bash
+OPENAI_API_KEY=... dryscope scan /path/to/project --verify --backend litellm --llm-model gpt-4o
+```
+
+Anthropic example:
+
+```toml
+[llm]
+backend = "litellm"
+model = "claude-3-5-sonnet-latest"
+```
+
+```bash
+ANTHROPIC_API_KEY=... dryscope scan /path/to/project --verify --backend litellm --llm-model claude-3-5-sonnet-latest
+```
+
+### Ollama
+
+```toml
+[llm]
+backend = "ollama"
+model = "qwen2.5:3b"
+# ollama_host = "http://localhost:11434"
+```
+
+```bash
+dryscope scan /path/to/project --verify --backend ollama --llm-model qwen2.5:3b
+```
 
 ## Agent Skills
 
