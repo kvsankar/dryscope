@@ -164,6 +164,22 @@
         { "path": "src/main/java/org/jsoup/nodes/Element.java", "name": "getElementsMatchingText" },
         { "path": "src/main/java/org/jsoup/nodes/Element.java", "name": "getElementsMatchingOwnText" }
       ]
+    },
+    {
+      "repo": "resty",
+      "label": "real_refactor_candidate",
+      "units": [
+        { "path": "client.go", "name": "tlsConfig" },
+        { "path": "sse.go", "name": "tlsConfig" }
+      ]
+    },
+    {
+      "repo": "gson",
+      "label": "real_refactor_candidate",
+      "units": [
+        { "path": "extras/src/main/java/com/google/gson/typeadapters/UtcDateTypeAdapter.java", "name": "parseInt" },
+        { "path": "gson/src/main/java/com/google/gson/internal/bind/util/ISO8601Utils.java", "name": "parseInt" }
+      ]
     }
   ]
 }

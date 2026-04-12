@@ -61,6 +61,11 @@
       "group": "public-new-languages"
     },
     {
+      "name": "react-modal",
+      "url": "https://github.com/reactjs/react-modal.git",
+      "group": "public-new-languages"
+    },
+    {
       "name": "jsoup",
       "url": "https://github.com/jhy/jsoup.git",
       "group": "public-new-languages"
@@ -74,6 +79,16 @@
       "name": "chi",
       "url": "https://github.com/go-chi/chi.git",
       "group": "public-new-languages"
+    },
+    {
+      "name": "resty",
+      "url": "https://github.com/go-resty/resty.git",
+      "group": "public-new-languages"
+    },
+    {
+      "name": "gson",
+      "url": "https://github.com/google/gson.git",
+      "group": "public-new-languages-stress"
     }
   ]
 }

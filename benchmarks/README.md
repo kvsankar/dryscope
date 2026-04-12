@@ -41,6 +41,7 @@ python benchmarks/run_public_benchmark.py --group public-moderate
 python benchmarks/run_public_benchmark.py --group public-low-star
 python benchmarks/run_public_benchmark.py --group public-claude-signal-2025
 python benchmarks/run_public_benchmark.py --group public-new-languages
+python benchmarks/run_public_benchmark.py --group public-new-languages-stress
 ```
 
 Outputs are written to `/tmp/dryscope-public-benchmark-results` by default.
@@ -63,13 +64,22 @@ added code languages:
 - JavaScript / JSX:
   - `axios`
   - `downshift`
+  - `react-modal`
 - Java:
   - `jsoup`
 - Go:
   - `cobra`
   - `chi`
+  - `resty`
 
 This group is intentionally not the heaviest possible set. During exploratory
 testing, some popular Java libraries behaved more like stress benchmarks than
 routine regression checks. Those are better kept as separate one-off scale
 tests than added to the default public pack.
+
+The `public-new-languages-stress` group currently contains:
+
+- `gson`
+
+Use it when you want a heavier Java-scale check, not for fast routine
+regression runs.
