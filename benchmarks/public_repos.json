@@ -71,6 +71,11 @@
       "group": "public-new-languages"
     },
     {
+      "name": "HikariCP",
+      "url": "https://github.com/brettwooldridge/HikariCP.git",
+      "group": "public-new-languages"
+    },
+    {
       "name": "cobra",
       "url": "https://github.com/spf13/cobra.git",
       "group": "public-new-languages"

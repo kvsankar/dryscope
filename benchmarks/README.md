@@ -67,6 +67,7 @@ added code languages:
   - `react-modal`
 - Java:
   - `jsoup`
+  - `HikariCP`
 - Go:
   - `cobra`
   - `chi`

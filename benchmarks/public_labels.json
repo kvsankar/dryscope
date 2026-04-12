@@ -180,6 +180,14 @@
         { "path": "extras/src/main/java/com/google/gson/typeadapters/UtcDateTypeAdapter.java", "name": "parseInt" },
         { "path": "gson/src/main/java/com/google/gson/internal/bind/util/ISO8601Utils.java", "name": "parseInt" }
       ]
+    },
+    {
+      "repo": "HikariCP",
+      "label": "uncertain",
+      "units": [
+        { "path": "src/main/java/com/zaxxer/hikari/HikariDataSource.java", "name": "setMetricRegistry" },
+        { "path": "src/main/java/com/zaxxer/hikari/HikariDataSource.java", "name": "setMetricsTrackerFactory" }
+      ]
     }
   ]
 }
