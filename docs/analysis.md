@@ -19,6 +19,27 @@ This positioning matters because functional readiness should be judged by
 whether dryscope improves that workflow, not by whether it replaces mature clone
 detectors, linters, IDEs, or human review.
 
+## Current Readiness
+
+As of April 29, 2026, dryscope is functionally ready for a public alpha under
+this positioning.
+
+The strongest evidence is not broad precision/recall. It is that dryscope can
+turn duplicate-rich, agent-created or agent-oriented repositories into a smaller
+review queue:
+
+| Repo | Structural candidates | Verified shortlist from top 15 |
+|------|----------------------:|-------------------------------:|
+| `CLI-Anything-WEB` | 94 | 5 |
+| `nanowave` | 82 | 10 |
+| `ClaudeCode_generated_app` | 51 | 6 |
+| `VibesOS` | 23 | 4 |
+
+The checked-in benchmark labels are deliberately sparse but include real
+refactor candidates and a known false-positive case. That is enough for alpha
+regression coverage of the narrowing workflow, but not enough to claim mature
+precision, recall, or automatic refactor correctness.
+
 ## Established Tools (text/token-based)
 
 | Tool | Approach | Languages | Limitations |
@@ -103,5 +124,8 @@ spent. In recent public validation:
 - `kvsankar/sattosat` produced one clear code refactor candidate and no docs noise
 - `stellar/stellar-docs` produced a compact grouped docs shortlist
 - `gethomepage/homepage` exited early as a large negative docs case
+- agent-created or agent-oriented repos produced large structural candidate sets
+  that bounded verification narrowed to single-digit or low-double-digit review
+  queues
 
 That is the right bar for dryscope: high-signal narrowing before expensive follow-up.

@@ -47,6 +47,12 @@ uv run python benchmarks/run_public_benchmark.py --group public-ai-generated-dup
 
 Outputs are written to `/tmp/dryscope-public-benchmark-results` by default.
 
+For a bounded verified pass over the AI-generated group:
+
+```bash
+uv run python benchmarks/run_public_benchmark.py --group public-ai-generated-duplicates --verify-max-findings 15
+```
+
 By default the public benchmark harness pins structural scans to
 `all-MiniLM-L6-v2` so benchmark results do not depend on API embedding
 credentials. Run it from the development environment, or install

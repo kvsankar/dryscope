@@ -45,6 +45,7 @@ The intended use is narrowing:
 | `-m, --min-lines` | `6` | Minimum lines for a code unit to be considered |
 | `--min-tokens` | `0` | Minimum unique normalized tokens (filters trivial units) |
 | `--max-cluster-size` | `15` | Drop clusters larger than this |
+| `--max-findings` | | Limit output and verification to the top N code findings |
 | `-e, --exclude` | | Glob patterns to exclude (e.g. `*/tests/*`) |
 | `--exclude-type` | | Base class types to exclude (e.g. `TextChoices`) |
 | `-f, --format` | `terminal` | Output format: `terminal`, `json`, `markdown`, or `html` |
@@ -66,6 +67,9 @@ For documentation repos, `--docs --verify` now also:
 ```bash
 # Code duplicates with LLM verification
 {{DRYSCOPE_BIN}} scan /path/to/project --code --verify --min-tokens 15
+
+# Bounded verification for duplicate-rich repos
+{{DRYSCOPE_BIN}} scan /path/to/project --code --verify --max-findings 15
 
 # Documentation overlap detection
 {{DRYSCOPE_BIN}} scan /path/to/project --docs --verify
@@ -131,6 +135,7 @@ Saved report cleanup:
 - Renamed clones (same logic, different variable/function names)
 - Structural clones with shared implementation shape
 - Repeated boilerplate can still appear structurally, but `--verify` is intended to filter much of it back out
+- For large duplicate-rich repos, `--max-findings` keeps verification focused on the highest-ranked candidates
 - Documentation IA overlap across documents that cover the same subjects or reader intents
 - Overlapping documentation sections across markdown/text files
 - Redundant explanations that could be consolidated or cross-referenced

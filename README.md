@@ -92,6 +92,9 @@ dryscope scan /path/to/project --lang python
 # With LLM verification
 dryscope scan /path/to/project --verify
 
+# Bounded verification for large duplicate-rich repos
+dryscope scan /path/to/project --verify --max-findings 15
+
 # Stricter threshold
 dryscope scan /path/to/project -t 0.95 --min-tokens 15
 ```
@@ -319,6 +322,7 @@ dryscope scan <path> [OPTIONS]
 | `-m, --min-lines` | `6` | Minimum lines per code unit |
 | `--min-tokens` | `0` | Minimum unique normalized tokens |
 | `--max-cluster-size` | `15` | Drop clusters larger than this |
+| `--max-findings` | | Limit output and verification to the top N code findings |
 | `-e, --exclude` | | Glob patterns to exclude (code) |
 | `--exclude-type` | | Base class types to exclude (code) |
 | `--embedding-model` | `text-embedding-3-small` | Embedding model; API models use LiteLLM, local sentence-transformers such as `all-MiniLM-L6-v2` require `.[local-embeddings]` |
@@ -432,6 +436,12 @@ For docs:
 `dryscope` includes a checked-in public benchmark pack under [benchmarks/README.md](/home/sankar/sankar/projects/dryscope/benchmarks/README.md).
 
 It only references public repositories and reviewed public labels. Private repo evaluation should remain local and out of the checked-in benchmark files.
+
+The current benchmark evidence supports public alpha positioning: dryscope can
+find and narrow repeated implementation shapes in AI-generated or
+agent-oriented repositories. The labels are still intentionally sparse, so the
+benchmark pack should be read as regression evidence for the narrowing workflow,
+not as a precision/recall claim.
 
 ## License
 
