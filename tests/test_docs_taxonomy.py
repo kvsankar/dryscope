@@ -249,6 +249,33 @@ def test_build_information_architecture_uses_llm(monkeypatch) -> None:
     assert ia["source_summary"]["document_descriptors"] == 1
 
 
+def test_build_information_architecture_warning_includes_exception(monkeypatch, capsys) -> None:
+    from dryscope.docs import coding
+
+    taxonomy = build_canonical_taxonomy(
+        {
+            "/docs/user/getting-started.md": ["install workflow"],
+            "/docs/user/tutorial.md": ["install workflow"],
+        }
+    ).to_dict()
+
+    def fake_call_llm_cached(*args, **kwargs) -> str:
+        raise RuntimeError("bad json from cli")
+
+    monkeypatch.setattr(coding, "call_llm_cached", fake_call_llm_cached)
+
+    ia = build_information_architecture(
+        taxonomy,
+        llm_model="fake-model",
+        backend="cli",
+    )
+
+    captured = capsys.readouterr()
+    assert ia["method"] == "deterministic-fallback"
+    assert "information architecture LLM pass failed" in captured.err
+    assert "RuntimeError: bad json from cli" in captured.err
+
+
 def test_embed_topics_uses_api_embedding_models(monkeypatch) -> None:
     calls: list[dict] = []
 

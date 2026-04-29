@@ -56,6 +56,30 @@ class TestScanCode:
         assert "findings" in data
 
 
+class TestScanDocs:
+    def test_embedding_model_option_applies_to_docs(self, runner, tmp_path, monkeypatch):
+        captured = {}
+
+        def fake_run_docs_scan(**kwargs):
+            captured["embedding_model"] = kwargs["settings"].docs_embedding_model
+
+        monkeypatch.setattr("dryscope.cli._run_docs_scan", fake_run_docs_scan)
+
+        result = runner.invoke(
+            main,
+            [
+                "scan",
+                str(tmp_path),
+                "--docs",
+                "--embedding-model",
+                "all-MiniLM-L6-v2",
+            ],
+        )
+
+        assert result.exit_code == 0
+        assert captured["embedding_model"] == "all-MiniLM-L6-v2"
+
+
 class TestScanErrors:
     def test_format_markdown_errors_for_code(self, runner):
         result = runner.invoke(main, ["scan", FIXTURES, "--code", "-f", "markdown"])

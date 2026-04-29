@@ -353,6 +353,7 @@ def scan(
         code_max_cluster_size=max_cluster_size if _explicit("max_cluster_size") else None,
         code_embedding_model=model if _explicit("model") else None,
         # Docs overrides
+        docs_embedding_model=model if _explicit("model") else None,
         threshold=threshold if _explicit("threshold") else None,
         threshold_intent=threshold_intent,
         backend=backend,

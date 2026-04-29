@@ -920,10 +920,11 @@ Respond with ONLY valid JSON:
             cli_dangerously_skip_permissions=cli_dangerously_skip_permissions,
         )
         ia = _parse_json_object_response(text)
-    except Exception:
+    except Exception as exc:
         print(
             "warning: information architecture LLM pass failed; "
-            "falling back to deterministic IA grouping",
+            f"falling back to deterministic IA grouping "
+            f"({type(exc).__name__}: {exc})",
             file=sys.stderr,
         )
         ia = {}
