@@ -21,14 +21,25 @@ SKILL_DESTS = [
 SHARED_SKILL_VENV = Path(os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local" / "share"))) / "dryscope" / "skill-venv"
 
 
-def _find_project_root() -> Path:
-    """Find the project root containing pyproject.toml."""
-    path = Path(__file__).resolve().parent
+def _find_project_root(start: Path | None = None) -> Path:
+    """Find the nearest project root containing pyproject.toml."""
+    path = (start or Path(__file__).resolve().parent).resolve()
     while path != path.parent:
         if (path / "pyproject.toml").exists():
             return path
         path = path.parent
     raise FileNotFoundError("Could not find pyproject.toml")
+
+
+def _find_install_source() -> str:
+    """Resolve the package source to install into the shared skill venv."""
+    try:
+        return str(_find_project_root(Path.cwd()))
+    except FileNotFoundError:
+        try:
+            return str(_find_project_root())
+        except FileNotFoundError:
+            return f"dryscope=={__version__}"
 
 
 def _find_git_root(scan_path: Path) -> Path:
@@ -398,22 +409,25 @@ def install() -> None:
         click.echo(f"SKILL.md template not found at {SKILL_TEMPLATE}", err=True)
         sys.exit(1)
 
-    project_root = _find_project_root()
+    install_source = _find_install_source()
     venv_dir = SHARED_SKILL_VENV
     dryscope_bin = venv_dir / "bin" / "dryscope"
     for dest in SKILL_DESTS:
         dest.mkdir(parents=True, exist_ok=True)
     venv_dir.parent.mkdir(parents=True, exist_ok=True)
 
-    click.echo(f"Creating venv at {venv_dir}...", err=True)
-    subprocess.run(
-        ["uv", "venv", str(venv_dir), "--python", ">=3.10"],
-        check=True,
-    )
+    if (venv_dir / "bin" / "python").exists():
+        click.echo(f"Using existing venv at {venv_dir}...", err=True)
+    else:
+        click.echo(f"Creating venv at {venv_dir}...", err=True)
+        subprocess.run(
+            ["uv", "venv", str(venv_dir), "--python", ">=3.10"],
+            check=True,
+        )
 
     click.echo("Installing dryscope into skill venv...", err=True)
     subprocess.run(
-        ["uv", "pip", "install", "--python", str(venv_dir / "bin" / "python"), str(project_root)],
+        ["uv", "pip", "install", "--upgrade", "--python", str(venv_dir / "bin" / "python"), install_source],
         check=True,
     )
 
