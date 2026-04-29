@@ -1,6 +1,10 @@
 # dryscope
 
-Find duplicate code and overlapping documentation before handing work to an expensive model.
+Preflight large repositories before AI-assisted refactors and documentation consolidation.
+
+`dryscope` finds duplicate-code candidates and overlapping documentation so an
+agent, stronger model, or human reviewer can start from a smaller, better-ranked
+set of files. It is built for repo narrowing, not for replacing judgment.
 
 `dryscope` is a narrowing tool:
 - for code, it surfaces structural duplicate candidates and filters them down to a shortlist
@@ -8,7 +12,9 @@ Find duplicate code and overlapping documentation before handing work to an expe
   - **Information Architecture**: profiles documents, discovers canonical labels, builds a topic/facet view, and suggests multi-document consolidation clusters
   - **Section Similarity**: compares heading-based sections and ranks concrete section-level consolidation/link recommendations
 
-It is designed to reduce how much of a repository a stronger model needs to read, not to replace the stronger model entirely.
+The core bet is simple: before spending expensive model context on a large repo,
+first identify the repeated implementation shapes, duplicated docs, and scattered
+documentation intents that are most likely to deserve follow-up.
 
 ## Features
 
@@ -27,15 +33,22 @@ It is designed to reduce how much of a repository a stronger model needs to read
 ## Positioning
 
 `dryscope` is best used as:
-- a code duplicate candidate generator
-- a documentation overlap detector
-- a documentation IA review aid for answering "how should these docs be organized?"
-- a prefilter before a stronger model does deeper refactoring or docs consolidation work
+- an AI preflight scanner before repository-wide refactors
+- a repo narrowing tool before handing work to an agent or stronger model
+- a code duplicate candidate generator for structural refactor opportunities
+- a documentation overlap and IA review aid for answering "how should these docs be organized?"
+- a prefilter that helps decide what a deeper reviewer should read first
 
 It is not positioned as:
+- a general-purpose lint replacement
+- a universal duplicate-code product for every developer workflow
 - a perfect semantic clone detector
 - a final refactor oracle
 - a complete replacement for human or stronger-model judgment
+
+The strongest use case is not "find every duplicate." It is "before I ask an
+agent to clean this up, show me the small set of likely duplicate code and docs
+consolidation targets worth spending attention on."
 
 ## Installation
 

@@ -1,18 +1,22 @@
 ---
 name: dryscope
-description: Detect duplicate code and documentation overlap in projects using tree-sitter parsing, normalization, and embedding-based similarity. Use when the user asks to find duplicate code, detect code clones, check for copy-paste code, find repeated patterns, DRY violations, or documentation overlap. Keywords - duplicate, clone, copy-paste, DRY, repetition, similarity, refactor duplicates, documentation overlap, redundant docs, doc overlap.
+description: Preflight repositories before AI-assisted refactors and documentation consolidation by finding duplicate-code candidates, repeated documentation sections, and docs IA overlap. Use when the user asks to narrow a repo for an agent/model, find duplicate code, detect code clones, check for copy-paste code, find repeated patterns, DRY violations, documentation overlap, redundant docs, or doc consolidation targets. Keywords - AI preflight, repo narrowing, duplicate, clone, copy-paste, DRY, repetition, similarity, refactor duplicates, documentation overlap, redundant docs, doc overlap.
 allowed-tools: [Bash, Read, Glob, Grep]
 ---
 
 ## What this skill does
 
-Runs **dryscope** — a unified tool for detecting code duplicates and documentation overlap. It uses tree-sitter to parse code into units (functions, classes, methods), normalizes them, generates embeddings, and clusters similar items together. For docs, it has two tracks:
+Runs **dryscope** — a preflight scanner for narrowing a repository before
+AI-assisted refactors and documentation consolidation. It uses tree-sitter to
+parse code into units (functions, classes, methods), normalizes them, generates
+embeddings, and clusters similar items together. For docs, it has two tracks:
 - **Information Architecture**: document descriptors, canonical labels, IA topic tree, facets, diagnostics, and suggested consolidation clusters
 - **Section Similarity**: heading-based section comparison and concrete section-level recommendations
 
 The intended use is narrowing:
-- use `dryscope` to find candidate duplicates or overlapping docs
-- then let a stronger model or a human decide what to refactor or consolidate
+- use `dryscope` to find candidate duplicate code, repeated docs, and IA overlap
+- hand the shortlist to an agent, stronger model, or human reviewer
+- treat results as triage input, not as an automatic refactor decision
 
 ## How to use
 

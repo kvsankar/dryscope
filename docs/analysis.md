@@ -1,5 +1,24 @@
 # Existing Code Clone Detection Tools — Analysis
 
+## Product Positioning
+
+dryscope is not trying to win the broad "duplicate code detector" category. Its
+practical role is narrower: it is a preflight scanner for AI-assisted repository
+work.
+
+The target workflow is:
+
+1. A user is about to ask an agent, stronger model, or human reviewer to clean up
+   a non-trivial repository.
+2. dryscope narrows the repo to likely duplicate implementation shapes,
+   repeated documentation sections, and scattered documentation intents.
+3. The follow-up reviewer spends context on the shortlist instead of reading the
+   whole repository from scratch.
+
+This positioning matters because functional readiness should be judged by
+whether dryscope improves that workflow, not by whether it replaces mature clone
+detectors, linters, IDEs, or human review.
+
 ## Established Tools (text/token-based)
 
 | Tool | Approach | Languages | Limitations |
@@ -68,17 +87,19 @@ dryscope fills a real gap, but in a narrower and more practical sense than
 "semantic clone detector" might suggest.
 
 What it does well:
-- surfaces structural duplicate candidates across multiple languages
-- filters code findings into a smaller shortlist for stronger follow-up
+- surfaces structural duplicate candidates across multiple languages before a larger refactor pass
+- filters code findings into a smaller shortlist for agent, model, or human follow-up
 - discovers documentation IA signals and consolidation clusters across a docs corpus
 - detects repeated documentation sections and ranks concrete section-level recommendations
 
 What it does not claim to do:
+- replace general linting, IDE inspection, or mature text-clone tooling
 - perfectly detect Type 4 semantic clones
 - decide every refactor automatically
 - replace deeper review by a stronger model or a human
 
-The product value is that it reduces search space. In recent public validation:
+The product value is that it reduces search space before expensive attention is
+spent. In recent public validation:
 - `kvsankar/sattosat` produced one clear code refactor candidate and no docs noise
 - `stellar/stellar-docs` produced a compact grouped docs shortlist
 - `gethomepage/homepage` exited early as a large negative docs case

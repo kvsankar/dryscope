@@ -12,7 +12,7 @@ Source Files (.py, .ts, .tsx)
 [Normalizer] ──> Strips identifiers, literals, comments; retains structure
     |
     v
-[Embedder] ──> Vector embeddings per code unit (sentence-transformers, local)
+[Embedder] ──> Vector embeddings per code unit (API embeddings or local sentence-transformers)
     |
     v
 [Similarity Engine] ──> Hybrid cosine+Jaccard with size-ratio filtering
@@ -39,7 +39,7 @@ Documentation Files (.md, .rst, .txt, .adoc)
 [Chunker] ──> Heading-based sections with line tracking
     |
     v
-[Embedder] ──> Vector embeddings per section (sentence-transformers, local)
+[Embedder] ──> Vector embeddings per section (API embeddings or local sentence-transformers)
     |
     v
 [Similarity] ──> Cross-document section pairs above threshold
@@ -96,7 +96,8 @@ Section Similarity track is section-level and points at concrete repeated text.
 - Makes Type 2 clones detectable as Type 1
 
 **Embedder** (`code/embedder.py`)
-- sentence-transformers (`all-MiniLM-L6-v2`) — local, no API key needed
+- API embedding models through LiteLLM, e.g. `text-embedding-3-small`
+- optional local sentence-transformers models such as `all-MiniLM-L6-v2`
 - Batch embedding with L2 normalization for dot-product cosine similarity
 - Suppresses noisy model loading output via OS-level fd redirection
 
@@ -132,7 +133,7 @@ Section Similarity track is section-level and points at concrete repeated text.
 - Boilerplate heading detection across document corpus
 
 **Embeddings** (`docs/embeddings.py`)
-- sentence-transformers for local embedding, litellm for API models
+- LiteLLM for API embedding models and optional sentence-transformers for local models
 - Hybrid similarity: `(1 - token_weight) * cosine + token_weight * Jaccard`
 - Cross-document and intra-document pair finding
 
@@ -208,7 +209,7 @@ Section Similarity track is section-level and points at concrete repeated text.
 
 - **Python 3.10+**
 - **tree-sitter** + language grammars (Python, TypeScript)
-- **sentence-transformers** (embeddings — local, no API)
+- **LiteLLM embeddings** by default, with optional **sentence-transformers** local embeddings
 - **numpy** (vector math, cosine similarity)
 - **click** (CLI), **rich** (docs terminal output)
 - **litellm** + **tenacity** (LLM verification/analysis)
@@ -231,7 +232,7 @@ Section Similarity track is section-level and points at concrete repeated text.
 ### M6: Docs Pipeline ✓
 - Documentation overlap detection merged from doclens project
 - Unified CLI with `--code`/`--docs` flags
-- Shared embeddings (sentence-transformers for both pipelines)
+- Shared embedding abstraction for API and optional local models
 - Unified JSON `findings[]` schema
 
 ### Future
