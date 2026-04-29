@@ -18,6 +18,7 @@ from dryscope.benchmark import score_labeled_findings
 DRYSCOPE_BIN = REPO_ROOT / ".venv" / "bin" / "dryscope"
 DEFAULT_MANIFEST = Path(__file__).with_name("public_repos.json")
 DEFAULT_LABELS = Path(__file__).with_name("public_labels.json")
+DEFAULT_EMBEDDING_MODEL = "all-MiniLM-L6-v2"
 
 
 def _run_json(args: list[str]) -> dict:
@@ -34,6 +35,18 @@ def main() -> None:
     parser.add_argument("--repos-dir", default="/tmp/dryscope-public-benchmark-repos")
     parser.add_argument("--out-dir", default="/tmp/dryscope-public-benchmark-results")
     parser.add_argument("--group", action="append", default=[], help="Only run selected benchmark groups")
+    parser.add_argument(
+        "--embedding-model",
+        default=DEFAULT_EMBEDDING_MODEL,
+        help="Embedding model used for benchmark scans",
+    )
+    parser.add_argument("--structural-only", action="store_true", help="Skip LLM verification")
+    parser.add_argument(
+        "--verify-max-findings",
+        type=int,
+        default=None,
+        help="Only verify the top N structural findings per repo",
+    )
     parser.add_argument("--llm-model", default="claude-haiku-4-5-20251001")
     parser.add_argument("--backend", default="cli", choices=["cli", "litellm"])
     parser.add_argument("--concurrency", type=int, default=8)
@@ -71,38 +84,52 @@ def main() -> None:
 
         row = {"repo": repo["name"], "group": repo["group"]}
         try:
-            structural = _run_json([str(DRYSCOPE_BIN), "scan", str(dest), "-f", "json"])
-            verified = _run_json([
+            structural = _run_json([
                 str(DRYSCOPE_BIN), "scan", str(dest),
-                "--verify",
-                "--backend", args.backend,
-                "--llm-model", args.llm_model,
-                "--concurrency", str(args.concurrency),
+                "--embedding-model", args.embedding_model,
                 "-f", "json",
             ])
+            verified = None
+            if not args.structural_only:
+                verified_cmd = [
+                    str(DRYSCOPE_BIN), "scan", str(dest),
+                    "--embedding-model", args.embedding_model,
+                    "--verify",
+                    "--backend", args.backend,
+                    "--llm-model", args.llm_model,
+                    "--concurrency", str(args.concurrency),
+                    "-f", "json",
+                ]
+                if args.verify_max_findings is not None:
+                    verified_cmd.extend(["--max-findings", str(args.verify_max_findings)])
+                verified = _run_json(verified_cmd)
         except RuntimeError as exc:
             row["run_error"] = str(exc)
             rows.append(row)
             continue
 
         structural_findings = structural.get("findings", [])
-        verified_findings = verified.get("findings", [])
-        score = score_labeled_findings(repo["name"], verified_findings, dest, labels)
-
         (out_dir / f"{repo['name']}_structural.json").write_text(json.dumps(structural, indent=2))
-        (out_dir / f"{repo['name']}_verify.json").write_text(json.dumps(verified, indent=2))
 
         verdicts: dict[str, int] = {}
-        for finding in verified_findings:
-            verdict = finding.get("verdict", "")
-            verdicts[verdict] = verdicts.get(verdict, 0) + 1
-
         row.update({
             "structural_findings": len(structural_findings),
-            "verified_findings": len(verified_findings),
-            "verdicts": verdicts,
-            "label_score": score,
+            "embedding_model": args.embedding_model,
         })
+        if verified is not None:
+            verified_findings = verified.get("findings", [])
+            score = score_labeled_findings(repo["name"], verified_findings, dest, labels)
+            (out_dir / f"{repo['name']}_verify.json").write_text(json.dumps(verified, indent=2))
+
+            for finding in verified_findings:
+                verdict = finding.get("verdict", "")
+                verdicts[verdict] = verdicts.get(verdict, 0) + 1
+
+            row.update({
+                "verified_findings": len(verified_findings),
+                "verdicts": verdicts,
+                "label_score": score,
+            })
         rows.append(row)
 
     summary = {"repos": rows}

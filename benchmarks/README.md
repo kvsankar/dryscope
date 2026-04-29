@@ -31,20 +31,33 @@ Private-repo evaluation can still be done locally, but it should stay out of the
 Use the local virtualenv binary:
 
 ```bash
-python benchmarks/run_public_benchmark.py
+uv run python benchmarks/run_public_benchmark.py
 ```
 
 Optional filters:
 
 ```bash
-python benchmarks/run_public_benchmark.py --group public-moderate
-python benchmarks/run_public_benchmark.py --group public-low-star
-python benchmarks/run_public_benchmark.py --group public-claude-signal-2025
-python benchmarks/run_public_benchmark.py --group public-new-languages
-python benchmarks/run_public_benchmark.py --group public-new-languages-stress
+uv run python benchmarks/run_public_benchmark.py --group public-moderate
+uv run python benchmarks/run_public_benchmark.py --group public-low-star
+uv run python benchmarks/run_public_benchmark.py --group public-claude-signal-2025
+uv run python benchmarks/run_public_benchmark.py --group public-new-languages
+uv run python benchmarks/run_public_benchmark.py --group public-new-languages-stress
+uv run python benchmarks/run_public_benchmark.py --group public-ai-generated-duplicates
 ```
 
 Outputs are written to `/tmp/dryscope-public-benchmark-results` by default.
+
+By default the public benchmark harness pins structural scans to
+`all-MiniLM-L6-v2` so benchmark results do not depend on API embedding
+credentials. Run it from the development environment, or install
+`dryscope[local-embeddings]`, because the lightweight default install does not
+include local sentence-transformers. Use `--embedding-model` to test another
+embedding backend.
+
+Use `--structural-only` when you only need candidate counts and saved structural
+JSON outputs. Omit it when you want the full LLM verification and label scoring
+pass. Use `--verify-max-findings 15` for a bounded verification pass over the
+highest-ranked candidates in each repo.
 
 ## Label Semantics
 
@@ -84,3 +97,39 @@ The `public-new-languages-stress` group currently contains:
 
 Use it when you want a heavier Java-scale check, not for fast routine
 regression runs.
+
+## AI-Generated Duplicate Group
+
+The `public-ai-generated-duplicates` group is for the product positioning around
+AI preflight and repo narrowing. These repos were selected because exploratory
+scans produced more than a token number of duplicate-code candidates:
+
+- `CLI-Anything-WEB`
+- `nanowave`
+- `ClaudeCode_generated_app`
+- `VibesOS`
+
+Use this group when checking whether dryscope finds useful repeated code shapes
+in agent-created, agent-oriented, or vibe-coded repositories.
+
+A structural-only run on April 29, 2026 with `all-MiniLM-L6-v2` produced:
+
+| Repo | Structural findings | Verified findings from top 15 |
+| --- | ---: | ---: |
+| `CLI-Anything-WEB` | 94 | 5 |
+| `nanowave` | 82 | 10 |
+| `ClaudeCode_generated_app` | 51 | 6 |
+| `VibesOS` | 23 | 4 |
+
+This group is intentionally not part of a "find every duplicate" claim. It
+checks the product story that dryscope can narrow agent-created or
+agent-oriented repositories to concrete repeated implementation shapes worth
+reviewing.
+
+The same April 29, 2026 run matched reviewed labels for:
+
+- `CLI-Anything-WEB`: 1 `real_refactor_candidate`
+- `nanowave`: 2 `real_refactor_candidate`
+- `ClaudeCode_generated_app`: 2 `real_refactor_candidate`
+- `VibesOS`: 1 `not_worth_refactoring` example that the verifier still kept as
+  `refactor`, making it a useful false-positive regression case

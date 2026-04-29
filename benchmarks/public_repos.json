@@ -94,6 +94,26 @@
       "name": "gson",
       "url": "https://github.com/google/gson.git",
       "group": "public-new-languages-stress"
+    },
+    {
+      "name": "CLI-Anything-WEB",
+      "url": "https://github.com/ItamarZand88/CLI-Anything-WEB.git",
+      "group": "public-ai-generated-duplicates"
+    },
+    {
+      "name": "nanowave",
+      "url": "https://github.com/moasq/nanowave.git",
+      "group": "public-ai-generated-duplicates"
+    },
+    {
+      "name": "ClaudeCode_generated_app",
+      "url": "https://github.com/mahankals/ClaudeCode_generated_app.git",
+      "group": "public-ai-generated-duplicates"
+    },
+    {
+      "name": "VibesOS",
+      "url": "https://github.com/popmechanic/VibesOS.git",
+      "group": "public-ai-generated-duplicates"
     }
   ]
 }

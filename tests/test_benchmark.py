@@ -1,8 +1,13 @@
 """Tests for public benchmark helpers."""
 
+import importlib.util
+import json
 from pathlib import Path
 
 from dryscope.benchmark import build_label_index, finding_signature, score_labeled_findings
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_finding_signature_uses_repo_relative_paths(tmp_path):
@@ -74,3 +79,29 @@ def test_build_label_index_normalizes_signature_order():
     ]
     index = build_label_index(labels)
     assert ("demo", (("a.py", "a"), ("b.py", "b"))) in index
+
+
+def test_public_benchmark_has_ai_generated_duplicate_group():
+    manifest = json.loads((REPO_ROOT / "benchmarks" / "public_repos.json").read_text())
+    repos = manifest["repos"]
+    names = [repo["name"] for repo in repos]
+
+    assert len(names) == len(set(names))
+    ai_generated = {repo["name"] for repo in repos if repo["group"] == "public-ai-generated-duplicates"}
+    assert ai_generated == {
+        "CLI-Anything-WEB",
+        "nanowave",
+        "ClaudeCode_generated_app",
+        "VibesOS",
+    }
+
+
+def test_public_benchmark_pins_local_embedding_model():
+    path = REPO_ROOT / "benchmarks" / "run_public_benchmark.py"
+    spec = importlib.util.spec_from_file_location("run_public_benchmark", path)
+    assert spec is not None
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+
+    assert module.DEFAULT_EMBEDDING_MODEL == "all-MiniLM-L6-v2"

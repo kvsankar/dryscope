@@ -76,6 +76,7 @@ def _run_code_scan(
     verify: bool,
     llm_api_key: str | None,
     lang: str | None,
+    max_findings: int | None = None,
 ) -> list | None:
     """Run the code duplicate detection pipeline and return clusters.
 
@@ -161,6 +162,9 @@ def _run_code_scan(
     clusters_idx = cluster_duplicates(len(units), pairs, max_cluster_size=max_cluster_size)
 
     clusters = build_clusters(units, clusters_idx, pairs, normalized_texts=normalized)
+    if max_findings is not None and len(clusters) > max_findings:
+        click.echo(f"Limiting to top {max_findings} clusters.", err=True)
+        clusters = clusters[:max_findings]
 
     # LLM verification pass
     if verify:
@@ -274,6 +278,7 @@ def _run_docs_scan(
 @click.option("--min-lines", "-m", default=6, type=int, help="Minimum lines for a code unit")
 @click.option("--min-tokens", default=0, type=int, help="Minimum unique normalized tokens")
 @click.option("--max-cluster-size", default=15, type=int, help="Drop clusters larger than this")
+@click.option("--max-findings", default=None, type=int, help="Limit output/verification to the top N code findings")
 @click.option("--exclude", "-e", multiple=True, help="Glob patterns to exclude")
 @click.option("--exclude-type", multiple=True, help="Base class types to exclude")
 @click.option("--embedding-model", "model", default="text-embedding-3-small", help="Embedding model name")
@@ -301,6 +306,7 @@ def scan(
     min_lines: int,
     min_tokens: int,
     max_cluster_size: int,
+    max_findings: int | None,
     exclude: tuple[str, ...],
     exclude_type: tuple[str, ...],
     model: str,
@@ -372,6 +378,7 @@ def scan(
             verify=verify,
             llm_api_key=llm_api_key,
             lang=lang,
+            max_findings=max_findings,
         )
 
     if docs:

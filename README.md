@@ -113,6 +113,20 @@ Public examples from recent validation passes:
   - docs scan found 0 overlap pairs
   - with the old large-repo guard enabled, the pipeline exited early instead of spending LLM work on a large negative repo
 
+Recent AI-generated / agent-oriented public repo checks show the code path doing
+the intended narrowing job:
+
+| Repo | Structural candidates | Verified shortlist from top 15 |
+| --- | ---: | ---: |
+| `CLI-Anything-WEB` | 94 | 5 |
+| `nanowave` | 82 | 10 |
+| `ClaudeCode_generated_app` | 51 | 6 |
+| `VibesOS` | 23 | 4 |
+
+These are candidate shortlists, not precision/recall claims. The benchmark pack
+keeps reviewed labels for selected findings, including real refactor candidates
+and at least one false-positive regression case.
+
 For docs-heavy repositories, the current docs report is organized around the two Doc DRY tracks:
 
 1. **Information Architecture**: document descriptors -> canonical label normalization -> IA topic tree/facets -> suggested consolidation clusters.

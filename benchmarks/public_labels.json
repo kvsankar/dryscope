@@ -188,6 +188,64 @@
         { "path": "src/main/java/com/zaxxer/hikari/HikariDataSource.java", "name": "setMetricRegistry" },
         { "path": "src/main/java/com/zaxxer/hikari/HikariDataSource.java", "name": "setMetricsTrackerFactory" }
       ]
+    },
+    {
+      "repo": "CLI-Anything-WEB",
+      "label": "real_refactor_candidate",
+      "units": [
+        { "path": "notebooklm/agent-harness/cli_web/notebooklm/core/auth.py", "name": "login_browser" },
+        { "path": "stitch/agent-harness/cli_web/stitch/core/auth.py", "name": "login_browser" }
+      ]
+    },
+    {
+      "repo": "CLI-Anything-WEB",
+      "label": "real_refactor_candidate",
+      "units": [
+        { "path": "notebooklm/agent-harness/cli_web/notebooklm/core/auth.py", "name": "fetch_tokens" },
+        { "path": "stitch/agent-harness/cli_web/stitch/core/auth.py", "name": "fetch_tokens" }
+      ]
+    },
+    {
+      "repo": "nanowave",
+      "label": "real_refactor_candidate",
+      "units": [
+        { "path": "internal/orchestration/xcodegen.go", "name": "mergeInfoPlistDefaults" },
+        { "path": "internal/xcodegenserver/config.go", "name": "mergeInfoPlistDefaults" }
+      ]
+    },
+    {
+      "repo": "nanowave",
+      "label": "real_refactor_candidate",
+      "units": [
+        { "path": "internal/orchestration/xcodegen.go", "name": "writeXcodeYAMLMap" },
+        { "path": "internal/xcodegenserver/config.go", "name": "writeYAMLMap" }
+      ]
+    },
+    {
+      "repo": "ClaudeCode_generated_app",
+      "label": "real_refactor_candidate",
+      "units": [
+        { "path": "services/auth-service/backend/src/utils/email_util.py", "name": "EmailUtil" },
+        { "path": "services/fundflow-service/backend/src/utils/email_util.py", "name": "EmailUtil" },
+        { "path": "services/todos-service/backend/src/utils/email_util.py", "name": "EmailUtil" }
+      ]
+    },
+    {
+      "repo": "ClaudeCode_generated_app",
+      "label": "real_refactor_candidate",
+      "units": [
+        { "path": "services/auth-service/backend/src/utils/jwt_util.py", "name": "JWTUtil" },
+        { "path": "services/fundflow-service/backend/src/utils/jwt_util.py", "name": "JWTUtil" },
+        { "path": "services/todos-service/backend/src/utils/jwt_util.py", "name": "JWTUtil" }
+      ]
+    },
+    {
+      "repo": "VibesOS",
+      "label": "not_worth_refactoring",
+      "units": [
+        { "path": "bundles/sse-parser.js", "name": "parseSSEStream" },
+        { "path": "bundles/vibes-ai.js", "name": "parseSSEStream" }
+      ]
     }
   ]
 }
