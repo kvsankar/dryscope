@@ -45,21 +45,39 @@ Documentation Files (.md, .rst, .txt, .adoc)
 [Similarity] ──> Cross-document section pairs above threshold
     |                              (similarity stage)
     v
-[Scaling Gates] ──> Limit later stages to strongest docs / doc pairs
-    |              or skip intent entirely on large negative repos
+[Section Recommendations] ──> Ranked section-level consolidation/link suggestions
+    |
+    +──────────────────────────────────────────────────────────────┐
+                                                                   |
+                                                                   v
+[Document Descriptors] ──> LLM profiles title, summary, aboutness, reader intent,
+    |                       role, audience, lifecycle, content type, surface
     |
     v
-[Topic Extraction] ──> LLM extracts topics per document
+[Canonical Label Taxonomy] ──> Deterministic + LLM canonicalization of
+    |                            aboutness and reader-intent labels
     |
     v
-[Topic Embedding] ──> Cosine matching finds intent overlap
-    |                              (intent stage)
+[Information Architecture] ──> Topic tree, facets, diagnostics,
+    |                           suggested consolidation clusters
+    |                              (intent/full stage)
     v
-[Doc-Pair Analysis] ──> LLM classifies overlap with recommendations
-    |                              (full stage)
+[Intent Pair Evidence] ──> Canonical labels are embedded to find related doc pairs
+    |
     v
-[Reporter] ──> grouped recommendations + terminal / markdown / html / json output
+[Doc-Pair Analysis] ──> Optional LLM classification with recommendations
+    |                              (full stage, cost-capped)
+    v
+[Reporter] ──> numbered collapsible markdown/html + structured json
 ```
+
+The docs report has two top-level Doc DRY tracks:
+
+1. **Information Architecture** — document descriptors, canonical labels, IA topic tree, facets, diagnostics, and suggested consolidation clusters.
+2. **Section Similarity** — heading chunks, embedding comparison, similar section pairs, and section similarity recommendations.
+
+The IA track is corpus-level and helps decide how to organize documentation. The
+Section Similarity track is section-level and points at concrete repeated text.
 
 ## Core Components
 
@@ -119,9 +137,17 @@ Documentation Files (.md, .rst, .txt, .adoc)
 - Cross-document and intra-document pair finding
 
 **Topics** (`docs/topics.py`)
-- LLM topic extraction per document (max 15 granular phrases)
-- Topic embedding and cosine matching for intent overlap
-- Document clustering by shared topics via Union-Find
+- Rich LLM document descriptor extraction
+- Descriptor fields include title, summary, aboutness labels, reader intents, doc role, audience, lifecycle, content type, surface, canonicality, and evidence
+- Descriptor labels are the input to canonical label normalization
+- Canonical labels can still be embedded to find related doc pairs for optional deeper analysis
+
+**Taxonomy** (`docs/taxonomy.py`)
+- Deterministic exact/fuzzy label normalization
+- Optional LLM canonicalization of descriptor labels into a durable corpus vocabulary
+- Canonical label taxonomy with document coverage, aliases, and co-occurrence
+- Information Architecture discovery: topic tree, facets, diagnostics, and suggested consolidation clusters
+- Facet seeds are configurable under `[docs.ia]`; they guide generic dimensions but do not impose a product-specific taxonomy
 
 **Coding** (`docs/coding.py`)
 - LLM doc-pair analysis with relationship classification
@@ -129,16 +155,20 @@ Documentation Files (.md, .rst, .txt, .adoc)
 - Content-aware chunk-to-topic attribution
 
 **Pipeline** (`docs/pipeline.py`)
-- Multi-stage orchestrator: similarity → intent → LLM analysis
-- Large-repo guards: caps intent extraction to docs with strongest similarity evidence, caps LLM doc-pair analysis to strongest pairs, and skips intent extraction on large negative repos with no stage-1 overlap
+- Multi-stage orchestrator: section similarity → descriptors/canonical taxonomy/IA → optional intent pair evidence → optional LLM doc-pair analysis
+- Descriptor extraction and canonicalization run across the selected docs corpus; `intent_max_docs = 0` means no doc cap
+- Caps LLM doc-pair analysis to strongest pairs when many related pairs are found
 - Cost estimation with model-specific pricing
-- Run persistence via RunStore
+- Run persistence via RunStore, with cleanup support for keeping the newest N runs or runs newer than a date cutoff
 - Progress tracking with rich console
 
 **Report Generation** (`docs/report.py`)
-- Builds prioritized recommendations from overlap pairs
-- Merges dense pairwise overlap families into grouped recommendations so docs with many near-identical siblings do not spam the output
-- Produces compact recommendation sets on repos like `stellar-docs`, where raw pairwise overlap would otherwise be noisy
+- Produces matching markdown, HTML, and JSON report structures
+- Numbered sections: Run Overview, Information Architecture, Suggested Consolidation Clusters, Section Similarity, optional Document Pair Analysis, Canonical Label Taxonomy, Methodology
+- HTML sections and subsections are collapsible
+- JSON uses the same ordered `report_structure` section list and avoids duplicate top-level IA/taxonomy payloads
+- Builds prioritized section similarity recommendations from overlap pairs
+- Separates IA consolidation clusters from section similarity recommendations so the report does not mix corpus organization signals with repeated-section findings
 
 ### Shared (`dryscope/`)
 
@@ -150,6 +180,7 @@ Documentation Files (.md, .rst, .txt, .adoc)
 
 **Config** (`config.py`)
 - Settings dataclass with `[code]`, `[docs]`, `[llm]`, `[cache]` sections
+- `[docs.ia]` facet seed settings for generic IA dimensions and suggested values
 - 3-layer merge: defaults → `.dryscope.toml` → CLI flags
 - TOML loading with backward compatibility
 - Includes code escalation policy knobs for post-verify filtering
@@ -158,6 +189,12 @@ Documentation Files (.md, .rst, .txt, .adoc)
 - Thread-safe SQLite cache for embeddings and LLM coding results
 - WAL + busy-timeout tuning for concurrent docs/code runs
 - Context manager support with batch commit on exit
+
+**Run Store** (`run_store.py`)
+- Persists docs pipeline runs under `.dryscope/runs/<run-id>/`
+- Tracks resumable stage artifacts plus generated `report.md`, `report.html`, and `report.json`
+- Maintains `.dryscope/latest` as a relative symlink to the newest or selected run
+- Provides cleanup primitives for `dryscope reports clean`, including keep-newest, keep-since, keep-days, dry-run, and latest-symlink repair after deletion
 
 **LLM Backend** (`llm_backend.py`)
 - Abstraction over litellm API and `claude -p` CLI backend

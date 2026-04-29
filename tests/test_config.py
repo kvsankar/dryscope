@@ -72,9 +72,15 @@ class TestSettingsDefaults:
 
     def test_default_docs_scale_limits(self):
         s = Settings()
-        assert s.docs_intent_max_docs == 250
+        assert s.docs_intent_max_docs == 0
         assert s.docs_llm_max_doc_pairs == 250
-        assert s.docs_intent_skip_without_similarity_min_docs == 100
+        assert s.docs_intent_skip_without_similarity_min_docs == 0
+
+    def test_default_docs_ia_facet_seeds(self):
+        s = Settings()
+        assert "doc_role" in s.docs_ia_facet_dimensions
+        assert "audience" in s.docs_ia_facet_dimensions
+        assert "guide" in s.docs_ia_facet_values["doc_role"]
 
 
 # ── load_settings ───────────────────────────────────────────────────────
@@ -186,6 +192,17 @@ class TestSections:
         assert s.docs_intent_max_docs == 42
         assert s.docs_llm_max_doc_pairs == 99
         assert s.docs_intent_skip_without_similarity_min_docs == 12
+
+    def test_docs_ia_section_from_toml(self, tmp_path):
+        toml_file = tmp_path / ".dryscope.toml"
+        toml_file.write_text(
+            '[docs.ia]\nfacet_dimensions = ["doc_role", "audience", "governance"]\n'
+            '[docs.ia.facet_values]\ngovernance = ["draft-only", "approved"]\n'
+        )
+        s = load_settings(tmp_path)
+        assert s.docs_ia_facet_dimensions == ["doc_role", "audience", "governance"]
+        assert s.docs_ia_facet_values["governance"] == ["draft-only", "approved"]
+        assert "guide" in s.docs_ia_facet_values["doc_role"]
 
     def test_llm_section_from_toml(self, tmp_path):
         toml_file = tmp_path / ".dryscope.toml"

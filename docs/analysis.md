@@ -45,10 +45,22 @@ The landscape for documentation overlap detection is even sparser:
 - **Manual review** — most teams rely on manual auditing of docs for redundancy
 - **Diff-based tools** — git diff and similar tools only catch textual duplication, not semantic overlap
 - **Search-based approaches** — full-text search can find exact phrases but misses paraphrased content
+- **Static site inventories** — navigation maps and generated link reports describe structure, but rarely infer whether documents cover the same reader intent or belong under the same IA branch
 
-dryscope's docs pipeline addresses this gap with embedding-based section similarity,
-LLM topic extraction for intent-level overlap detection, and grouped recommendations
-for repeated document families.
+dryscope's docs pipeline addresses this gap with two Doc DRY tracks:
+
+1. **Information Architecture** — LLM document descriptors capture aboutness,
+   reader intent, document role, audience, lifecycle, content type, surface, and
+   canonicality. These descriptors are canonicalized into a corpus-level label
+   taxonomy, then used to infer a topic tree, facets, diagnostics, and suggested
+   consolidation clusters.
+2. **Section Similarity** — heading-based sections are embedded and compared to
+   find concrete repeated or near-repeated text. Section-level findings become
+   section similarity recommendations.
+
+The IA track is meant to answer "how should these docs be organized?" The section
+similarity track is meant to answer "where is repeated content?" They are related
+but intentionally reported separately.
 
 ## Conclusion
 
@@ -58,7 +70,8 @@ dryscope fills a real gap, but in a narrower and more practical sense than
 What it does well:
 - surfaces structural duplicate candidates across multiple languages
 - filters code findings into a smaller shortlist for stronger follow-up
-- detects documentation overlap and collapses noisy pairwise overlaps into grouped recommendations
+- discovers documentation IA signals and consolidation clusters across a docs corpus
+- detects repeated documentation sections and ranks concrete section-level recommendations
 
 What it does not claim to do:
 - perfectly detect Type 4 semantic clones

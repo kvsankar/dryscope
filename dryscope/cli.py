@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 import sys
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import click
@@ -264,7 +265,7 @@ def _run_docs_scan(
 @click.option("--max-cluster-size", default=15, type=int, help="Drop clusters larger than this")
 @click.option("--exclude", "-e", multiple=True, help="Glob patterns to exclude")
 @click.option("--exclude-type", multiple=True, help="Base class types to exclude")
-@click.option("--embedding-model", "model", default="all-MiniLM-L6-v2", help="Sentence-transformer model name")
+@click.option("--embedding-model", "model", default="text-embedding-3-small", help="Embedding model name")
 # Docs-specific options
 @click.option("--stage", type=click.Choice(["similarity", "full"]), default="similarity", help="Docs pipeline stage")
 @click.option("--resume", is_flag=True, default=False, help="Resume from latest docs run")
@@ -458,6 +459,81 @@ def init_config() -> None:
 
     target.write_text(DEFAULT_CONFIG_TOML)
     click.echo(f"Created {target}")
+
+
+# ─── Report run cleanup ──────────────────────────────────────────────────
+
+
+def _parse_keep_since(value: str) -> datetime:
+    """Parse a date cutoff for report cleanup."""
+    for fmt in ("%Y-%m-%d", "%Y-%m"):
+        try:
+            return datetime.strptime(value, fmt)
+        except ValueError:
+            pass
+    raise click.BadParameter("expected YYYY-MM-DD or YYYY-MM")
+
+
+@main.group()
+def reports() -> None:
+    """Manage saved dryscope report runs."""
+    pass
+
+
+@reports.command("clean")
+@click.argument("path", type=click.Path(exists=True), default=".", required=False)
+@click.option("--keep-last", type=click.IntRange(min=0), default=None, help="Keep the newest N report runs.")
+@click.option("--keep-since", default=None, help="Keep report runs on or after YYYY-MM-DD or YYYY-MM.")
+@click.option("--keep-days", type=click.IntRange(min=0), default=None, help="Keep report runs from the last N days.")
+@click.option("--force", is_flag=True, default=False, help="Actually delete old report runs. Without this, dry-run only.")
+def reports_clean(
+    path: str,
+    keep_last: int | None,
+    keep_since: str | None,
+    keep_days: int | None,
+    force: bool,
+) -> None:
+    """Clean old .dryscope/runs report directories.
+
+    If multiple keep rules are supplied, a run is kept when it matches any rule.
+    """
+    from dryscope.run_store import RunStore
+
+    if keep_last is None and keep_since is None and keep_days is None:
+        raise click.UsageError("provide --keep-last, --keep-since, or --keep-days")
+    if keep_since is not None and keep_days is not None:
+        raise click.UsageError("use either --keep-since or --keep-days, not both")
+
+    scan_path = Path(path).resolve()
+    project_root = _find_git_root(scan_path)
+    cutoff = _parse_keep_since(keep_since) if keep_since else None
+    if keep_days is not None:
+        cutoff = datetime.now() - timedelta(days=keep_days)
+
+    runs = RunStore.list_runs(project_root)
+    result = RunStore.cleanup_runs(
+        project_root,
+        keep_last=keep_last,
+        keep_since=cutoff,
+        dry_run=not force,
+    )
+
+    action = "Deleted" if force else "Would delete"
+    removed = result.deleted if force else result.would_delete
+    click.echo(f"Project: {project_root}")
+    click.echo(f"Runs found: {len(runs)}")
+    click.echo(f"Keeping: {len(result.kept)}")
+    click.echo(f"{action}: {len(removed)}")
+    for run_dir in removed:
+        click.echo(f"  {run_dir.name}")
+    if not force and removed:
+        click.echo("Dry run only. Re-run with --force to delete.")
+    if force:
+        latest = RunStore.find_latest(project_root)
+        if latest is not None:
+            click.echo(f"Latest: {latest.run_id}")
+        else:
+            click.echo("Latest: none")
 
 
 # ─── Cache management ─────────────────────────────────────────────────────

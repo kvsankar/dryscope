@@ -9,6 +9,45 @@ from pathlib import Path
 
 DEFAULT_INCLUDE = ["*.md", "*.rst", "*.txt", "*.adoc"]
 DEFAULT_EXCLUDE = ["node_modules", "venv", ".git", ".dryscope", "*.lock"]
+DEFAULT_DOCS_IA_FACET_DIMENSIONS = [
+    "doc_role",
+    "audience",
+    "lifecycle",
+    "content_type",
+    "surface",
+    "canonicality",
+]
+DEFAULT_DOCS_IA_FACET_VALUES = {
+    "doc_role": [
+        "guide",
+        "reference",
+        "tutorial",
+        "spec",
+        "plan",
+        "status",
+        "research",
+        "changelog",
+        "architecture",
+        "decision",
+        "overview",
+        "troubleshooting",
+    ],
+    "audience": ["user", "contributor", "maintainer", "operator", "internal", "agent"],
+    "lifecycle": ["current", "proposed", "historical", "deprecated", "draft", "unknown"],
+    "content_type": [
+        "concept",
+        "workflow",
+        "api",
+        "troubleshooting",
+        "decision",
+        "benchmark",
+        "example",
+        "architecture",
+        "requirements",
+    ],
+    "surface": ["public", "internal", "generated", "extension", "package", "integration"],
+    "canonicality": ["primary", "supporting", "archive", "duplicate", "index", "unknown"],
+}
 
 DEFAULT_CONFIG_TOML = """\
 [code]
@@ -16,7 +55,7 @@ min_lines = 6
 min_tokens = 0
 max_cluster_size = 15
 threshold = 0.90
-embedding_model = "all-MiniLM-L6-v2"
+embedding_model = "text-embedding-3-small"
 escalate_refactor_min_lines = 40
 escalate_refactor_min_actionability = 2.0
 escalate_refactor_min_units = 3
@@ -32,10 +71,24 @@ threshold_intent = 0.8
 min_content_words = 15
 include_intra = false
 token_weight = 0.3
-embedding_model = "all-MiniLM-L6-v2"
-intent_max_docs = 250
+# Same embedding backend choices as [code].
+embedding_model = "text-embedding-3-small"
+intent_max_docs = 0
 llm_max_doc_pairs = 250
-intent_skip_without_similarity_min_docs = 100
+intent_skip_without_similarity_min_docs = 0
+
+[docs.ia]
+# Generic seed dimensions shown to the LLM. These are suggestions, not a
+# product-specific taxonomy; dryscope still infers the corpus topic tree.
+facet_dimensions = ["doc_role", "audience", "lifecycle", "content_type", "surface", "canonicality"]
+
+[docs.ia.facet_values]
+doc_role = ["guide", "reference", "tutorial", "spec", "plan", "status", "research", "changelog", "architecture", "decision", "overview", "troubleshooting"]
+audience = ["user", "contributor", "maintainer", "operator", "internal", "agent"]
+lifecycle = ["current", "proposed", "historical", "deprecated", "draft", "unknown"]
+content_type = ["concept", "workflow", "api", "troubleshooting", "decision", "benchmark", "example", "architecture", "requirements"]
+surface = ["public", "internal", "generated", "extension", "package", "integration"]
+canonicality = ["primary", "supporting", "archive", "duplicate", "index", "unknown"]
 
 [llm]
 model = "claude-haiku-4-5-20251001"
@@ -67,7 +120,7 @@ class Settings:
     code_min_tokens: int = 0
     code_max_cluster_size: int = 15
     code_threshold: float = 0.90
-    code_embedding_model: str = "all-MiniLM-L6-v2"
+    code_embedding_model: str = "text-embedding-3-small"
     code_escalate_refactor_min_lines: int = 40
     code_escalate_refactor_min_actionability: float = 2.0
     code_escalate_refactor_min_units: int = 3
@@ -81,10 +134,19 @@ class Settings:
     min_content_words: int = 15
     include_intra: bool = False
     token_weight: float = 0.3
-    docs_embedding_model: str = "all-MiniLM-L6-v2"
-    docs_intent_max_docs: int = 250
+    docs_embedding_model: str = "text-embedding-3-small"
+    docs_intent_max_docs: int = 0
     docs_llm_max_doc_pairs: int = 250
-    docs_intent_skip_without_similarity_min_docs: int = 100
+    docs_intent_skip_without_similarity_min_docs: int = 0
+    docs_ia_facet_dimensions: list[str] = field(
+        default_factory=lambda: list(DEFAULT_DOCS_IA_FACET_DIMENSIONS)
+    )
+    docs_ia_facet_values: dict[str, list[str]] = field(
+        default_factory=lambda: {
+            key: list(values)
+            for key, values in DEFAULT_DOCS_IA_FACET_VALUES.items()
+        }
+    )
 
     # LLM settings
     model: str = "claude-haiku-4-5-20251001"
@@ -160,6 +222,7 @@ def load_settings(
         code_cfg = data.get("code", {})
         # Backward compat: read [scan] if [docs] is absent
         docs_cfg = data.get("docs", {}) or data.get("scan", {})
+        docs_ia_cfg = docs_cfg.get("ia", {}) if isinstance(docs_cfg, dict) else {}
         llm_cfg = data.get("llm", {})
         cache_cfg = data.get("cache", {})
 
@@ -209,6 +272,27 @@ def load_settings(
             settings.docs_llm_max_doc_pairs = docs_cfg["llm_max_doc_pairs"]
         if "intent_skip_without_similarity_min_docs" in docs_cfg:
             settings.docs_intent_skip_without_similarity_min_docs = docs_cfg["intent_skip_without_similarity_min_docs"]
+        if "facet_dimensions" in docs_ia_cfg:
+            settings.docs_ia_facet_dimensions = [
+                str(item).strip()
+                for item in docs_ia_cfg["facet_dimensions"]
+                if str(item).strip()
+            ]
+        if "facet_values" in docs_ia_cfg:
+            merged_facet_values = {
+                key: list(values)
+                for key, values in settings.docs_ia_facet_values.items()
+            }
+            merged_facet_values.update({
+                str(key).strip(): [
+                    str(item).strip()
+                    for item in values
+                    if str(item).strip()
+                ]
+                for key, values in docs_ia_cfg["facet_values"].items()
+                if str(key).strip() and isinstance(values, list)
+            })
+            settings.docs_ia_facet_values = merged_facet_values
 
         # LLM section
         if "model" in llm_cfg:

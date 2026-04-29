@@ -124,8 +124,8 @@ def _build_intent_evidence(intent_matches: list[dict]) -> str:
     lines: list[str] = []
     for i, m in enumerate(intent_matches, 1):
         lines.append(
-            f'{i}. Doc A topic "{m["topic_a"]}" \u2194 '
-            f'Doc B topic "{m["topic_b"]}" (similarity={m["similarity"]:.2f})'
+            f'{i}. Doc A canonical topic "{m["topic_a"]}" \u2194 '
+            f'Doc B canonical topic "{m["topic_b"]}" (similarity={m["similarity"]:.2f})'
         )
     return "\n".join(lines) if lines else "(no intent evidence)"
 
@@ -171,7 +171,7 @@ def analyze_doc_pair(
         intent_section = f"""
 ---
 
-Intent evidence (from topic extraction stage):
+Intent evidence (from canonical topic taxonomy stage):
 {formatted}
 """
 

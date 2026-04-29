@@ -6,10 +6,10 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import numpy as np
-import litellm
 
 from collections import Counter
 
+from dryscope.code.embedder import Embedder, is_api_embedding_model
 from dryscope.cache import Cache
 from dryscope.docs.models import Chunk, OverlapPair
 from dryscope.similarity import cosine_similarity_matrix
@@ -42,25 +42,14 @@ def _get_sentence_transformer(model_name: str):
     global _st_model, _st_model_name
     with _st_lock:
         if _st_model is None or _st_model_name != model_name:
-            from dryscope.code.embedder import Embedder
             _st_model = Embedder(model_name)
             _st_model_name = model_name
         return _st_model
 
 
 def _is_api_model(model_name: str) -> bool:
-    """Determine whether an embedding model is an API model or a local sentence-transformers model.
-
-    API models are identified by known prefixes (text-embedding-, voyage-, etc.)
-    or by containing a provider prefix with a slash (e.g. openai/text-embedding-3-small).
-    Everything else is treated as a sentence-transformers model name.
-    """
-    name = model_name.lower()
-    api_prefixes = (
-        "text-embedding-", "voyage-", "embed-", "cohere/",
-        "openai/", "azure/", "bedrock/",
-    )
-    return any(name.startswith(p) for p in api_prefixes)
+    """Backward-compatible alias for API embedding model detection."""
+    return is_api_embedding_model(model_name)
 
 
 # ─── Existing litellm-based helpers ────────────────────────────────────
@@ -73,6 +62,13 @@ def get_embedding(text: str, model: str, cache: Cache | None = None) -> list[flo
         if cached is not None:
             return cached
 
+    try:
+        import litellm
+    except ImportError as exc:
+        raise RuntimeError(
+            "API embedding model requires LiteLLM. Install dryscope with "
+            "API embedding support or install `litellm`."
+        ) from exc
     response = litellm.embedding(model=model, input=[text])
     vector = response.data[0]["embedding"]
 

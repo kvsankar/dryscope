@@ -3,10 +3,25 @@
 from __future__ import annotations
 
 import os
-import sys
 from pathlib import Path
+
 import numpy as np
 from numpy.typing import NDArray
+
+
+def is_api_embedding_model(model_name: str) -> bool:
+    """Return True when model_name should be resolved through LiteLLM embeddings."""
+    name = model_name.lower()
+    api_prefixes = (
+        "text-embedding-",
+        "voyage-",
+        "embed-",
+        "cohere/",
+        "openai/",
+        "azure/",
+        "bedrock/",
+    )
+    return any(name.startswith(prefix) for prefix in api_prefixes)
 
 
 def _has_local_huggingface_cache(model_name: str) -> bool:
@@ -18,11 +33,23 @@ def _has_local_huggingface_cache(model_name: str) -> bool:
 
 
 class Embedder:
-    """Generates embeddings using sentence-transformers."""
+    """Generates embeddings through API models or local sentence-transformers."""
 
-    def __init__(self, model_name: str = "all-MiniLM-L6-v2"):
+    def __init__(self, model_name: str = "text-embedding-3-small"):
+        self.model_name = model_name
+        self.model = None
+        if is_api_embedding_model(model_name):
+            return
+
         # Lazy import to avoid slow startup when not needed
-        from sentence_transformers import SentenceTransformer
+        try:
+            from sentence_transformers import SentenceTransformer
+        except ImportError as exc:
+            raise RuntimeError(
+                "Local embedding model requires the optional local embedding stack. "
+                "Install dryscope with `dryscope[local-embeddings]`, or use an API "
+                "embedding model such as `text-embedding-3-small`."
+            ) from exc
 
         # Suppress noisy "UNEXPECTED key" / "LOAD REPORT" from model loader
         # Must redirect at OS fd level — the C library writes directly
@@ -55,10 +82,27 @@ class Embedder:
         if not texts:
             return np.empty((0, 0), dtype=np.float32)
 
+        if is_api_embedding_model(self.model_name):
+            try:
+                import litellm
+            except ImportError as exc:
+                raise RuntimeError(
+                    "API embedding model requires LiteLLM. Install dryscope with "
+                    "API embedding support or install `litellm`."
+                ) from exc
+            response = litellm.embedding(model=self.model_name, input=texts)
+            embeddings = np.array(
+                [item["embedding"] for item in response.data],
+                dtype=np.float32,
+            )
+            norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
+            norms[norms == 0] = 1
+            return (embeddings / norms).astype(np.float32)
+
         embeddings = self.model.encode(
             texts,
             show_progress_bar=False,
             convert_to_numpy=True,
-            normalize_embeddings=True,  # pre-normalize for cosine similarity via dot product
+            normalize_embeddings=True,  # pre-normalize for fast dot-product similarity
         )
         return embeddings.astype(np.float32)

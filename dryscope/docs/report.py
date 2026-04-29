@@ -6,6 +6,7 @@ import json
 import subprocess
 from collections import defaultdict
 from datetime import datetime, timezone
+from html import escape
 from pathlib import Path
 
 from rich.console import Console
@@ -23,12 +24,337 @@ def _short_path(path: str | None) -> str:
     return Path(path).name
 
 
+def _display_path(path: str | None, project_root: Path | None = None) -> str:
+    """Return a readable path for report tables and topic clusters."""
+    if not path:
+        return "(unspecified)"
+    if project_root is not None:
+        try:
+            return str(Path(path).relative_to(project_root))
+        except ValueError:
+            pass
+    return _short_path(path)
+
+
+def _topic_document_clusters(result: AnalysisResult) -> list[dict]:
+    """Return all multi-document canonical topic clusters from the taxonomy."""
+    taxonomy = result.topic_taxonomy or {}
+    clusters = taxonomy.get("topic_document_clusters")
+    if clusters is None:
+        clusters = [
+            {
+                "topic": topic.get("name"),
+                "documents": topic.get("documents", []),
+                "document_count": topic.get("document_count", 0),
+                "mention_count": topic.get("mention_count", 0),
+                "aliases": topic.get("aliases", []),
+            }
+            for topic in taxonomy.get("canonical_topics", [])
+            if int(topic.get("document_count") or 0) >= 2
+        ]
+    return sorted(
+        clusters,
+        key=lambda c: (
+            -int(c.get("document_count") or 0),
+            -int(c.get("mention_count") or 0),
+            str(c.get("topic") or ""),
+        ),
+    )
+
+
+def _information_architecture(result: AnalysisResult) -> dict:
+    """Return discovered information architecture from the topic taxonomy."""
+    taxonomy = result.topic_taxonomy or {}
+    ia = taxonomy.get("information_architecture")
+    return ia if isinstance(ia, dict) else {}
+
+
+def _build_run_overview(
+    result: AnalysisResult,
+    similarity_pairs: list[OverlapPair],
+    recommendations: list[dict],
+    stages_run: list[str] | None = None,
+) -> dict:
+    """Build the top-down capability/aspect summary shared by all report formats."""
+    stages = set(stages_run or [])
+    ia = _information_architecture(result)
+    taxonomy = result.topic_taxonomy or {}
+    canonical_topics = taxonomy.get("canonical_topics", []) if isinstance(taxonomy, dict) else []
+    coverage_clusters = _topic_document_clusters(result)
+    doc_dry_ran = bool(result.documents or "Similarity" in stages or "Intent" in stages)
+    ia_ran = bool("Intent" in stages or result.document_descriptors or taxonomy)
+    section_similarity_ran = bool("Similarity" in stages or similarity_pairs)
+
+    return {
+        "capabilities": {
+            "code_dry": {
+                "ran": False,
+                "label": "Code DRY",
+                "what_it_does": "Finds duplicate or near-duplicate code units and refactor candidates.",
+                "result": "Not exercised in this documentation run.",
+            },
+            "doc_dry": {
+                "ran": doc_dry_ran,
+                "label": "Doc DRY",
+                "what_it_does": "Finds documentation overlap through IA signals and section similarity.",
+                "result": (
+                    f"{_plural(len(result.documents), 'document')}, "
+                    f"{_plural(len(result.chunks), 'section')}, "
+                    f"{_plural(len(similarity_pairs), 'similar section pair')}, "
+                    f"{_plural(len(coverage_clusters), 'consolidation cluster')}."
+                ),
+            },
+        },
+        "doc_dry_aspects": {
+            "information_architecture": {
+                "ran": ia_ran,
+                "label": "Information Architecture",
+                "pipeline": [
+                    "document descriptor extraction",
+                    "canonical label normalization",
+                    "IA topic tree and facet discovery",
+                    "suggested consolidation clusters",
+                ],
+                "results": {
+                    "documents_profiled": len(result.document_descriptors),
+                    "descriptor_labels": sum(
+                        len(descriptor.get("about", [])) + len(descriptor.get("reader_intents", []))
+                        for descriptor in result.document_descriptors.values()
+                    ),
+                    "canonical_labels": len(canonical_topics),
+                    "suggested_consolidation_clusters": len(coverage_clusters),
+                    "ia_topic_groups": len(ia.get("topic_tree", [])),
+                    "facet_dimensions": len(ia.get("facets", {})),
+                    "ia_diagnostics": len(ia.get("diagnostics", [])),
+                },
+            },
+            "section_similarity": {
+                "ran": section_similarity_ran,
+                "label": "Section similarity",
+                "pipeline": [
+                    "split documents into sections",
+                    "embed sections",
+                    "compare cross-document section pairs",
+                    "section similarity recommendations",
+                ],
+                "results": {
+                    "sections_analyzed": len(result.chunks),
+                    "similar_section_pairs": len(similarity_pairs),
+                    "section_similarity_recommendations": len(recommendations),
+                },
+            },
+        },
+        "supporting_results": {
+            "llm_document_pair_analyses": len(result.doc_pair_analyses),
+            "stages_run": stages_run or [],
+        },
+    }
+
+
+def _pair_to_dict(pair: OverlapPair) -> dict:
+    """Convert a similar section pair to structured JSON."""
+    return {
+        "chunk_a": {
+            "document": pair.chunk_a.document_path,
+            "heading_path": pair.chunk_a.heading_path,
+            "line_start": pair.chunk_a.line_start,
+            "line_end": pair.chunk_a.line_end,
+        },
+        "chunk_b": {
+            "document": pair.chunk_b.document_path,
+            "heading_path": pair.chunk_b.heading_path,
+            "line_start": pair.chunk_b.line_start,
+            "line_end": pair.chunk_b.line_end,
+        },
+        "embedding_similarity": pair.embedding_similarity,
+        "shared_codes": pair.shared_codes,
+    }
+
+
+def _doc_pair_analysis_to_dict(analysis: DocPairAnalysis) -> dict:
+    """Convert an LLM document-pair analysis to structured JSON."""
+    return {
+        "doc_a": analysis.doc_a_path,
+        "doc_a_name": _short_path(analysis.doc_a_path),
+        "doc_b": analysis.doc_b_path,
+        "doc_b_name": _short_path(analysis.doc_b_path),
+        "doc_a_purpose": analysis.doc_a_purpose,
+        "doc_b_purpose": analysis.doc_b_purpose,
+        "relationship": analysis.relationship,
+        "confidence": analysis.confidence,
+        "topics": [
+            {
+                "name": topic.name,
+                "canonical": topic.canonical,
+                "canonical_name": _short_path(topic.canonical),
+                "action_for_other": topic.action_for_other,
+                "reason": topic.reason,
+            }
+            for topic in analysis.topics
+        ],
+    }
+
+
+def _canonical_label_taxonomy_data(result: AnalysisResult) -> dict:
+    """Return canonical label taxonomy data without duplicating IA clusters."""
+    taxonomy = result.topic_taxonomy or {}
+    canonical_topics = []
+    for topic in taxonomy.get("canonical_topics", []):
+        canonical_topics.append({
+            "name": topic.get("name"),
+            "aliases": topic.get("aliases", []),
+            "document_count": topic.get("document_count", 0),
+            "mention_count": topic.get("mention_count", 0),
+        })
+    return {
+        "canonical_topics": canonical_topics,
+        "raw_to_canonical": taxonomy.get("raw_to_canonical", {}),
+        "co_occurrence": taxonomy.get("co_occurrence", []),
+        "document_descriptors": result.document_descriptors,
+    }
+
+
+def _report_structure(
+    overview: dict,
+    recommendations: list[dict],
+    result: AnalysisResult,
+    similarity_pairs: list[OverlapPair],
+) -> list[dict]:
+    """Return the ordered report sections and backing data for JSON consumers."""
+    taxonomy = result.topic_taxonomy or {}
+    similar_section_pairs = [_pair_to_dict(pair) for pair in similarity_pairs]
+    sections: list[dict] = [
+        {
+            "id": "run_overview",
+            "title": "Run Overview",
+            "data": {
+                "overview": overview,
+                "scanned_documents": [
+                    doc.path for doc in sorted(result.documents, key=lambda d: d.path)
+                ],
+            },
+        },
+    ]
+    if _information_architecture(result):
+        sections.append({
+            "id": "information_architecture",
+            "title": "Information Architecture",
+            "data": _information_architecture(result),
+        })
+    if _topic_document_clusters(result):
+        sections.append({
+            "id": "suggested_consolidation_clusters",
+            "title": "Suggested Consolidation Clusters",
+            "data": _topic_document_clusters(result),
+        })
+    sections.append({
+        "id": "section_similarity",
+        "title": "Section Similarity",
+        "data": {
+            "similar_section_pairs": len(similarity_pairs),
+            "section_similarity_recommendations": len(recommendations),
+        },
+        "children": [
+            {
+                "id": "section_similarity_recommendations",
+                "title": "Section Similarity Recommendations",
+                "data": recommendations,
+            },
+            {
+                "id": "similar_section_pairs",
+                "title": "Similar Section Pairs",
+                "data": similar_section_pairs,
+            },
+        ],
+    })
+    if result.doc_pair_analyses:
+        sections.append({
+            "id": "document_pair_analysis",
+            "title": "Document Pair Analysis",
+            "data": [
+                _doc_pair_analysis_to_dict(analysis)
+                for analysis in result.doc_pair_analyses
+            ],
+        })
+    if taxonomy:
+        sections.append({
+            "id": "canonical_label_taxonomy",
+            "title": "Canonical Label Taxonomy",
+            "data": _canonical_label_taxonomy_data(result),
+        })
+    sections.append({"id": "methodology", "title": "Methodology", "data": {}})
+
+    for index, section in enumerate(sections, 1):
+        section["number"] = index
+        section["title_numbered"] = f"{index}. {section['title']}"
+        for child_index, child in enumerate(section.get("children", []), 1):
+            child["number"] = f"{index}.{child_index}"
+            child["title_numbered"] = f"{index}.{child_index}. {child['title']}"
+    return sections
+
+
+def _ran_text(value: bool) -> str:
+    """Human-readable report status."""
+    return "Yes" if value else "No"
+
+
+def _plural(count: int, singular: str, plural: str | None = None) -> str:
+    """Return a small count phrase with correct singular/plural wording."""
+    return f"{count} {singular if count == 1 else (plural or singular + 's')}"
+
+
+def _metric_card(value: int, label: str) -> str:
+    """Return one dashboard metric card."""
+    return (
+        f'  <div class="metric-card"><div class="metric-value">{value}</div>'
+        f'<div class="metric-label">{label}</div></div>\n'
+    )
+
+
+def _html_code(value: object) -> str:
+    """Return an escaped inline code element for raw HTML blocks in markdown."""
+    return f"<code>{escape(str(value or ''))}</code>"
+
+
+def _html_list(items: list[object]) -> str:
+    """Return a full escaped HTML list for collapsible markdown sections."""
+    if not items:
+        return "<p>None.</p>"
+    rows = "\n".join(f"  <li>{_html_code(item)}</li>" for item in items)
+    return f"<ul>\n{rows}\n</ul>"
+
+
+def _html_text_list(items: list[object]) -> str:
+    """Return a full escaped HTML list for non-code text values."""
+    if not items:
+        return "<p>None.</p>"
+    rows = "\n".join(f"  <li>{escape(str(item or ''))}</li>" for item in items)
+    return f"<ul>\n{rows}\n</ul>"
+
+
+def _details_block(summary: str, body: str, class_name: str = "report-item", open_: bool = False) -> str:
+    """Return a raw HTML details block that works in markdown and HTML reports."""
+    open_attr = " open" if open_ else ""
+    return (
+        f'<details class="{class_name}"{open_attr}>\n'
+        f"<summary>{escape(summary)}</summary>\n"
+        f"{body}\n"
+        "</details>\n"
+    )
+
+
+def _markdown_table_cell(value: object) -> str:
+    """Escape a value for use inside a markdown table cell."""
+    text = str(value or "").replace("\n", " ").replace("\r", " ")
+    text = text.replace("|", r"\|")
+    return " ".join(text.split())
+
+
 def render_terminal(
     result: AnalysisResult,
     similarity_pairs: list[OverlapPair],
     suggestions: list[dict] | None,
     console: Console | None = None,
-    topic_clusters: list[dict] | None = None,
 ) -> None:
     """Render analysis results to terminal using Rich."""
     if console is None:
@@ -91,15 +417,44 @@ def render_terminal(
                 )
             console.print()
 
-    # Topic Clusters
-    if topic_clusters:
-        console.print("[bold]Document Clusters by Topic:[/bold]", style="cyan")
-        for i, cluster in enumerate(topic_clusters, 1):
-            label = cluster["label"]
-            docs = cluster["documents"]
-            console.print(f"  {i}. [bold]\"{label}\"[/bold] ({len(docs)} documents)")
+    coverage_clusters = _topic_document_clusters(result)
+    if coverage_clusters:
+        console.print("[bold]Topic Coverage Clusters:[/bold]", style="cyan")
+        console.print(
+            f"Found [bold]{len(coverage_clusters)}[/bold] canonical topics covered by 2+ documents"
+        )
+        for i, cluster in enumerate(coverage_clusters, 1):
+            docs = cluster.get("documents", [])
+            console.print(
+                f"  {i}. [bold]\"{cluster.get('topic', '(unnamed topic)')}\"[/bold] "
+                f"({len(docs)} documents, {cluster.get('mention_count', 0)} mentions)"
+            )
             for doc in docs:
                 console.print(f"     • {_short_path(doc)}")
+        console.print()
+
+    if result.topic_taxonomy:
+        canonical_topics = result.topic_taxonomy.get("canonical_topics", [])
+        if canonical_topics:
+            console.print("[bold]Canonical Topics:[/bold]", style="cyan")
+            for topic in canonical_topics[:10]:
+                console.print(
+                    f"  • [bold]{topic['name']}[/bold] "
+                    f"({topic['document_count']} docs, {topic['mention_count']} mentions)"
+                )
+            console.print()
+
+    ia = _information_architecture(result)
+    if ia:
+        console.print("[bold]Information Architecture:[/bold]", style="cyan")
+        console.print(
+            f"  Topic groups: [bold]{len(ia.get('topic_tree', []))}[/bold], "
+            f"facets: [bold]{len(ia.get('facets', {}))}[/bold], "
+            f"diagnostics: [bold]{len(ia.get('diagnostics', []))}[/bold]"
+        )
+        for parent in ia.get("topic_tree", [])[:8]:
+            children = parent.get("children", [])
+            console.print(f"  • [bold]{parent.get('label', '(unnamed)')}[/bold] ({len(children)} children)")
         console.print()
 
     # Refactoring Suggestions
@@ -126,7 +481,6 @@ def render_markdown(
     settings: Settings | None = None,
     project_root: Path | None = None,
     stages_run: list[str] | None = None,
-    topic_clusters: list[dict] | None = None,
 ) -> str:
     """Render analysis results as markdown.
 
@@ -153,10 +507,41 @@ def render_markdown(
 
     # ── Dashboard ──────────────────────────────────────────────────────
     n_docs = len(result.documents)
-    n_sections = len(result.chunks)
     n_pairs = len(similarity_pairs)
     n_recs = len(recommendations)
     pipeline_dots = "  ".join(f"● {s}" for s in stages_run) if stages_run else "—"
+    ia = _information_architecture(result)
+    n_profiled_docs = len(result.document_descriptors) or n_docs
+    n_ia_groups = len(ia.get("topic_tree", []))
+    n_ia_facets = len(ia.get("facets", {}))
+    n_consolidation_clusters = len(_topic_document_clusters(result))
+    ia_ran = bool(ia or result.document_descriptors or result.topic_taxonomy)
+    section_similarity_ran = bool("Similarity" in set(stages_run) or similarity_pairs)
+
+    metric_cards = [_metric_card(n_docs, "Documents")]
+    track_bits: list[str] = []
+    if ia_ran:
+        metric_cards.extend([
+            _metric_card(n_ia_groups, "IA Groups"),
+            _metric_card(n_consolidation_clusters, "IA Consolidation Clusters"),
+        ])
+        track_bits.append(
+            f"Information Architecture: {n_profiled_docs} docs profiled, "
+            f"{n_ia_groups} groups, {n_ia_facets} facets, "
+            f"{n_consolidation_clusters} consolidation clusters."
+        )
+    if section_similarity_ran:
+        metric_cards.extend([
+            _metric_card(n_pairs, "Similar Section Pairs"),
+            _metric_card(n_recs, "Section Similarity Recs"),
+        ])
+        track_bits.append(
+            f"Section Similarity: {n_pairs} similar section pairs, "
+            f"{n_recs} recommendations."
+        )
+    if not ia_ran and not section_similarity_ran:
+        metric_cards.append(_metric_card(len(result.chunks), "Sections"))
+    track_summary = " ".join(track_bits) if track_bits else "No Doc DRY analysis tracks ran."
 
     # Scan context
     scan_path_str = str(project_root) if project_root else "unknown"
@@ -168,77 +553,279 @@ def render_markdown(
         else:
             git_name = f" ({project_root.name})"
 
-    # File list (collapsible)
-    file_list_html = ""
-    if result.documents:
-        file_items = "\n".join(
-            f"    <li>{_short_path(doc.path)}</li>"
-            for doc in sorted(result.documents, key=lambda d: d.path)
-        )
-        file_list_html = (
-            '\n  <details class="file-list">\n'
-            f"    <summary>{n_docs} files scanned</summary>\n"
-            f"    <ol>\n{file_items}\n    </ol>\n"
-            "  </details>\n"
-        )
-
     lines.append(
         '<div class="dashboard">\n'
-        f'  <div class="metric-card"><div class="metric-value">{n_docs}</div>'
-        f'<div class="metric-label">Documents</div></div>\n'
-        f'  <div class="metric-card"><div class="metric-value">{n_sections}</div>'
-        f'<div class="metric-label">Sections</div></div>\n'
-        f'  <div class="metric-card"><div class="metric-value">{n_pairs}</div>'
-        f'<div class="metric-label">Sim Pairs</div></div>\n'
-        f'  <div class="metric-card"><div class="metric-value">{n_recs}</div>'
-        f'<div class="metric-label">Recommendations</div></div>\n'
+        f'{"".join(metric_cards)}'
         f'  <div class="pipeline-bar">Pipeline: {pipeline_dots}</div>\n'
+        f'  <div class="track-summary">{track_summary}</div>\n'
         f'  <div class="scan-context">Scanned: <code>{scan_path_str}</code>{git_name}</div>\n'
-        f'{file_list_html}'
         '</div>\n'
     )
 
-    # ── Recommendations (moved to top) ─────────────────────────────────
-    if recommendations:
-        lines.append("## Recommendations\n")
-        lines.append("| # | Score | Files | Action |")
-        lines.append("|---|-------|-------|--------|")
-        for rec in recommendations:
-            files = ", ".join(
-                f"`{Path(f['file']).name}`" for f in rec["affected_files"]
+    overview = _build_run_overview(
+        result,
+        similarity_pairs,
+        recommendations,
+        stages_run=stages_run,
+    )
+    report_sections = _report_structure(
+        overview,
+        recommendations,
+        result,
+        similarity_pairs,
+    )
+    section_titles = {
+        section["id"]: section["title_numbered"]
+        for section in report_sections
+    }
+    child_titles = {
+        child["id"]: child["title_numbered"]
+        for section in report_sections
+        for child in section.get("children", [])
+    }
+
+    # ── Run Overview ───────────────────────────────────────────────────
+    lines.append(f"## {section_titles['run_overview']}\n")
+    lines.append("### Capabilities Exercised\n")
+    lines.append("| Capability | Ran | What It Does | Result |")
+    lines.append("|------------|-----|--------------|--------|")
+    for capability in overview["capabilities"].values():
+        lines.append(
+            f"| {capability['label']} "
+            f"| {_ran_text(capability['ran'])} "
+            f"| {capability['what_it_does']} "
+            f"| {capability['result']} |"
+        )
+    lines.append("")
+
+    lines.append("### Doc DRY Result Summary\n")
+    lines.append("| Aspect | Ran | Pipeline | Results |")
+    lines.append("|--------|-----|----------|---------|")
+    for aspect in overview["doc_dry_aspects"].values():
+        results = ", ".join(
+            f"{key.replace('_', ' ')}: {value}"
+            for key, value in aspect["results"].items()
+        )
+        lines.append(
+            f"| {aspect['label']} "
+            f"| {_ran_text(aspect['ran'])} "
+            f"| {' -> '.join(aspect['pipeline'])} "
+            f"| {results} |"
+        )
+    lines.append("")
+
+    if result.documents:
+        scanned_docs = [
+            _display_path(doc.path, project_root)
+            for doc in sorted(result.documents, key=lambda d: d.path)
+        ]
+        lines.append("### Scanned Documents\n")
+        lines.append(
+            _details_block(
+                f"{len(scanned_docs)} documents scanned",
+                _html_list(scanned_docs),
+                class_name="report-list",
             )
+        )
+        lines.append("")
+
+    # ── Information Architecture ───────────────────────────────────────
+    if ia:
+        lines.append(f"## {section_titles['information_architecture']}\n")
+        lines.append(
+            f"Method: `{ia.get('method', 'unknown')}`. "
+            f"Top-level topic groups: {len(ia.get('topic_tree', []))}. "
+            f"Facet dimensions: {len(ia.get('facets', {}))}. "
+            f"Diagnostics: {len(ia.get('diagnostics', []))}.\n"
+        )
+
+        topic_tree = ia.get("topic_tree", [])
+        if topic_tree:
+            lines.append("### Discovered Topic Tree\n")
+            for parent in topic_tree:
+                label = parent.get("label") or "(unnamed group)"
+                description = parent.get("description") or ""
+                child_blocks: list[str] = []
+                if description:
+                    child_blocks.append(f"<p>{escape(str(description))}</p>")
+                for child in parent.get("children", []):
+                    child_label = child.get("label") or "(unnamed topic)"
+                    doc_count = child.get("document_count", 0)
+                    child_body: list[str] = []
+                    child_desc = child.get("description")
+                    if child_desc:
+                        child_body.append(f"<p>{escape(str(child_desc))}</p>")
+                    topics = child.get("topics", [])
+                    if topics:
+                        child_body.append(
+                            _details_block(
+                                f"{len(topics)} canonical labels",
+                                _html_list([str(topic) for topic in topics]),
+                                class_name="report-list",
+                            )
+                        )
+                    documents = child.get("documents", [])
+                    if documents:
+                        child_body.append(
+                            _details_block(
+                                f"{len(documents)} documents",
+                                _html_list([_display_path(str(doc), project_root) for doc in documents]),
+                                class_name="report-list",
+                            )
+                        )
+                    child_blocks.append(
+                        _details_block(
+                            f"{child_label} ({doc_count} docs)",
+                            "\n".join(child_body) if child_body else "<p>No additional details.</p>",
+                            class_name="report-item",
+                        )
+                    )
+                lines.append(
+                    _details_block(
+                        f"{label} ({len(parent.get('children', []))} topics)",
+                        "\n".join(child_blocks) if child_blocks else "<p>No child topics.</p>",
+                        class_name="report-item",
+                        open_=True,
+                    )
+                )
+            lines.append("")
+
+        facets = ia.get("facets", {})
+        if facets:
+            lines.append("### Facets\n")
+            for facet_name, facet in sorted(facets.items()):
+                facet_body: list[str] = []
+                description = facet.get("description") if isinstance(facet, dict) else ""
+                if description:
+                    facet_body.append(f"<p>{escape(str(description))}</p>")
+                values = facet.get("values", []) if isinstance(facet, dict) else []
+                for value in values:
+                    label = value.get("value", "(unspecified)")
+                    docs = value.get("documents", [])
+                    evidence = value.get("evidence", [])
+                    value_body: list[str] = []
+                    if docs:
+                        value_body.append(
+                            _details_block(
+                                f"{len(docs)} documents",
+                                _html_list([_display_path(str(doc), project_root) for doc in docs]),
+                                class_name="report-list",
+                            )
+                        )
+                    if evidence:
+                        value_body.append(
+                            _details_block(
+                                f"{len(evidence)} evidence items",
+                                _html_text_list(evidence),
+                                class_name="report-list",
+                            )
+                        )
+                    facet_body.append(
+                        _details_block(
+                            f"{label} ({len(docs)} docs)",
+                            "\n".join(value_body) if value_body else "<p>No additional details.</p>",
+                            class_name="report-item",
+                        )
+                    )
+                lines.append(
+                    _details_block(
+                        f"{facet_name} ({len(values)} values)",
+                        "\n".join(facet_body) if facet_body else "<p>No facet values.</p>",
+                        class_name="report-item",
+                        open_=True,
+                    )
+                )
+            lines.append("")
+
+        diagnostics = ia.get("diagnostics", [])
+        if diagnostics:
+            lines.append("### IA Diagnostics\n")
+            lines.append("| Severity | Kind | Issue | Recommendation |")
+            lines.append("|----------|------|-------|----------------|")
+            for item in diagnostics:
+                lines.append(
+                    f"| {_markdown_table_cell(item.get('severity', ''))} "
+                    f"| `{_markdown_table_cell(item.get('kind', ''))}` "
+                    f"| {_markdown_table_cell(item.get('message', ''))} "
+                    f"| {_markdown_table_cell(item.get('recommendation', ''))} |"
+                )
+            lines.append("")
+
+    # ── Suggested Consolidation Clusters ───────────────────────────────
+    coverage_clusters = _topic_document_clusters(result)
+    if coverage_clusters:
+        lines.append(f"## {section_titles['suggested_consolidation_clusters']}\n")
+        lines.append(
+            f"Found {len(coverage_clusters)} canonical labels covered by 2+ documents. "
+            "These are candidates to inspect for consolidation, splitting, or stronger cross-links.\n"
+        )
+        for i, cluster in enumerate(coverage_clusters, 1):
+            topic = cluster.get("topic") or "(unnamed topic)"
+            docs = cluster.get("documents", [])
+            mention_count = cluster.get("mention_count", 0)
+            cluster_body = [
+                _details_block(
+                    f"{len(docs)} documents",
+                    _html_list([_display_path(str(doc), project_root) for doc in docs]),
+                    class_name="report-list",
+                )
+            ]
+            aliases = cluster.get("aliases", [])
+            if aliases:
+                cluster_body.append(
+                    _details_block(
+                        f"{len(aliases)} aliases",
+                        _html_list([str(alias) for alias in aliases]),
+                        class_name="report-list",
+                    )
+                )
             lines.append(
-                f"| {rec['priority_rank']} "
-                f"| {rec['priority_score']} "
-                f"| {files} "
-                f"| {rec['suggested_action']} |"
+                _details_block(
+                    f"{i}. {topic} ({len(docs)} docs, {mention_count} mentions)",
+                    "\n".join(cluster_body),
+                    class_name="report-item",
+                )
             )
         lines.append("")
 
-        for rec in recommendations:
-            lines.append(f"### {rec['priority_rank']}. {rec['suggested_action'].title()} ({rec['priority_score']} pts)\n")
-            lines.append(f"{rec['action_detail']}\n")
-            for f in rec["affected_files"]:
-                file_path = f["file"]
-                for section in f.get("sections", []):
-                    sec = " > ".join(section.get("sections", []))
-                    lr = section.get("line_range")
-                    loc = file_path
-                    if sec:
-                        loc += f": {sec}"
-                    if lr:
-                        loc += f" (L{lr[0]}–{lr[1]})"
-                    lines.append(f"- `{loc}`")
-            lines.append("")
+    # ── Section Similarity ─────────────────────────────────────────────
+    lines.append(f"## {section_titles['section_similarity']}\n")
+    lines.append(
+        "This is the Doc DRY section-level pass: split documents into sections, "
+        "embed them, and report similar cross-document section pairs.\n"
+    )
+    lines.append(f"Found {len(similarity_pairs)} similar section pairs.\n")
 
-    # ── Stage 1: Similarity ────────────────────────────────────────────
-    lines.append("## Stage 1: Semantic Similarity\n")
-    lines.append(f"Found {len(similarity_pairs)} similar section pairs\n")
+    if recommendations:
+        lines.append(f"### {child_titles['section_similarity_recommendations']}\n")
+        lines.append(
+            "These recommendations are derived from the section similarity pairs in this track. "
+            "Information Architecture consolidation candidates are listed separately under "
+            "Suggested Consolidation Clusters.\n"
+        )
+        for rec in recommendations:
+            rec_body: list[str] = [
+                f"<p><strong>Action:</strong> {escape(str(rec['suggested_action']))}</p>",
+                f"<p><strong>Score:</strong> {escape(str(rec['priority_score']))}</p>",
+                f"<p>{escape(str(rec['action_detail']))}</p>",
+            ]
+            file_items = [str(f["file"]) for f in rec["affected_files"]]
+            rec_body.append(_html_list(file_items))
+            lines.append(
+                _details_block(
+                    f"{rec['priority_rank']}. {rec['suggested_action'].title()} "
+                    f"({rec['priority_score']} pts, {len(rec['affected_files'])} files)",
+                    "\n".join(rec_body),
+                    class_name="report-item",
+                )
+            )
+        lines.append("")
 
     if similarity_pairs:
+        lines.append(f"### {child_titles['similar_section_pairs']}\n")
         lines.append("| Similarity | Section A | Section B |")
         lines.append("|------------|-----------|-----------|")
-        for pair in similarity_pairs[:20]:
+        for pair in similarity_pairs:
             heading_a = " > ".join(pair.chunk_a.heading_path) or "(no heading)"
             heading_b = " > ".join(pair.chunk_b.heading_path) or "(no heading)"
             loc_a = f"`{_short_path(pair.chunk_a.document_path)}`: {heading_a}"
@@ -247,9 +834,9 @@ def render_markdown(
             lines.append(f"| {sim_str} | {loc_a} | {loc_b} |")
         lines.append("")
 
-    # ── Stage 2: Doc-pair analysis ─────────────────────────────────────
+    # ── Doc-pair analysis ──────────────────────────────────────────────
     if result.doc_pair_analyses:
-        lines.append("## Stage 2: Document-Pair Analysis\n")
+        lines.append(f"## {section_titles['document_pair_analysis']}\n")
         lines.append(f"Analyzed {len(result.doc_pair_analyses)} document pairs\n")
 
         for analysis in result.doc_pair_analyses:
@@ -270,30 +857,51 @@ def render_markdown(
                     )
                 lines.append("")
 
-    # ── Topic Clusters ─────────────────────────────────────────────────
-    if topic_clusters:
-        lines.append("## Document Clusters by Topic\n")
-        lines.append(f"Found {len(topic_clusters)} document clusters sharing common topics.\n")
-        for i, cluster in enumerate(topic_clusters, 1):
-            label = cluster["label"]
-            docs = cluster["documents"]
-            lines.append(f"### Cluster {i}: \"{label}\" ({len(docs)} documents)\n")
-            for doc in docs:
-                lines.append(f"- `{_short_path(doc)}`")
-            shared = cluster.get("shared_topics", [])
-            if shared:
+    if result.topic_taxonomy:
+        canonical_topics = result.topic_taxonomy.get("canonical_topics", [])
+        if canonical_topics:
+            lines.append(f"## {section_titles['canonical_label_taxonomy']}\n")
+            lines.append(
+                "Canonical labels are the normalized vocabulary produced from document "
+                "descriptors. Document coverage for multi-document labels is listed above "
+                "under Suggested Consolidation Clusters; this section gives the full "
+                "vocabulary and alias map once.\n"
+            )
+            for topic in canonical_topics:
+                name = topic.get("name", "(unnamed label)")
+                aliases = topic.get("aliases", [])
+                topic_body = [
+                    f"<p><strong>Documents:</strong> {escape(str(topic.get('document_count', 0)))}</p>",
+                    f"<p><strong>Mentions:</strong> {escape(str(topic.get('mention_count', 0)))}</p>",
+                    _details_block(
+                        f"{len(aliases)} aliases",
+                        _html_list([str(alias) for alias in aliases]),
+                        class_name="report-list",
+                    ),
+                ]
+                lines.append(
+                    _details_block(
+                        f"{name} ({topic.get('document_count', 0)} docs, "
+                        f"{topic.get('mention_count', 0)} mentions)",
+                        "\n".join(topic_body),
+                        class_name="report-item",
+                    )
+                )
+            co_occurrence = result.topic_taxonomy.get("co_occurrence", [])
+            if co_occurrence:
                 lines.append("")
-                lines.append("**Shared topics:**\n")
-                seen = set()
-                for m in shared[:10]:
-                    pair_key = (m["topic_a"], m["topic_b"])
-                    if pair_key in seen:
-                        continue
-                    seen.add(pair_key)
-                    if m["topic_a"] == m["topic_b"]:
-                        lines.append(f"- {m['topic_a']} ({m['similarity']:.2f})")
-                    else:
-                        lines.append(f"- {m['topic_a']} ↔ {m['topic_b']} ({m['similarity']:.2f})")
+                co_items = []
+                for item in co_occurrence:
+                    topics = item.get("topics", [])
+                    if len(topics) == 2:
+                        co_items.append(f"{topics[0]} + {topics[1]} ({item.get('count')} docs)")
+                lines.append(
+                    _details_block(
+                        f"{len(co_items)} co-occurring label pairs",
+                        _html_text_list(co_items),
+                        class_name="report-list",
+                    )
+                )
             lines.append("")
 
     # ── Refactoring Suggestions ────────────────────────────────────────
@@ -313,15 +921,18 @@ def render_markdown(
             lines.append("")
 
     # ── Methodology ────────────────────────────────────────────────────
-    lines.append("## Methodology\n")
+    lines.append(f"## {section_titles['methodology']}\n")
     lines.append("### Pipeline\n")
     lines.append(
-        "dryscope uses a multi-stage pipeline to detect documentation overlap:\n\n"
-        "1. **Similarity** — Splits documents into sections, generates sentence-transformers embeddings, "
-        "and finds cross-document section pairs above the similarity threshold.\n"
-        "2. **Intent** — Extracts granular topics per document via LLM, embeds them, "
-        "and matches cross-document topics by cosine similarity to detect fragmented overlap.\n"
-        "3. **LLM Analysis** — Sends each overlapping document pair to an LLM for "
+        "dryscope has two broad capabilities: Code DRY and Doc DRY. This report is for Doc DRY. "
+        "The Doc DRY pipeline has two main aspects:\n\n"
+        "1. **Information Architecture** — Extracts document descriptors, canonicalizes aboutness and "
+        "reader-intent labels, discovers an IA topic tree and facets, and lists multi-document "
+        "consolidation clusters.\n"
+        "2. **Section similarity** — Splits documents into sections, generates API or local embeddings, "
+        "finds cross-document section pairs above the similarity threshold, and produces section similarity "
+        "recommendations.\n"
+        "3. **Document pair analysis** — Sends overlapping document pairs to an LLM for "
         "relationship classification, topic-level canonical/action assignments, and "
         "refactoring suggestions.\n"
     )
@@ -366,73 +977,37 @@ def render_json(
     settings: Settings | None = None,
     project_root: Path | None = None,
     stages_run: list[str] | None = None,
-    topic_clusters: list[dict] | None = None,
 ) -> str:
     """Render analysis results as JSON."""
-
-    def _pair_to_dict(pair: OverlapPair) -> dict:
-        return {
-            "chunk_a": {
-                "document": pair.chunk_a.document_path,
-                "heading_path": pair.chunk_a.heading_path,
-                "line_start": pair.chunk_a.line_start,
-                "line_end": pair.chunk_a.line_end,
-            },
-            "chunk_b": {
-                "document": pair.chunk_b.document_path,
-                "heading_path": pair.chunk_b.heading_path,
-                "line_start": pair.chunk_b.line_start,
-                "line_end": pair.chunk_b.line_end,
-            },
-            "embedding_similarity": pair.embedding_similarity,
-            "shared_codes": pair.shared_codes,
-        }
+    recommendations: list[dict] = []
+    if settings is not None and project_root is not None:
+        recommendations = build_recommendations(similarity_pairs, suggestions, project_root)
+    overview = _build_run_overview(
+        result,
+        similarity_pairs,
+        recommendations,
+        stages_run=stages_run,
+    )
 
     data: dict = {
         "summary": {
             "documents_scanned": len(result.documents),
             "chunks_analyzed": len(result.chunks),
             "similarity_pairs_found": len(similarity_pairs),
+            "section_similarity_recommendations_found": len(recommendations),
         },
-        "documents": [
-            _short_path(doc.path) for doc in sorted(result.documents, key=lambda d: d.path)
-        ],
-        "stages_run": stages_run or [],
+        "report_structure": _report_structure(
+            overview,
+            recommendations,
+            result,
+            similarity_pairs,
+        ),
     }
 
     if settings is not None and project_root is not None:
         data["metadata"] = _build_metadata(settings, project_root)
-        recommendations = build_recommendations(similarity_pairs, suggestions, project_root)
-        if recommendations:
-            data["summary"]["recommendations_count"] = len(recommendations)
-            data["recommendations"] = recommendations
-
-    data["similarity_pairs"] = [_pair_to_dict(p) for p in similarity_pairs]
-
-    if result.doc_pair_analyses:
-        data["doc_pair_analyses"] = [
-            {
-                "doc_a": a.doc_a_path,
-                "doc_a_name": _short_path(a.doc_a_path),
-                "doc_b": a.doc_b_path,
-                "doc_b_name": _short_path(a.doc_b_path),
-                "doc_a_purpose": a.doc_a_purpose,
-                "doc_b_purpose": a.doc_b_purpose,
-                "relationship": a.relationship,
-                "confidence": a.confidence,
-                "topics": [
-                    {
-                        "name": t.name,
-                        "canonical": t.canonical,
-                        "canonical_name": _short_path(t.canonical),
-                        "action_for_other": t.action_for_other,
-                        "reason": t.reason,
-                    }
-                    for t in a.topics
-                ],
-            }
-            for a in result.doc_pair_analyses
-        ]
+    if recommendations:
+        data["summary"]["recommendations_count"] = len(recommendations)
 
     if result.categories:
         data["categories"] = {
@@ -442,9 +1017,6 @@ def render_json(
             }
             for cat in result.categories
         }
-
-    if topic_clusters:
-        data["topic_clusters"] = topic_clusters
 
     if suggestions:
         data["refactoring_suggestions"] = suggestions
@@ -474,6 +1046,19 @@ summary { padding: .5em .75em; cursor: pointer; font-weight: 600; background: #f
 summary:hover { background: #e9ecef; }
 details[open] > summary { border-bottom: 1px solid var(--border); }
 details > :not(summary) { padding: 0 .75em; }
+.report-section { margin: 1.25rem 0; border-radius: 8px; }
+.report-section > summary { padding: .75rem 1rem; }
+.report-section-title { font-size: 1.35rem; font-weight: 700; color: var(--fg); }
+.report-section > :not(summary) { padding-left: 1rem; padding-right: 1rem; }
+.report-subsection { margin: .75rem 0; border-radius: 6px; }
+.report-subsection > summary { padding: .55rem .75rem; }
+.report-subsection-title { font-size: 1.05rem; font-weight: 650; color: var(--fg); }
+.report-subsection > :not(summary) { padding-left: .75rem; padding-right: .75rem; }
+.report-item { margin: .6rem 0; border-radius: 6px; background: #fff; }
+.report-item > summary { background: #fff; }
+.report-list { margin: .5rem 0; border-radius: 6px; background: #fff; }
+.report-list > summary { background: #fff; font-size: .95rem; }
+.report-list ul { margin: .5rem 0 .75rem; }
 .badge { display: inline-block; padding: .15em .5em; border-radius: 3px;
          font-size: .85em; font-weight: 600; }
 .badge-consolidate { background: #ffeeba; color: #856404; }
@@ -485,7 +1070,7 @@ details > :not(summary) { padding: 0 .75em; }
 .badge-low { background: var(--muted); color: #fff; }
 ul { padding-left: 1.5em; }
 /* Dashboard */
-.dashboard { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem;
+.dashboard { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1rem;
              margin: 1.5rem 0; }
 .metric-card { background: #f8f9fa; border: 1px solid var(--border); border-radius: 8px;
                padding: 1rem; text-align: center; }
@@ -494,6 +1079,8 @@ ul { padding-left: 1.5em; }
                 letter-spacing: .05em; }
 .pipeline-bar { grid-column: 1 / -1; background: #f8f9fa; border: 1px solid var(--border);
                 border-radius: 8px; padding: .6rem 1rem; font-size: .9rem; color: var(--fg); }
+.track-summary { grid-column: 1 / -1; background: #fff; border: 1px solid var(--border);
+                 border-radius: 8px; padding: .6rem 1rem; font-size: .9rem; color: var(--fg); }
 .scan-context { grid-column: 1 / -1; padding: .4rem 1rem; font-size: .9rem; color: var(--muted); }
 .scan-context code { font-size: .85rem; }
 .file-list { grid-column: 1 / -1; border: 1px solid var(--border); border-radius: 6px;
@@ -568,6 +1155,10 @@ def render_html(markdown_content: str) -> str:
     # Add data-score attributes to recommendation table rows and inject slider
     html_body = _inject_recommendation_slider(html_body)
 
+    # Make report sections collapsible in HTML.
+    html_body = _wrap_subsections_in_details(html_body)
+    html_body = _wrap_top_level_sections_in_details(html_body)
+
     return (
         "<!DOCTYPE html>\n"
         '<html lang="en">\n'
@@ -629,22 +1220,99 @@ def _wrap_doc_pairs_in_details(html: str) -> str:
     return "".join(rebuilt)
 
 
+def _wrap_top_level_sections_in_details(html: str) -> str:
+    """Wrap each top-level h2 report section in an open collapsible details block."""
+    import re
+
+    pattern = r'(<h2>(.*?)</h2>)'
+    parts = re.split(pattern, html)
+    if len(parts) <= 1:
+        return html
+
+    rebuilt: list[str] = [parts[0]]
+    i = 1
+    while i < len(parts):
+        section_title = parts[i + 1].strip()
+        after = parts[i + 2] if i + 2 < len(parts) else ""
+        next_heading = re.search(r'(?=<h2>)', after)
+        if next_heading:
+            section_content = after[:next_heading.start()]
+            remaining = after[next_heading.start():]
+        else:
+            section_content = after
+            remaining = ""
+        rebuilt.append(
+            '<details class="report-section" open>\n'
+            f'<summary><span class="report-section-title">{section_title}</span></summary>\n'
+            f'{section_content}\n'
+            '</details>\n'
+        )
+        rebuilt.append(remaining)
+        i += 3
+
+    return "".join(rebuilt)
+
+
+def _wrap_subsections_in_details(html: str) -> str:
+    """Wrap each h3 subsection in an open collapsible details block."""
+    import re
+
+    pattern = r'(<h3>(.*?)</h3>)'
+    parts = re.split(pattern, html)
+    if len(parts) <= 1:
+        return html
+
+    rebuilt: list[str] = [parts[0]]
+    i = 1
+    while i < len(parts):
+        subsection_title = parts[i + 1].strip()
+        after = parts[i + 2] if i + 2 < len(parts) else ""
+        next_top_level = re.search(r'(?=<h2>)', after)
+        if next_top_level:
+            subsection_content = after[:next_top_level.start()]
+            remaining = after[next_top_level.start():]
+        else:
+            subsection_content = after
+            remaining = ""
+        rebuilt.append(
+            '<details class="report-subsection" open>\n'
+            f'<summary><span class="report-subsection-title">{subsection_title}</span></summary>\n'
+            f'{subsection_content}\n'
+            '</details>\n'
+        )
+        rebuilt.append(remaining)
+        i += 3
+
+    return "".join(rebuilt)
+
+
 def _inject_recommendation_slider(html: str) -> str:
     """Add data-score attributes to recommendation table rows and inject a slider.
 
-    Finds the first table after the Recommendations heading, adds data-score to
-    each body row, wraps it with an id, and inserts a range slider above it.
+    Finds the first table after the Section Similarity Recommendations heading,
+    adds data-score to each body row, wraps it with an id, and inserts a range
+    slider above it.
     """
     import re
 
-    # Find the Recommendations h2 and the first table after it
-    rec_match = re.search(r'<h2[^>]*>Recommendations</h2>', html, re.IGNORECASE)
+    # Find the section-similarity recommendations heading and the first table after it.
+    rec_match = re.search(
+        r'<h[23][^>]*>(?:\d+(?:\.\d+)*\.\s*)?Section Similarity Recommendations</h[23]>',
+        html,
+        re.IGNORECASE,
+    )
     if not rec_match:
         return html
 
-    # Find the first <table> after the Recommendations heading
+    # Find the first <table> after the recommendations heading.
+    next_heading = re.search(r'<h[23][^>]*>', html[rec_match.end():], flags=re.IGNORECASE)
+    section_end = (
+        rec_match.end() + next_heading.start()
+        if next_heading
+        else len(html)
+    )
     table_start = html.find('<table>', rec_match.end())
-    if table_start == -1:
+    if table_start == -1 or table_start >= section_end:
         return html
     table_end = html.find('</table>', table_start)
     if table_end == -1:
@@ -738,6 +1406,8 @@ def _build_metadata(settings: Settings, project_root: Path) -> dict:
             "exclude": settings.exclude,
             "model": settings.model,
             "embedding_model": settings.docs_embedding_model,
+            "ia_facet_dimensions": settings.docs_ia_facet_dimensions,
+            "ia_facet_values": settings.docs_ia_facet_values,
         },
     }
 
@@ -1112,11 +1782,16 @@ def render_final_report(
     settings: Settings,
     project_root: Path,
     stages_run: list[str] | None = None,
-    topic_clusters: list[dict] | None = None,
 ) -> dict:
     """Build the complete report.json for persistent storage."""
     recommendations = build_recommendations(
         similarity_pairs, suggestions, project_root,
+    )
+    overview = _build_run_overview(
+        result,
+        similarity_pairs,
+        recommendations,
+        stages_run=stages_run,
     )
 
     report: dict = {
@@ -1126,15 +1801,14 @@ def render_final_report(
             "chunks_analyzed": len(result.chunks),
             "similarity_pairs_found": len(similarity_pairs),
             "recommendations_count": len(recommendations),
+            "section_similarity_recommendations_found": len(recommendations),
         },
-        "documents": [
-            _short_path(doc.path) for doc in sorted(result.documents, key=lambda d: d.path)
-        ],
-        "stages_run": stages_run or [],
-        "recommendations": recommendations,
+        "report_structure": _report_structure(
+            overview,
+            recommendations,
+            result,
+            similarity_pairs,
+        ),
     }
-
-    if topic_clusters:
-        report["topic_clusters"] = topic_clusters
 
     return report

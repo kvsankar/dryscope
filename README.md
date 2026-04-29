@@ -4,14 +4,19 @@ Find duplicate code and overlapping documentation before handing work to an expe
 
 `dryscope` is a narrowing tool:
 - for code, it surfaces structural duplicate candidates and filters them down to a shortlist
-- for docs, it finds overlapping sections and groups repeated document families into consolidation recommendations
+- for docs, it has two tracks:
+  - **Information Architecture**: profiles documents, discovers canonical labels, builds a topic/facet view, and suggests multi-document consolidation clusters
+  - **Section Similarity**: compares heading-based sections and ranks concrete section-level consolidation/link recommendations
 
 It is designed to reduce how much of a repository a stronger model needs to read, not to replace the stronger model entirely.
 
 ## Features
 
-- **Code duplicate detection** — Python, Go, Java, JavaScript, JSX, TypeScript, and TSX via tree-sitter + sentence-transformers
-- **Documentation overlap detection** — Markdown, RST, and plaintext via embedding similarity + optional LLM analysis
+- **Code duplicate detection** — Python, Go, Java, JavaScript, JSX, TypeScript, and TSX via tree-sitter + embeddings
+- **Documentation Information Architecture** — LLM document descriptors, canonical label taxonomy, IA topic tree, facets, diagnostics, and consolidation clusters
+- **Documentation section similarity** — Markdown, RST, and plaintext via heading chunks, embedding similarity, and optional LLM pair analysis
+- **HTML/Markdown/JSON docs reports** — top-down Doc DRY report with numbered collapsible sections and the same structure across formats
+- **Saved report cleanup** — prune old `.dryscope/runs` outputs by count or date, dry-run first by default
 - **Hybrid similarity** — 70% embedding cosine + 30% token Jaccard with size-ratio filtering
 - **Optional LLM verification** — classifies findings as `refactor`, `review`, or `noise`
 - **Deterministic escalation policy** — keeps `review` findings plus higher-value `refactor` findings for expensive follow-up
@@ -24,6 +29,7 @@ It is designed to reduce how much of a repository a stronger model needs to read
 `dryscope` is best used as:
 - a code duplicate candidate generator
 - a documentation overlap detector
+- a documentation IA review aid for answering "how should these docs be organized?"
 - a prefilter before a stronger model does deeper refactoring or docs consolidation work
 
 It is not positioned as:
@@ -37,6 +43,15 @@ It is not positioned as:
 uv pip install .
 ```
 
+The default install supports API embedding models through LiteLLM. Set the
+provider API key for your embedding model, such as `OPENAI_API_KEY` for
+`text-embedding-3-small`. Local sentence-transformer embeddings are optional
+because they pull in PyTorch:
+
+```bash
+uv pip install ".[local-embeddings]"
+```
+
 ## Quick Start
 
 ```bash
@@ -45,6 +60,12 @@ dryscope scan /path/to/project
 
 # Documentation overlap
 dryscope scan /path/to/docs --docs
+
+# Local embeddings, after installing .[local-embeddings]
+dryscope scan /path/to/project --embedding-model all-MiniLM-L6-v2
+
+# Full documentation IA + section similarity report
+dryscope scan /path/to/docs --docs --stage full --backend cli -f html
 
 # Both code and docs
 dryscope scan /path/to/project --code --docs
@@ -73,11 +94,16 @@ Public examples from recent validation passes:
 
 - `stellar/stellar-docs`
   - docs scan found real overlap in repeated sequence-diagram flows
-  - grouped recommendation output reduced noisy pairwise suggestions into a compact 4-item shortlist
+  - grouped Section Similarity output reduced noisy pairwise suggestions into a compact 4-item shortlist
 
 - `gethomepage/homepage`
   - docs scan found 0 overlap pairs
-  - the pipeline exited early instead of spending LLM work on a large negative repo
+  - with the old large-repo guard enabled, the pipeline exited early instead of spending LLM work on a large negative repo
+
+For docs-heavy repositories, the current docs report is organized around the two Doc DRY tracks:
+
+1. **Information Architecture**: document descriptors -> canonical label normalization -> IA topic tree/facets -> suggested consolidation clusters.
+2. **Section Similarity**: document sections -> embeddings -> similar section pairs -> section similarity recommendations.
 
 ## Configuration
 
@@ -95,7 +121,7 @@ min_lines = 6
 min_tokens = 0
 max_cluster_size = 15
 threshold = 0.90
-embedding_model = "all-MiniLM-L6-v2"
+embedding_model = "text-embedding-3-small"
 escalate_refactor_min_lines = 40
 escalate_refactor_min_actionability = 2.0
 escalate_refactor_min_units = 3
@@ -111,10 +137,24 @@ threshold_intent = 0.8
 min_content_words = 15
 include_intra = false
 token_weight = 0.3
-embedding_model = "all-MiniLM-L6-v2"
-intent_max_docs = 250
+# Same embedding backend choices as [code].
+embedding_model = "text-embedding-3-small"
+intent_max_docs = 0
 llm_max_doc_pairs = 250
-intent_skip_without_similarity_min_docs = 100
+intent_skip_without_similarity_min_docs = 0
+
+[docs.ia]
+# Generic seed dimensions shown to the LLM. These are suggestions, not a
+# product-specific taxonomy; dryscope still infers the corpus topic tree.
+facet_dimensions = ["doc_role", "audience", "lifecycle", "content_type", "surface", "canonicality"]
+
+[docs.ia.facet_values]
+doc_role = ["guide", "reference", "tutorial", "spec", "plan", "status", "research", "changelog", "architecture", "decision", "overview", "troubleshooting"]
+audience = ["user", "contributor", "maintainer", "operator", "internal", "agent"]
+lifecycle = ["current", "proposed", "historical", "deprecated", "draft", "unknown"]
+content_type = ["concept", "workflow", "api", "troubleshooting", "decision", "benchmark", "example", "architecture", "requirements"]
+surface = ["public", "internal", "generated", "extension", "package", "integration"]
+canonicality = ["primary", "supporting", "archive", "duplicate", "index", "unknown"]
 
 [llm]
 model = "claude-haiku-4-5-20251001"
@@ -246,7 +286,7 @@ dryscope scan <path> [OPTIONS]
 |--------|---------|-------------|
 | `--code / --no-code` | `--code` | Scan for code duplicates |
 | `--docs / --no-docs` | off | Scan for documentation overlap |
-| `--lang` | all | Filter: `python`, `ts`, `tsx` |
+| `--lang` | all | Filter: `python`, `go`, `java`, `js`, `jsx`, `ts`, `tsx` |
 | `-t, --threshold` | `0.90` | Similarity threshold (0.0-1.0) |
 | `-f, --format` | `terminal` | Output: `terminal`, `json`, `markdown`, `html` |
 | `-m, --min-lines` | `6` | Minimum lines per code unit |
@@ -254,12 +294,25 @@ dryscope scan <path> [OPTIONS]
 | `--max-cluster-size` | `15` | Drop clusters larger than this |
 | `-e, --exclude` | | Glob patterns to exclude (code) |
 | `--exclude-type` | | Base class types to exclude (code) |
-| `--embedding-model` | `all-MiniLM-L6-v2` | Sentence-transformer model |
+| `--embedding-model` | `text-embedding-3-small` | Embedding model; API models use LiteLLM, local sentence-transformers such as `all-MiniLM-L6-v2` require `.[local-embeddings]` |
 | `--verify` | off | LLM verification + deterministic escalation policy |
 | `--llm-model` | `claude-haiku-4-5-20251001` | LLM model for verification |
 | `--stage` | `similarity` | Docs pipeline: `similarity` or `full` |
 | `--resume` | off | Resume from latest docs run |
 | `--intra` | off | Include intra-document overlap (docs) |
+| `--threshold-intent` | `0.8` | Topic/intent matching threshold for docs full stage |
+| `--concurrency` | config | Max parallel LLM calls for docs full stage |
+| `--backend` | config | LLM backend: `cli`, `codex-cli`, `litellm`, or `ollama` |
+
+Report cleanup:
+
+| Command | Description |
+|---------|-------------|
+| `dryscope reports clean <path> --keep-last N` | Keep the newest N saved report runs |
+| `dryscope reports clean <path> --keep-since YYYY-MM-DD` | Keep runs on or after a calendar date |
+| `dryscope reports clean <path> --keep-since YYYY-MM` | Keep runs on or after the first day of a month |
+| `dryscope reports clean <path> --keep-days N` | Keep runs from the last N days |
+| `--force` | Actually delete runs; without this, cleanup is preview-only |
 
 ```
 dryscope init         # Generate .dryscope.toml
@@ -267,14 +320,55 @@ dryscope install      # Install Claude Code and Codex skills
 dryscope uninstall    # Remove Claude Code and Codex skills
 dryscope cache stats  # Show cache statistics
 dryscope cache clear  # Clear the cache
+dryscope reports clean /path/to/project --keep-last 5          # Preview deleting older saved runs
+dryscope reports clean /path/to/project --keep-days 30 --force # Delete runs older than 30 days
 ```
+
+### Saved Report Cleanup
+
+Docs scans are saved under `.dryscope/runs/<run-id>/` with `report.md`,
+`report.html`, `report.json`, and resumable stage artifacts. Cleanup is dry-run
+by default:
+
+```bash
+# Keep the newest 10 runs; preview only
+dryscope reports clean /path/to/project --keep-last 10
+
+# Keep reports from April 2026 onward; preview only
+dryscope reports clean /path/to/project --keep-since 2026-04-01
+
+# Keep reports from the last 30 days and actually delete older runs
+dryscope reports clean /path/to/project --keep-days 30 --force
+```
+
+When multiple keep rules are supplied, dryscope keeps the union. For example,
+`--keep-last 5 --keep-days 30` preserves the newest five runs plus any run from
+the last 30 days. After deletion, `.dryscope/latest` is repointed to the newest
+remaining run.
+
+### Report Format Structure
+
+`report.md`, `report.html`, and `report.json` use the same top-level section
+order: Run Overview, Information Architecture, Suggested Consolidation Clusters,
+Section Similarity, optional Document Pair Analysis, Canonical Label Taxonomy,
+and Methodology.
+
+At the top level, JSON keeps only run metadata, a compact summary, and the
+ordered `report_structure`; detailed payloads live under their owning sections.
+
+Each detailed list is owned by one section. For example, IA topic documents live
+inside Information Architecture, consolidation documents live inside Suggested
+Consolidation Clusters, and canonical labels/aliases live inside Canonical Label
+Taxonomy. The report avoids "sample first, full list later" output; long lists
+are collapsible in Markdown/HTML and nested under the corresponding section in
+JSON.
 
 ## How It Works
 
 ### Code Pipeline
 1. **Parse** — tree-sitter extracts functions, classes, and methods
 2. **Normalize** — identifiers/literals replaced with placeholders; comments stripped
-3. **Embed** — sentence-transformers generates vector embeddings locally
+3. **Embed** — API embeddings through LiteLLM or local sentence-transformers embeddings
 4. **Compare** — hybrid similarity (70% cosine + 30% token Jaccard) with size-ratio filtering
 5. **Cluster** — Union-Find groups similar pairs, scored by actionability
 6. **Verify** _(optional)_ — LLM classifies each cluster as `refactor`, `review`, or `noise`
@@ -282,13 +376,14 @@ dryscope cache clear  # Clear the cache
 
 ### Docs Pipeline
 1. **Chunk** — split documents into heading-based sections
-2. **Embed** — sentence-transformers generates section embeddings
-3. **Compare** — hybrid similarity finds cross-document overlap
-4. **Restrict** _(large repos)_ — cap later stages to docs and doc-pairs with the strongest similarity evidence
-5. **Skip Early** _(large negative repos)_ — if stage 1 finds no overlap in a large corpus, the intent stage is skipped instead of spending LLM work on the whole repo
-6. **Topics** _(full stage)_ — LLM extracts topics, clusters documents by intent overlap
-7. **Analyze** _(full stage)_ — LLM classifies each pair with action recommendations
-8. **Group** — related pairwise recommendations are merged into document-family recommendations to reduce output spam
+2. **Embed** — API embeddings through LiteLLM or local sentence-transformers embeddings
+3. **Compare sections** — hybrid similarity finds cross-document section overlap
+4. **Extract descriptors** _(full stage)_ — LLM profiles each document with title, summary, aboutness labels, reader intents, role, audience, lifecycle, content type, surface, and canonicality
+5. **Canonicalize labels** _(full stage)_ — deterministic matching plus optional LLM canonicalization turns raw aboutness/intent labels into a corpus-level canonical label taxonomy
+6. **Discover IA** _(full stage)_ — LLM builds a candidate information architecture: topic tree, facets, diagnostics, and suggested consolidation clusters
+7. **Match intent pairs** _(full stage)_ — canonical labels are embedded to find related document pairs for optional deeper pair analysis
+8. **Analyze pairs** _(full stage)_ — LLM classifies overlapping document pairs with action recommendations when within cost limits
+9. **Report** — markdown, HTML, and JSON share the same top-down structure: run overview, Information Architecture, Suggested Consolidation Clusters, Section Similarity, optional pair analysis, and canonical label taxonomy
 
 ## What Good Output Looks Like
 
@@ -298,8 +393,11 @@ For code:
 - borderline same-file or low-payoff duplicates left as `review`
 
 For docs:
-- 0 recommendations on clean negative repos
-- a few grouped recommendations on docs-heavy repos
+- an Information Architecture section showing topic groups, facets, and diagnostics
+- suggested consolidation clusters from canonical labels shared by multiple documents
+- section similarity recommendations only when section-level overlap exists
+- 0 section similarity recommendations on clean negative repos, while IA may still report organizational signals
+- a few grouped Section Similarity recommendations on docs-heavy repos
 - one family recommendation for many near-identical sibling docs, rather than many pairwise duplicates
 
 ## Benchmarking

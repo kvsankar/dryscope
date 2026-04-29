@@ -26,12 +26,26 @@ class TestScanHelp:
 
 class TestScanCode:
     def test_scan_code_produces_output(self, runner):
-        result = runner.invoke(main, ["scan", FIXTURES, "--code"])
+        result = runner.invoke(
+            main,
+            ["scan", FIXTURES, "--code", "--embedding-model", "all-MiniLM-L6-v2"],
+        )
         # Should complete without error (exit 0)
         assert result.exit_code == 0
 
     def test_scan_code_json_produces_valid_json(self, runner):
-        result = runner.invoke(main, ["scan", FIXTURES, "--code", "-f", "json"])
+        result = runner.invoke(
+            main,
+            [
+                "scan",
+                FIXTURES,
+                "--code",
+                "-f",
+                "json",
+                "--embedding-model",
+                "all-MiniLM-L6-v2",
+            ],
+        )
         assert result.exit_code == 0
         # Output mixes stderr messages with JSON; extract the JSON object
         output = result.output
@@ -57,3 +71,53 @@ class TestVersion:
         result = runner.invoke(main, ["--version"])
         assert result.exit_code == 0
         assert __version__ in result.output
+
+
+class TestReportsClean:
+    def _make_run(self, root: Path, run_id: str) -> Path:
+        run_dir = root / ".dryscope" / "runs" / run_id
+        run_dir.mkdir(parents=True)
+        (run_dir / "report.html").write_text(run_id)
+        return run_dir
+
+    def test_reports_clean_defaults_to_dry_run(self, runner, tmp_path):
+        self._make_run(tmp_path, "20260401-000000")
+        self._make_run(tmp_path, "20260402-000000")
+        self._make_run(tmp_path, "20260403-000000")
+
+        result = runner.invoke(main, ["reports", "clean", str(tmp_path), "--keep-last", "1"])
+
+        assert result.exit_code == 0
+        assert "Would delete: 2" in result.output
+        assert "Dry run only" in result.output
+        assert (tmp_path / ".dryscope" / "runs" / "20260401-000000").exists()
+
+    def test_reports_clean_force_deletes_old_runs(self, runner, tmp_path):
+        self._make_run(tmp_path, "20260401-000000")
+        self._make_run(tmp_path, "20260402-000000")
+        newest = self._make_run(tmp_path, "20260403-000000")
+
+        result = runner.invoke(main, ["reports", "clean", str(tmp_path), "--keep-last", "1", "--force"])
+
+        assert result.exit_code == 0
+        assert "Deleted: 2" in result.output
+        assert "Latest: 20260403-000000" in result.output
+        assert newest.exists()
+        assert not (tmp_path / ".dryscope" / "runs" / "20260401-000000").exists()
+
+    def test_reports_clean_keep_since(self, runner, tmp_path):
+        self._make_run(tmp_path, "20260331-000000")
+        self._make_run(tmp_path, "20260401-000000")
+        self._make_run(tmp_path, "20260402-000000")
+
+        result = runner.invoke(main, ["reports", "clean", str(tmp_path), "--keep-since", "2026-04-01"])
+
+        assert result.exit_code == 0
+        assert "Would delete: 1" in result.output
+        assert "20260331-000000" in result.output
+
+    def test_reports_clean_requires_policy(self, runner, tmp_path):
+        result = runner.invoke(main, ["reports", "clean", str(tmp_path)])
+
+        assert result.exit_code != 0
+        assert "provide --keep-last, --keep-since, or --keep-days" in result.output

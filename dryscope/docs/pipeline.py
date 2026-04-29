@@ -217,21 +217,18 @@ def _save_all_reports(
     settings: Settings,
     scan_path: Path,
     stages_run: list[str] | None = None,
-    topic_clusters: list[dict] | None = None,
 ) -> None:
     """Save report.json, report.md, and report.html to the run directory."""
     from dryscope.docs.report import render_final_report, render_html, render_markdown
 
     run_store.save_stage(
         "report.json",
-        render_final_report(result, similarity_pairs, suggestions, settings, scan_path, stages_run,
-                            topic_clusters=topic_clusters),
+        render_final_report(result, similarity_pairs, suggestions, settings, scan_path, stages_run),
     )
     md_content = render_markdown(
         result, similarity_pairs, suggestions,
         settings=settings, project_root=scan_path,
         stages_run=stages_run,
-        topic_clusters=topic_clusters,
     )
     (run_store.run_dir / "report.md").write_text(md_content)
     (run_store.run_dir / "report.html").write_text(render_html(md_content))
@@ -380,14 +377,12 @@ def run_pipeline(
         doc_pair_groups = _group_pairs_by_doc_pair(similarity_pairs)
         intent_evidence: dict[tuple[str, str], list[dict]] = {}
 
-        topic_clusters: list[dict] = []
-
         if settings.threshold_intent > 0:
             from dryscope.docs.topics import (
-                cluster_documents_by_topic,
+                descriptor_labels,
                 embed_topics,
                 find_intent_doc_pairs,
-                run_topic_extraction,
+                run_document_descriptor_extraction,
             )
 
             intent_resumed = False
@@ -396,15 +391,55 @@ def run_pipeline(
             if run_store and run_store.stage_exists("stage1b_topics.json"):
                 saved = run_store.load_stage("stage1b_topics.json")
                 if saved:
-                    doc_topics = saved.get("doc_topics", {})
-                    for match in saved.get("intent_matches", []):
-                        key = (min(match["doc_a"], match["doc_b"]), max(match["doc_a"], match["doc_b"]))
-                        intent_evidence[key] = match["matched_topics"]
-                    intent_resumed = True
-                    console.print(
-                        f"[green]Resumed intent detection: {len(doc_topics)} documents, "
-                        f"{len(intent_evidence)} intent pairs.[/green]"
+                    result.document_descriptors = saved.get("document_descriptors", {})
+                    result.topic_taxonomy = saved.get("topic_taxonomy")
+                    if saved.get("descriptor_based") and result.document_descriptors and result.topic_taxonomy:
+                        doc_topics = saved.get("doc_topics", {})
+                        for match in saved.get("intent_matches", []):
+                            key = (min(match["doc_a"], match["doc_b"]), max(match["doc_a"], match["doc_b"]))
+                            intent_evidence[key] = match["matched_topics"]
+                        intent_resumed = True
+                        console.print(
+                            f"[green]Resumed descriptor-based intent detection: {len(doc_topics)} documents, "
+                            f"{len(intent_evidence)} intent pairs.[/green]"
+                        )
+                    existing_ia = (
+                        result.topic_taxonomy.get("information_architecture")
+                        if result.topic_taxonomy else None
                     )
+                    needs_ia = (
+                        not isinstance(existing_ia, dict)
+                        or not existing_ia
+                        or str(existing_ia.get("method", "")).startswith("deterministic")
+                    )
+                    if intent_resumed and result.topic_taxonomy and needs_ia:
+                        from dryscope.docs.taxonomy import build_information_architecture
+
+                        with console.status("[bold green]Discovering information architecture..."):
+                            result.topic_taxonomy["information_architecture"] = build_information_architecture(
+                                result.topic_taxonomy,
+                                document_descriptors=result.document_descriptors,
+                                llm_model=settings.model,
+                                cache=cache,
+                                backend=settings.backend,
+                                ollama_host=settings.ollama_host,
+                                cli_strip_api_key=settings.cli_strip_api_key,
+                                cli_permission_mode=settings.cli_permission_mode,
+                                cli_dangerously_skip_permissions=settings.cli_dangerously_skip_permissions,
+                                facet_dimensions=settings.docs_ia_facet_dimensions,
+                                facet_values=settings.docs_ia_facet_values,
+                            )
+                        ia = result.topic_taxonomy.get("information_architecture", {})
+                        console.print(
+                            "Discovered IA: "
+                            f"[bold]{len(ia.get('topic_tree', []))}[/bold] top-level topic groups, "
+                            f"[bold]{len(ia.get('facets', {}))}[/bold] facet dimensions, "
+                            f"[bold]{len(ia.get('diagnostics', []))}[/bold] diagnostics"
+                        )
+                        saved["topic_taxonomy"] = result.topic_taxonomy
+                        run_store.save_stage("stage1b_topics.json", saved)
+                        if cache:
+                            cache.commit()
 
             if not intent_resumed:
                 console.print()
@@ -430,25 +465,86 @@ def run_pipeline(
                         )
 
                 if intent_doc_chunks_map:
-                    def topic_progress(done: int, total: int) -> None:
-                        console.print(f"  Extracting topics {done}/{total}...", end="\r")
+                    def descriptor_progress(done: int, total: int) -> None:
+                        console.print(f"  Extracting descriptors {done}/{total}...", end="\r")
 
-                    doc_topics = run_topic_extraction(
+                    result.document_descriptors = run_document_descriptor_extraction(
                         intent_doc_chunks_map, settings.model, cache,
                         backend=settings.backend,
                         concurrency=settings.concurrency,
-                        on_progress=topic_progress,
+                        on_progress=descriptor_progress,
                         ollama_host=settings.ollama_host,
                         cli_strip_api_key=settings.cli_strip_api_key,
                         cli_permission_mode=settings.cli_permission_mode,
                         cli_dangerously_skip_permissions=settings.cli_dangerously_skip_permissions,
+                        facet_dimensions=settings.docs_ia_facet_dimensions,
+                        facet_values=settings.docs_ia_facet_values,
                     )
 
                     if cache:
                         cache.commit()
 
-                    total_topics = sum(len(t) for t in doc_topics.values())
-                    console.print(f"Extracted [bold]{total_topics}[/bold] topics from {len(doc_topics)} documents")
+                    raw_doc_topics = {
+                        doc_path: descriptor_labels(descriptor)
+                        for doc_path, descriptor in result.document_descriptors.items()
+                    }
+                    total_topics = sum(len(t) for t in raw_doc_topics.values())
+                    console.print(
+                        f"Extracted [bold]{len(result.document_descriptors)}[/bold] descriptors "
+                        f"and [bold]{total_topics}[/bold] IA labels"
+                    )
+
+                    from dryscope.docs.taxonomy import build_canonical_taxonomy, build_information_architecture
+
+                    with console.status("[bold green]Canonicalizing topics..."):
+                        taxonomy = build_canonical_taxonomy(
+                            raw_doc_topics,
+                            llm_model=settings.model,
+                            cache=cache,
+                            backend=settings.backend,
+                            llm_concurrency=settings.concurrency,
+                            ollama_host=settings.ollama_host,
+                            cli_strip_api_key=settings.cli_strip_api_key,
+                            cli_permission_mode=settings.cli_permission_mode,
+                            cli_dangerously_skip_permissions=settings.cli_dangerously_skip_permissions,
+                        )
+                    doc_topics = taxonomy.doc_topics
+                    result.topic_taxonomy = taxonomy.to_dict()
+                    topic_document_clusters = result.topic_taxonomy.get("topic_document_clusters", [])
+                    console.print(
+                        "Normalized to "
+                        f"[bold]{len(taxonomy.canonical_topics)}[/bold] canonical topics "
+                        f"({taxonomy.method})"
+                    )
+                    console.print(
+                        "Found "
+                        f"[bold]{len(topic_document_clusters)}[/bold] topic coverage clusters "
+                        "(canonical topics covered by 2+ documents)"
+                    )
+                    with console.status("[bold green]Discovering information architecture..."):
+                        result.topic_taxonomy["information_architecture"] = build_information_architecture(
+                            result.topic_taxonomy,
+                            document_descriptors=result.document_descriptors,
+                            llm_model=settings.model,
+                            cache=cache,
+                            backend=settings.backend,
+                            ollama_host=settings.ollama_host,
+                            cli_strip_api_key=settings.cli_strip_api_key,
+                            cli_permission_mode=settings.cli_permission_mode,
+                            cli_dangerously_skip_permissions=settings.cli_dangerously_skip_permissions,
+                            facet_dimensions=settings.docs_ia_facet_dimensions,
+                            facet_values=settings.docs_ia_facet_values,
+                        )
+                    ia = result.topic_taxonomy.get("information_architecture", {})
+                    console.print(
+                        "Discovered IA: "
+                        f"[bold]{len(ia.get('topic_tree', []))}[/bold] top-level topic groups, "
+                        f"[bold]{len(ia.get('facets', {}))}[/bold] facet dimensions, "
+                        f"[bold]{len(ia.get('diagnostics', []))}[/bold] diagnostics"
+                    )
+
+                    if cache:
+                        cache.commit()
 
                     # Embed all unique topics
                     all_topics = list({t for topics in doc_topics.values() for t in topics})
@@ -465,21 +561,6 @@ def run_pipeline(
                         f"(topic cosine > {settings.threshold_intent})"
                     )
 
-                    # Cluster documents by shared topics
-                    if all_topics:
-                        topic_clusters = cluster_documents_by_topic(
-                            doc_topics, topic_embeddings, settings.threshold_intent,
-                        )
-                        if topic_clusters:
-                            console.print(
-                                f"Found [bold]{len(topic_clusters)}[/bold] document clusters by topic"
-                            )
-                            for cluster in topic_clusters:
-                                console.print(
-                                    f"  Cluster \"{cluster['label']}\": "
-                                    f"{len(cluster['documents'])} docs"
-                                )
-
                     # Save stage1b
                     if run_store:
                         intent_matches_data = [
@@ -492,7 +573,12 @@ def run_pipeline(
                         ]
                         run_store.save_stage("stage1b_topics.json", {
                             "metadata": {},
+                            "descriptor_based": True,
+                            "document_descriptors": result.document_descriptors,
+                            "descriptor_labels": raw_doc_topics,
+                            "raw_doc_topics": raw_doc_topics,
                             "doc_topics": doc_topics,
+                            "topic_taxonomy": result.topic_taxonomy,
                             "intent_matches": intent_matches_data,
                         })
 
@@ -517,11 +603,9 @@ def run_pipeline(
 
         if not doc_pair_groups:
             if run_store:
-                _save_all_reports(run_store, result, similarity_pairs, suggestions, settings, scan_path, stages_run,
-                                  topic_clusters=topic_clusters)
+                _save_all_reports(run_store, result, similarity_pairs, suggestions, settings, scan_path, stages_run)
             _output_results(result, similarity_pairs, suggestions,
-                            output_format, output_file, console, settings, scan_path, stages_run,
-                            topic_clusters=topic_clusters)
+                            output_format, output_file, console, settings, scan_path, stages_run)
             return result
 
         # ─── Stage 2: LLM Doc-Pair Analysis ───
@@ -540,11 +624,9 @@ def run_pipeline(
                 f"Skipping LLM stage.[/red]"
             )
             if run_store:
-                _save_all_reports(run_store, result, similarity_pairs, suggestions, settings, scan_path, stages_run,
-                                  topic_clusters=topic_clusters)
+                _save_all_reports(run_store, result, similarity_pairs, suggestions, settings, scan_path, stages_run)
             _output_results(result, similarity_pairs, suggestions,
-                            output_format, output_file, console, settings, scan_path, stages_run,
-                            topic_clusters=topic_clusters)
+                            output_format, output_file, console, settings, scan_path, stages_run)
             return result
 
         if not skip_confirm:
@@ -552,11 +634,9 @@ def run_pipeline(
             if not click.confirm("Proceed?"):
                 console.print("[yellow]Skipping LLM stage.[/yellow]")
                 if run_store:
-                    _save_all_reports(run_store, result, similarity_pairs, suggestions, settings, scan_path, stages_run,
-                                      topic_clusters=topic_clusters)
+                    _save_all_reports(run_store, result, similarity_pairs, suggestions, settings, scan_path, stages_run)
                 _output_results(result, similarity_pairs, suggestions,
-                                output_format, output_file, console, settings, scan_path, stages_run,
-                                topic_clusters=topic_clusters)
+                                output_format, output_file, console, settings, scan_path, stages_run)
                 return result
 
         try:
@@ -618,12 +698,10 @@ def run_pipeline(
             suggestions = None
 
         if run_store:
-            _save_all_reports(run_store, result, similarity_pairs, suggestions, settings, scan_path, stages_run,
-                              topic_clusters=topic_clusters)
+            _save_all_reports(run_store, result, similarity_pairs, suggestions, settings, scan_path, stages_run)
 
         _output_results(result, similarity_pairs, suggestions,
-                        output_format, output_file, console, settings, scan_path, stages_run,
-                        topic_clusters=topic_clusters)
+                        output_format, output_file, console, settings, scan_path, stages_run)
         return result
     finally:
         if cache:
@@ -640,25 +718,26 @@ def _output_results(
     settings: Settings | None = None,
     scan_path: Path | None = None,
     stages_run: list[str] | None = None,
-    topic_clusters: list[dict] | None = None,
 ) -> None:
     """Generate and output the report."""
     from dryscope.docs.report import render_html, render_json, render_markdown, render_terminal
 
     if output_format == "terminal":
         console.print()
-        render_terminal(result, similarity_pairs, suggestions, console,
-                        topic_clusters=topic_clusters)
+        render_terminal(result, similarity_pairs, suggestions, console)
     elif output_format == "markdown":
         content = render_markdown(
             result, similarity_pairs, suggestions,
             settings=settings, project_root=scan_path,
             stages_run=stages_run,
-            topic_clusters=topic_clusters,
         )
         if output_file:
-            Path(output_file).write_text(content)
+            output_path = Path(output_file)
+            output_path.write_text(content)
+            html_path = output_path.with_suffix(".html")
+            html_path.write_text(render_html(content))
             console.print(f"Report written to [bold]{output_file}[/bold]")
+            console.print(f"HTML report written to [bold]{html_path}[/bold]")
         else:
             stdout_console = Console()
             stdout_console.print(content)
@@ -667,7 +746,6 @@ def _output_results(
             result, similarity_pairs, suggestions,
             settings=settings, project_root=scan_path,
             stages_run=stages_run,
-            topic_clusters=topic_clusters,
         )
         content = render_html(md_content)
         if output_file:
@@ -679,8 +757,7 @@ def _output_results(
     elif output_format == "json":
         content = render_json(result, similarity_pairs, suggestions,
                               settings=settings, project_root=scan_path,
-                              stages_run=stages_run,
-                              topic_clusters=topic_clusters)
+                              stages_run=stages_run)
         if output_file:
             Path(output_file).write_text(content)
             console.print(f"Report written to [bold]{output_file}[/bold]")

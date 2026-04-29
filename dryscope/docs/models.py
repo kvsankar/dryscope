@@ -104,3 +104,5 @@ class AnalysisResult:
     codes: list[Code] = field(default_factory=list)
     categories: list[Category] = field(default_factory=list)
     doc_pair_analyses: list[DocPairAnalysis] = field(default_factory=list)
+    document_descriptors: dict[str, dict] = field(default_factory=dict)
+    topic_taxonomy: dict | None = None

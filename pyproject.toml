@@ -20,7 +20,6 @@ dependencies = [
     "tree-sitter-javascript>=0.23",
     "tree-sitter-go>=0.25",
     "tree-sitter-typescript>=0.23",
-    "sentence-transformers>=3.0",
     "numpy>=1.26",
     "click>=8.0",
     "rich>=13.0",
@@ -28,11 +27,11 @@ dependencies = [
     "litellm>=1.0",
     "tenacity>=8.0",
     "tree-sitter-java>=0.23.5",
-    "tree-sitter-go>=0.25.0",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7.0", "pytest-cov"]
+local-embeddings = ["sentence-transformers>=3.0"]
+dev = ["pytest>=7.0", "pytest-cov", "sentence-transformers>=3.0"]
 
 [project.urls]
 Homepage = "https://github.com/sankar/dryscope"
