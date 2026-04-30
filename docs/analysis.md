@@ -36,9 +36,10 @@ review queue:
 | `VibesOS` | 23 | 4 |
 
 The checked-in benchmark labels are deliberately sparse but include real
-refactor candidates and a known false-positive case. That is enough for alpha
-regression coverage of the narrowing workflow, but not enough to claim mature
-precision, recall, or automatic refactor correctness.
+refactor candidates and known non-actionable cases. That is enough for alpha
+regression coverage of the narrowing workflow. The separate quality report
+scores the reviewed slice with TP/FP/FN, labeled precision, curated recall, F1,
+and top-K metrics, but it is still not a broad mature precision/recall claim.
 
 ## Established Tools (text/token-based)
 
@@ -131,3 +132,5 @@ spent. In recent public validation:
   queues
 
 That is the right bar for dryscope: high-signal narrowing before expensive follow-up.
+Use `uv run python benchmarks/run_quality_report.py` to generate the current
+label-based quality report.

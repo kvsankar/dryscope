@@ -4,7 +4,15 @@ import importlib.util
 import json
 from pathlib import Path
 
-from dryscope.benchmark import build_label_index, finding_signature, score_labeled_findings
+from dryscope.benchmark import (
+    build_label_index,
+    docs_section_signature,
+    finding_matches_label_units,
+    finding_signature,
+    score_code_quality,
+    score_docs_section_quality,
+    score_labeled_findings,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -81,6 +89,137 @@ def test_build_label_index_normalizes_signature_order():
     assert ("demo", (("a.py", "a"), ("b.py", "b"))) in index
 
 
+def test_finding_matches_label_units_by_path_suffix():
+    finding = {
+        "units": [
+            {"file": "/tmp/clone/src/app.py", "name": "main"},
+            {"file": "/tmp/clone/src/app.py", "name": "helper"},
+        ]
+    }
+
+    assert finding_matches_label_units(
+        finding,
+        [
+            {"path": "src/app.py", "name": "helper"},
+            {"path": "src/app.py", "name": "main"},
+        ],
+    )
+
+
+def test_score_code_quality_reports_tp_fp_fn():
+    findings = [
+        {
+            "verdict": "review",
+            "tier": "exact",
+            "units": [
+                {"file": "/tmp/clone/src/app.py", "name": "main"},
+                {"file": "/tmp/clone/src/app.py", "name": "helper"},
+            ],
+        },
+        {
+            "verdict": "review",
+            "tier": "exact",
+            "units": [
+                {"file": "/tmp/clone/src/noise.py", "name": "a"},
+                {"file": "/tmp/clone/src/noise.py", "name": "b"},
+            ],
+        },
+    ]
+    labels = [
+        {
+            "repo": "demo",
+            "label": "real_refactor_candidate",
+            "units": [
+                {"path": "src/app.py", "name": "main"},
+                {"path": "src/app.py", "name": "helper"},
+            ],
+        },
+        {
+            "repo": "demo",
+            "label": "not_worth_refactoring",
+            "units": [
+                {"path": "src/noise.py", "name": "a"},
+                {"path": "src/noise.py", "name": "b"},
+            ],
+        },
+        {
+            "repo": "demo",
+            "label": "real_refactor_candidate",
+            "units": [
+                {"path": "src/missed.py", "name": "a"},
+                {"path": "src/missed.py", "name": "b"},
+            ],
+        },
+    ]
+
+    score = score_code_quality("demo", findings, labels)
+
+    assert score["true_positives"] == 1
+    assert score["false_positives"] == 1
+    assert score["false_negatives"] == 1
+    assert score["labeled_precision"] == 0.5
+    assert score["curated_recall"] == 0.5
+
+
+def test_docs_section_signature_is_order_independent():
+    pair = {
+        "chunk_a": {"file": "b.md", "line_start": 20},
+        "chunk_b": {"file": "a.md", "line_start": 10},
+    }
+
+    assert docs_section_signature(pair) == (("a.md", 10), ("b.md", 20))
+
+
+def test_score_docs_section_quality_reports_tp_fp_fn():
+    pairs = [
+        {
+            "chunk_a": {"file": "a.md", "line_start": 10},
+            "chunk_b": {"file": "b.md", "line_start": 20},
+            "embedding_similarity": 1.0,
+        },
+        {
+            "chunk_a": {"file": "template-a.md", "line_start": 1},
+            "chunk_b": {"file": "template-b.md", "line_start": 1},
+            "embedding_similarity": 0.99,
+        },
+    ]
+    labels = [
+        {
+            "repo": "docs",
+            "track": "docs-section-match",
+            "label": "useful_section_match",
+            "sections": [
+                {"path": "b.md", "line_start": 20},
+                {"path": "a.md", "line_start": 10},
+            ],
+        },
+        {
+            "repo": "docs",
+            "track": "docs-section-match",
+            "label": "intentional_repetition",
+            "sections": [
+                {"path": "template-a.md", "line_start": 1},
+                {"path": "template-b.md", "line_start": 1},
+            ],
+        },
+        {
+            "repo": "docs",
+            "track": "docs-section-match",
+            "label": "useful_section_match",
+            "sections": [
+                {"path": "missed-a.md", "line_start": 1},
+                {"path": "missed-b.md", "line_start": 1},
+            ],
+        },
+    ]
+
+    score = score_docs_section_quality("docs", pairs, labels)
+
+    assert score["true_positives"] == 1
+    assert score["false_positives"] == 1
+    assert score["false_negatives"] == 1
+
+
 def test_public_benchmark_has_ai_generated_duplicate_group():
     manifest = json.loads((REPO_ROOT / "benchmarks" / "public_repos.json").read_text())
     repos = manifest["repos"]
@@ -111,6 +250,14 @@ def test_public_docs_benchmark_has_default_group():
         "prometheus-docs",
     }
     assert all(repo["docs_path"] for repo in repos)
+
+
+def test_public_docs_labels_use_known_schema():
+    labels = json.loads((REPO_ROOT / "benchmarks" / "public_docs_labels.json").read_text())["labels"]
+
+    assert labels
+    assert {label["track"] for label in labels} == {"docs-section-match"}
+    assert all(len(label["sections"]) == 2 for label in labels)
 
 
 def test_public_benchmark_pins_local_embedding_model():

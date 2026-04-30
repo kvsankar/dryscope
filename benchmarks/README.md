@@ -7,8 +7,10 @@ It exists to turn exploratory testing into a repeatable workflow:
 - `public_repos.json` defines the public repositories used for benchmarking
 - `public_docs_repos.json` defines the public documentation repositories used for docs benchmarking
 - `public_labels.json` stores reviewed labels for a subset of findings
+- `public_docs_labels.json` stores reviewed Section Match labels for a subset of docs findings
 - `run_public_benchmark.py` clones the public repos, runs `dryscope`, and scores any findings that match the stored labels
 - `run_public_docs_benchmark.py` clones docs repos, runs the docs tracks, and saves report artifacts
+- `run_quality_report.py` converts generated benchmark outputs plus labels into quality metrics
 
 This benchmark pack is intentionally conservative:
 - it is for repeatable public regression checks
@@ -50,6 +52,41 @@ uv run python benchmarks/run_public_benchmark.py --group public-ai-generated-dup
 Outputs are written to `/tmp/dryscope-public-benchmark-results` by default.
 Each summary row and saved JSON output records the dryscope git commit and the
 cloned benchmark repository git commit.
+
+## Quality Report
+
+The benchmark runners prove that dryscope can run and generate artifacts. The
+quality report is the separate step that scores generated output against
+curated labels:
+
+```bash
+uv run python benchmarks/run_quality_report.py
+```
+
+Outputs are written to `/tmp/dryscope-quality-report` by default:
+
+- `quality_report.json`
+- `quality_report.md`
+
+The report uses the practical 2x2 for a shortlist tool:
+
+- **TP**: a surfaced finding matches an actionable curated label
+- **FP**: a surfaced finding matches a curated non-actionable label
+- **FN**: an actionable curated label was not surfaced
+- **TN**: intentionally omitted, because the space of non-duplicate code units
+  and non-overlapping doc sections is too large to enumerate meaningfully
+
+The headline metrics are:
+
+- **labeled precision**: `TP / (TP + FP)` over surfaced findings that have
+  curated labels
+- **curated recall**: `TP / (TP + FN)` over curated actionable labels
+- **F1**: harmonic mean of labeled precision and curated recall
+- **precision@K / recall@K**: top-of-shortlist metrics for `K = 5, 10, 15`
+
+Unlabeled surfaced findings are not counted as false positives. This keeps the
+current sparse public labels honest: the report is quality evidence over the
+reviewed slice, not a mature broad precision/recall claim.
 
 For a bounded Code Review pass over the AI-generated group:
 

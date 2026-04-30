@@ -447,6 +447,17 @@ agent-oriented repositories. The labels are still intentionally sparse, so the
 benchmark pack should be read as regression evidence for the narrowing workflow,
 not as a precision/recall claim.
 
+For quality assessment, run:
+
+```bash
+uv run python benchmarks/run_quality_report.py
+```
+
+That report scores generated benchmark outputs against curated public labels
+using TP/FP/FN, labeled precision, curated recall, F1, and precision@K/recall@K.
+True negatives are intentionally omitted because the non-duplicate search space
+is too large to enumerate.
+
 ## License
 
 MIT

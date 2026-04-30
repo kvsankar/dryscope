@@ -1,0 +1,64 @@
+{
+  "labels": [
+    {
+      "repo": "fastapi-en",
+      "track": "docs-section-match",
+      "label": "useful_section_match",
+      "sections": [
+        { "path": "index.md", "line_start": 491 },
+        { "path": "tutorial/first-steps.md", "line_start": 416 }
+      ],
+      "note": "Exact repeated deployment section between overview and tutorial."
+    },
+    {
+      "repo": "fastapi-en",
+      "track": "docs-section-match",
+      "label": "useful_section_match",
+      "sections": [
+        { "path": "index.md", "line_start": 271 },
+        { "path": "tutorial/first-steps.md", "line_start": 69 }
+      ],
+      "note": "Exact repeated interactive API docs section."
+    },
+    {
+      "repo": "astro-en",
+      "track": "docs-section-match",
+      "label": "intentional_repetition",
+      "sections": [
+        { "path": "guides/cms/ghost.mdx", "line_start": 287 },
+        { "path": "guides/cms/hashnode.mdx", "line_start": 356 }
+      ],
+      "note": "Template repetition across parallel CMS integration guides."
+    },
+    {
+      "repo": "astro-en",
+      "track": "docs-section-match",
+      "label": "intentional_repetition",
+      "sections": [
+        { "path": "guides/integrations-guide/preact.mdx", "line_start": 225 },
+        { "path": "guides/integrations-guide/react.mdx", "line_start": 193 }
+      ],
+      "note": "Parallel framework integration guidance; useful to detect but not necessarily consolidate."
+    },
+    {
+      "repo": "godot-tutorials",
+      "track": "docs-section-match",
+      "label": "useful_section_match",
+      "sections": [
+        { "path": "export/exporting_for_linux.rst", "line_start": 35 },
+        { "path": "export/exporting_for_windows.rst", "line_start": 31 }
+      ],
+      "note": "Repeated cross-platform export instructions worth reviewing for shared wording."
+    },
+    {
+      "repo": "godot-tutorials",
+      "track": "docs-section-match",
+      "label": "intentional_repetition",
+      "sections": [
+        { "path": "migrating/upgrading_to_godot_4.4.rst", "line_start": 19 },
+        { "path": "migrating/upgrading_to_godot_4.5.rst", "line_start": 30 }
+      ],
+      "note": "Versioned upgrade guides naturally repeat migration framing."
+    }
+  ]
+}
