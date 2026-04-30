@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 from dryscope.docs.taxonomy import (
     build_canonical_taxonomy,
-    build_information_architecture,
+    build_docs_map,
     normalize_topic_text,
     topic_similarity,
 )
@@ -159,7 +159,7 @@ def test_build_canonical_taxonomy_parallel_llm_batches(monkeypatch) -> None:
     assert taxonomy.canonical_topics["beta topic"].documents == {"/docs/c.md", "/docs/d.md"}
 
 
-def test_build_information_architecture_uses_llm(monkeypatch) -> None:
+def test_build_docs_map_uses_llm(monkeypatch) -> None:
     from dryscope.docs import coding
 
     taxonomy = build_canonical_taxonomy(
@@ -176,12 +176,12 @@ def test_build_information_architecture_uses_llm(monkeypatch) -> None:
                 "method": "llm",
                 "topic_tree": [
                     {
-                        "id": "ia_01",
+                        "id": "docs_map_01",
                         "label": "getting started",
                         "description": "Entry-point docs.",
                         "children": [
                             {
-                                "id": "ia_01_01",
+                                "id": "docs_map_01_01",
                                 "label": "quickstart workflows",
                                 "description": "First successful usage path.",
                                 "topics": ["quickstart workflow", "install workflow"],
@@ -234,22 +234,22 @@ def test_build_information_architecture_uses_llm(monkeypatch) -> None:
         }
     }
 
-    ia = build_information_architecture(
+    docs_map = build_docs_map(
         taxonomy,
         document_descriptors=descriptors,
         llm_model="fake-model",
         backend="cli",
     )
 
-    assert ia["method"] == "llm"
-    assert ia["topic_tree"][0]["label"] == "getting started"
-    assert ia["facets"]["doc_role"]["values"][0]["value"] == "guide"
-    assert ia["diagnostics"][0]["kind"] == "fragmented_intent"
-    assert ia["source_summary"]["documents"] == 3
-    assert ia["source_summary"]["document_descriptors"] == 1
+    assert docs_map["method"] == "llm"
+    assert docs_map["topic_tree"][0]["label"] == "getting started"
+    assert docs_map["facets"]["doc_role"]["values"][0]["value"] == "guide"
+    assert docs_map["diagnostics"][0]["kind"] == "fragmented_intent"
+    assert docs_map["source_summary"]["documents"] == 3
+    assert docs_map["source_summary"]["document_descriptors"] == 1
 
 
-def test_build_information_architecture_warning_includes_exception(monkeypatch, capsys) -> None:
+def test_build_docs_map_warning_includes_exception(monkeypatch, capsys) -> None:
     from dryscope.docs import coding
 
     taxonomy = build_canonical_taxonomy(
@@ -264,15 +264,15 @@ def test_build_information_architecture_warning_includes_exception(monkeypatch, 
 
     monkeypatch.setattr(coding, "call_llm_cached", fake_call_llm_cached)
 
-    ia = build_information_architecture(
+    docs_map = build_docs_map(
         taxonomy,
         llm_model="fake-model",
         backend="cli",
     )
 
     captured = capsys.readouterr()
-    assert ia["method"] == "deterministic-fallback"
-    assert "information architecture LLM pass failed" in captured.err
+    assert docs_map["method"] == "deterministic-fallback"
+    assert "Docs Map LLM pass failed" in captured.err
     assert "RuntimeError: bad json from cli" in captured.err
 
 

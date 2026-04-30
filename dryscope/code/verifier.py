@@ -1,4 +1,4 @@
-"""LLM-based verification of duplicate clusters.
+"""Code Review for duplicate-code clusters.
 
 Uses litellm for provider-agnostic LLM calls. Supports any model that litellm
 supports (Anthropic, OpenAI, Azure, Bedrock, Ollama, etc.). Auth is handled
@@ -140,7 +140,7 @@ def _format_cluster_context(cluster: Cluster) -> str:
 
 
 def _format_cluster_for_llm(cluster: Cluster) -> str:
-    """Format a cluster's source code for LLM verification."""
+    """Format a cluster's source code for Code Review."""
     parts: list[str] = []
     for i, unit in enumerate(cluster.units):
         parts.append(
@@ -264,7 +264,7 @@ def verify_clusters(
             try:
                 verdict, reason = future.result()
             except Exception as e:
-                logger.warning("LLM verification failed for cluster %d: %s", cluster.cluster_id, e)
+                logger.warning("Code Review failed for cluster %d: %s", cluster.cluster_id, e)
                 verdict, reason = VERDICT_REVIEW, f"verification error: {e}"
             results.append((cluster, verdict, reason))
 

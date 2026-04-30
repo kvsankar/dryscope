@@ -79,6 +79,56 @@ class TestScanDocs:
         assert result.exit_code == 0
         assert captured["embedding_model"] == "all-MiniLM-L6-v2"
 
+    def test_llm_max_doc_pairs_option_applies_to_docs(self, runner, tmp_path, monkeypatch):
+        captured = {}
+
+        def fake_run_docs_scan(**kwargs):
+            captured["llm_max_doc_pairs"] = kwargs["settings"].docs_llm_max_doc_pairs
+
+        monkeypatch.setattr("dryscope.cli._run_docs_scan", fake_run_docs_scan)
+
+        result = runner.invoke(
+            main,
+            [
+                "scan",
+                str(tmp_path),
+                "--docs",
+                "--stage",
+                "docs-report-pack",
+                "--llm-max-doc-pairs",
+                "25",
+            ],
+        )
+
+        assert result.exit_code == 0
+        assert captured["llm_max_doc_pairs"] == 25
+
+    def test_exclude_option_applies_to_docs(self, runner, tmp_path, monkeypatch):
+        captured = {}
+
+        def fake_run_docs_scan(**kwargs):
+            captured["exclude"] = kwargs["settings"].exclude
+
+        monkeypatch.setattr("dryscope.cli._run_docs_scan", fake_run_docs_scan)
+
+        result = runner.invoke(
+            main,
+            [
+                "scan",
+                str(tmp_path),
+                "--docs",
+                "-e",
+                "drafts/**",
+                "-e",
+                "*.tmp.md",
+            ],
+        )
+
+        assert result.exit_code == 0
+        assert "node_modules" in captured["exclude"]
+        assert "drafts/**" in captured["exclude"]
+        assert "*.tmp.md" in captured["exclude"]
+
 
 class TestScanErrors:
     def test_format_markdown_errors_for_code(self, runner):

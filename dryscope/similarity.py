@@ -1,4 +1,4 @@
-"""Find duplicate clusters from embeddings using cosine similarity + Union-Find."""
+"""Find Code Match clusters from embeddings using cosine similarity + Union-Find."""
 
 from __future__ import annotations
 

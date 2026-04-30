@@ -1,4 +1,4 @@
-"""Intent overlap detection via LLM topic extraction + embedding matching."""
+"""Docs Map descriptor extraction and topic matching."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import numpy as np
 from dryscope.cache import Cache
-from dryscope.config import DEFAULT_DOCS_IA_FACET_DIMENSIONS, DEFAULT_DOCS_IA_FACET_VALUES
+from dryscope.config import DEFAULT_DOCS_MAP_FACET_DIMENSIONS, DEFAULT_DOCS_MAP_FACET_VALUES
 from dryscope.docs.coding import call_llm_cached, _strip_code_fences
 from dryscope.docs.embeddings import _get_sentence_transformer, get_embedding, _is_api_model
 from dryscope.docs.models import Chunk
@@ -133,7 +133,7 @@ def _normalize_descriptor(raw: dict, doc_path: str, chunks: list[Chunk]) -> dict
 
 
 def descriptor_labels(descriptor: dict) -> list[str]:
-    """Return IA labels from a rich descriptor for canonical normalization."""
+    """Return Docs Map labels from a rich descriptor for canonical normalization."""
     labels: list[str] = []
     for key in ("about", "reader_intents"):
         labels.extend(str(item).strip() for item in descriptor.get(key, []) if str(item).strip())
@@ -163,8 +163,8 @@ def extract_document_descriptor(
     """Extract a rich IA descriptor for one document via LLM."""
     content = _document_content(chunks)
     headings = _document_headings(chunks)
-    facet_dimensions = facet_dimensions or list(DEFAULT_DOCS_IA_FACET_DIMENSIONS)
-    facet_values = facet_values or DEFAULT_DOCS_IA_FACET_VALUES
+    facet_dimensions = facet_dimensions or list(DEFAULT_DOCS_MAP_FACET_DIMENSIONS)
+    facet_values = facet_values or DEFAULT_DOCS_MAP_FACET_VALUES
     facet_seed = {
         "facet_dimensions": facet_dimensions,
         "suggested_values": {
@@ -175,7 +175,7 @@ def extract_document_descriptor(
         "custom_dimensions": [
             name
             for name in facet_dimensions
-            if name not in DEFAULT_DOCS_IA_FACET_VALUES
+            if name not in DEFAULT_DOCS_MAP_FACET_VALUES
         ],
     }
     cache_key_raw = f"{doc_path}|{content}|{model}|{DESCRIPTORS_VERSION}|{json.dumps(facet_seed, sort_keys=True)}"
@@ -507,7 +507,7 @@ def run_document_descriptor_extraction(
     facet_dimensions: list[str] | None = None,
     facet_values: dict[str, list[str]] | None = None,
 ) -> dict[str, dict]:
-    """Orchestrate parallel IA descriptor extraction across all documents."""
+    """Orchestrate parallel Docs Map descriptor extraction across all documents."""
     if prior_descriptors is None:
         prior_descriptors = {}
 

@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import tomllib
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
 
-DEFAULT_INCLUDE = ["*.md", "*.rst", "*.txt", "*.adoc"]
+DEFAULT_INCLUDE = ["*.md", "*.mdx", "*.rst", "*.txt", "*.adoc"]
 DEFAULT_EXCLUDE = ["node_modules", "venv", ".git", ".dryscope", "*.lock"]
-DEFAULT_DOCS_IA_FACET_DIMENSIONS = [
+DEFAULT_DOCS_MAP_FACET_DIMENSIONS = [
     "doc_role",
     "audience",
     "lifecycle",
@@ -17,7 +18,7 @@ DEFAULT_DOCS_IA_FACET_DIMENSIONS = [
     "surface",
     "canonicality",
 ]
-DEFAULT_DOCS_IA_FACET_VALUES = {
+DEFAULT_DOCS_MAP_FACET_VALUES = {
     "doc_role": [
         "guide",
         "reference",
@@ -64,7 +65,7 @@ keep_same_file_refactors = false
 # exclude_type = ["BaseModel"]
 
 [docs]
-include = ["*.md", "*.rst", "*.txt", "*.adoc"]
+include = ["*.md", "*.mdx", "*.rst", "*.txt", "*.adoc"]
 exclude = ["node_modules", "venv", ".git", ".dryscope", "*.lock"]
 threshold_similarity = 0.9
 threshold_intent = 0.8
@@ -77,12 +78,12 @@ intent_max_docs = 0
 llm_max_doc_pairs = 250
 intent_skip_without_similarity_min_docs = 0
 
-[docs.ia]
+[docs.map]
 # Generic seed dimensions shown to the LLM. These are suggestions, not a
 # product-specific taxonomy; dryscope still infers the corpus topic tree.
 facet_dimensions = ["doc_role", "audience", "lifecycle", "content_type", "surface", "canonicality"]
 
-[docs.ia.facet_values]
+[docs.map.facet_values]
 doc_role = ["guide", "reference", "tutorial", "spec", "plan", "status", "research", "changelog", "architecture", "decision", "overview", "troubleshooting"]
 audience = ["user", "contributor", "maintainer", "operator", "internal", "agent"]
 lifecycle = ["current", "proposed", "historical", "deprecated", "draft", "unknown"]
@@ -138,13 +139,13 @@ class Settings:
     docs_intent_max_docs: int = 0
     docs_llm_max_doc_pairs: int = 250
     docs_intent_skip_without_similarity_min_docs: int = 0
-    docs_ia_facet_dimensions: list[str] = field(
-        default_factory=lambda: list(DEFAULT_DOCS_IA_FACET_DIMENSIONS)
+    docs_map_facet_dimensions: list[str] = field(
+        default_factory=lambda: list(DEFAULT_DOCS_MAP_FACET_DIMENSIONS)
     )
-    docs_ia_facet_values: dict[str, list[str]] = field(
+    docs_map_facet_values: dict[str, list[str]] = field(
         default_factory=lambda: {
             key: list(values)
-            for key, values in DEFAULT_DOCS_IA_FACET_VALUES.items()
+            for key, values in DEFAULT_DOCS_MAP_FACET_VALUES.items()
         }
     )
 
@@ -189,6 +190,17 @@ def find_config_file(scan_path: Path | None = None) -> Path | None:
     return None
 
 
+def _pattern_list(value: str | Sequence[str]) -> list[str]:
+    """Normalize comma-separated or repeated CLI pattern values."""
+    if isinstance(value, str):
+        raw_items = value.split(",")
+    else:
+        raw_items = []
+        for item in value:
+            raw_items.extend(str(item).split(","))
+    return [item.strip() for item in raw_items if item.strip()]
+
+
 def load_settings(
     scan_path: Path | None = None,
     *,
@@ -204,10 +216,11 @@ def load_settings(
     backend: str | None = None,
     threshold: float | None = None,
     threshold_intent: float | None = None,
-    include: str | None = None,
-    exclude: str | None = None,
+    include: str | Sequence[str] | None = None,
+    exclude: str | Sequence[str] | None = None,
     max_cost: float | None = None,
     min_words: int | None = None,
+    llm_max_doc_pairs: int | None = None,
     concurrency: int | None = None,
     intra: bool | None = None,
     token_weight: float | None = None,
@@ -220,9 +233,8 @@ def load_settings(
     if config_path is not None:
         data = load_toml(config_path)
         code_cfg = data.get("code", {})
-        # Backward compat: read [scan] if [docs] is absent
-        docs_cfg = data.get("docs", {}) or data.get("scan", {})
-        docs_ia_cfg = docs_cfg.get("ia", {}) if isinstance(docs_cfg, dict) else {}
+        docs_cfg = data.get("docs", {})
+        docs_map_cfg = docs_cfg.get("map", {}) if isinstance(docs_cfg, dict) else {}
         llm_cfg = data.get("llm", {})
         cache_cfg = data.get("cache", {})
 
@@ -253,9 +265,6 @@ def load_settings(
             settings.exclude = docs_cfg["exclude"]
         if "threshold_similarity" in docs_cfg:
             settings.threshold_similarity = docs_cfg["threshold_similarity"]
-        # Backward compat: threshold_embedding treated as alias
-        elif "threshold_embedding" in docs_cfg:
-            settings.threshold_similarity = docs_cfg["threshold_embedding"]
         if "threshold_intent" in docs_cfg:
             settings.threshold_intent = docs_cfg["threshold_intent"]
         if "min_content_words" in docs_cfg:
@@ -272,16 +281,16 @@ def load_settings(
             settings.docs_llm_max_doc_pairs = docs_cfg["llm_max_doc_pairs"]
         if "intent_skip_without_similarity_min_docs" in docs_cfg:
             settings.docs_intent_skip_without_similarity_min_docs = docs_cfg["intent_skip_without_similarity_min_docs"]
-        if "facet_dimensions" in docs_ia_cfg:
-            settings.docs_ia_facet_dimensions = [
+        if "facet_dimensions" in docs_map_cfg:
+            settings.docs_map_facet_dimensions = [
                 str(item).strip()
-                for item in docs_ia_cfg["facet_dimensions"]
+                for item in docs_map_cfg["facet_dimensions"]
                 if str(item).strip()
             ]
-        if "facet_values" in docs_ia_cfg:
+        if "facet_values" in docs_map_cfg:
             merged_facet_values = {
                 key: list(values)
-                for key, values in settings.docs_ia_facet_values.items()
+                for key, values in settings.docs_map_facet_values.items()
             }
             merged_facet_values.update({
                 str(key).strip(): [
@@ -289,10 +298,10 @@ def load_settings(
                     for item in values
                     if str(item).strip()
                 ]
-                for key, values in docs_ia_cfg["facet_values"].items()
+                for key, values in docs_map_cfg["facet_values"].items()
                 if str(key).strip() and isinstance(values, list)
             })
-            settings.docs_ia_facet_values = merged_facet_values
+            settings.docs_map_facet_values = merged_facet_values
 
         # LLM section
         if "model" in llm_cfg:
@@ -340,15 +349,17 @@ def load_settings(
     if threshold_intent is not None:
         settings.threshold_intent = threshold_intent
     if include is not None:
-        settings.include = [s.strip() for s in include.split(",")]
+        settings.include = _pattern_list(include)
     if exclude is not None:
-        settings.exclude = [s.strip() for s in exclude.split(",")]
+        settings.exclude = [*settings.exclude, *_pattern_list(exclude)]
     if backend is not None:
         settings.backend = backend
     if max_cost is not None:
         settings.max_cost = max_cost
     if min_words is not None:
         settings.min_content_words = min_words
+    if llm_max_doc_pairs is not None:
+        settings.docs_llm_max_doc_pairs = llm_max_doc_pairs
     if concurrency is not None:
         settings.concurrency = concurrency
     if intra is not None:

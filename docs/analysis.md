@@ -78,29 +78,31 @@ No widely used tool combines all of:
 The text-based tools (jscpd, CPD) are production-quality but only catch Type 1-2 clones.
 The research tools target Type 3-4 more directly but are not packaged for practical use.
 
-## Documentation Overlap Detection
+## Docs Track Detection
 
-The landscape for documentation overlap detection is even sparser:
+The landscape for docs track detection is even sparser:
 
 - **Manual review** — most teams rely on manual auditing of docs for redundancy
 - **Diff-based tools** — git diff and similar tools only catch textual duplication, not semantic overlap
 - **Search-based approaches** — full-text search can find exact phrases but misses paraphrased content
 - **Static site inventories** — navigation maps and generated link reports describe structure, but rarely infer whether documents cover the same reader intent or belong under the same IA branch
 
-dryscope's docs pipeline addresses this gap with two Doc DRY tracks:
+dryscope's docs pipeline addresses this gap with named docs tracks:
 
-1. **Information Architecture** — LLM document descriptors capture aboutness,
+1. **Docs Map** (`docs-map`) — LLM document descriptors capture aboutness,
    reader intent, document role, audience, lifecycle, content type, surface, and
    canonicality. These descriptors are canonicalized into a corpus-level label
-   taxonomy, then used to infer a topic tree, facets, diagnostics, and suggested
+   taxonomy, then used to infer a topic tree, facets, diagnostics, and
    consolidation clusters.
-2. **Section Similarity** — heading-based sections are embedded and compared to
+2. **Section Match** (`docs-section-match`) — heading-based sections are embedded and compared to
    find concrete repeated or near-repeated text. Section-level findings become
-   section similarity recommendations.
+   Section Match recommendations.
+3. **Doc Pair Review** (`docs-pair-review`) — selected related document pairs
+   are reviewed by an LLM for relationship and consolidation actions.
 
-The IA track is meant to answer "how should these docs be organized?" The section
-similarity track is meant to answer "where is repeated content?" They are related
-but intentionally reported separately.
+Docs Map is meant to answer "how should these docs be organized?" Section Match
+is meant to answer "where is repeated content?" They are related but
+intentionally reported separately.
 
 ## Conclusion
 
@@ -110,7 +112,7 @@ dryscope fills a real gap, but in a narrower and more practical sense than
 What it does well:
 - surfaces structural duplicate candidates across multiple languages before a larger refactor pass
 - filters code findings into a smaller shortlist for agent, model, or human follow-up
-- discovers documentation IA signals and consolidation clusters across a docs corpus
+- discovers Docs Map signals and consolidation clusters across a docs corpus
 - detects repeated documentation sections and ranks concrete section-level recommendations
 
 What it does not claim to do:

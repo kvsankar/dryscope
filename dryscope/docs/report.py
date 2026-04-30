@@ -15,6 +15,19 @@ from rich.table import Table
 
 from dryscope.config import Settings
 from dryscope.docs.models import AnalysisResult, Category, Code, DocPairAnalysis, OverlapPair
+from dryscope.terminology import (
+    CODE_MATCH,
+    CODE_MATCH_SLUG,
+    DOCS_MAP,
+    DOCS_MAP_SLUG,
+    DOCS_PAIR_REVIEW,
+    DOCS_PAIR_REVIEW_SLUG,
+    DOCS_REPORT_PACK,
+    DOCS_REPORT_PACK_SLUG,
+    DOCS_SECTION_MATCH,
+    DOCS_SECTION_MATCH_SLUG,
+    DOCS_STAGE_LABELS,
+)
 
 
 def _short_path(path: str | None) -> str:
@@ -62,11 +75,11 @@ def _topic_document_clusters(result: AnalysisResult) -> list[dict]:
     )
 
 
-def _information_architecture(result: AnalysisResult) -> dict:
-    """Return discovered information architecture from the topic taxonomy."""
+def _docs_map(result: AnalysisResult) -> dict:
+    """Return discovered Docs Map data from the topic taxonomy."""
     taxonomy = result.topic_taxonomy or {}
-    ia = taxonomy.get("information_architecture")
-    return ia if isinstance(ia, dict) else {}
+    docs_map = taxonomy.get("docs_map")
+    return docs_map if isinstance(docs_map, dict) else {}
 
 
 def _build_run_overview(
@@ -77,43 +90,46 @@ def _build_run_overview(
 ) -> dict:
     """Build the top-down capability/aspect summary shared by all report formats."""
     stages = set(stages_run or [])
-    ia = _information_architecture(result)
+    docs_map = _docs_map(result)
     taxonomy = result.topic_taxonomy or {}
     canonical_topics = taxonomy.get("canonical_topics", []) if isinstance(taxonomy, dict) else []
     coverage_clusters = _topic_document_clusters(result)
-    doc_dry_ran = bool(result.documents or "Similarity" in stages or "Intent" in stages)
-    ia_ran = bool("Intent" in stages or result.document_descriptors or taxonomy)
-    section_similarity_ran = bool("Similarity" in stages or similarity_pairs)
+    docs_tracks_ran = bool(result.documents or DOCS_SECTION_MATCH_SLUG in stages or DOCS_MAP_SLUG in stages)
+    docs_map_ran = bool(DOCS_MAP_SLUG in stages or result.document_descriptors or taxonomy)
+    section_match_ran = bool(DOCS_SECTION_MATCH_SLUG in stages or similarity_pairs)
 
     return {
         "capabilities": {
-            "code_dry": {
+            "code_match": {
                 "ran": False,
-                "label": "Code DRY",
-                "what_it_does": "Finds duplicate or near-duplicate code units and refactor candidates.",
+                "label": CODE_MATCH,
+                "slug": CODE_MATCH_SLUG,
+                "what_it_does": "Finds duplicate or near-duplicate code units.",
                 "result": "Not exercised in this documentation run.",
             },
-            "doc_dry": {
-                "ran": doc_dry_ran,
-                "label": "Doc DRY",
-                "what_it_does": "Finds documentation overlap through IA signals and section similarity.",
+            "docs_tracks": {
+                "ran": docs_tracks_ran,
+                "label": "Docs tracks",
+                "slug": "docs-tracks",
+                "what_it_does": "Runs Docs Map, Section Match, and optional Doc Pair Review.",
                 "result": (
                     f"{_plural(len(result.documents), 'document')}, "
                     f"{_plural(len(result.chunks), 'section')}, "
-                    f"{_plural(len(similarity_pairs), 'similar section pair')}, "
+                    f"{_plural(len(similarity_pairs), 'matched section pair')}, "
                     f"{_plural(len(coverage_clusters), 'consolidation cluster')}."
                 ),
             },
         },
-        "doc_dry_aspects": {
-            "information_architecture": {
-                "ran": ia_ran,
-                "label": "Information Architecture",
+        "docs_track_aspects": {
+            "docs_map": {
+                "ran": docs_map_ran,
+                "label": DOCS_MAP,
+                "slug": DOCS_MAP_SLUG,
                 "pipeline": [
                     "document descriptor extraction",
                     "canonical label normalization",
-                    "IA topic tree and facet discovery",
-                    "suggested consolidation clusters",
+                    "topic tree and facet discovery",
+                    "docs map clusters",
                 ],
                 "results": {
                     "documents_profiled": len(result.document_descriptors),
@@ -122,37 +138,43 @@ def _build_run_overview(
                         for descriptor in result.document_descriptors.values()
                     ),
                     "canonical_labels": len(canonical_topics),
-                    "suggested_consolidation_clusters": len(coverage_clusters),
-                    "ia_topic_groups": len(ia.get("topic_tree", [])),
-                    "facet_dimensions": len(ia.get("facets", {})),
-                    "ia_diagnostics": len(ia.get("diagnostics", [])),
+                    "docs_map_clusters": len(coverage_clusters),
+                    "docs_map_groups": len(docs_map.get("topic_tree", [])),
+                    "facet_dimensions": len(docs_map.get("facets", {})),
+                    "docs_map_diagnostics": len(docs_map.get("diagnostics", [])),
                 },
             },
-            "section_similarity": {
-                "ran": section_similarity_ran,
-                "label": "Section similarity",
+            "docs_section_match": {
+                "ran": section_match_ran,
+                "label": DOCS_SECTION_MATCH,
+                "slug": DOCS_SECTION_MATCH_SLUG,
                 "pipeline": [
                     "split documents into sections",
                     "embed sections",
                     "compare cross-document section pairs",
-                    "section similarity recommendations",
+                    "section match recommendations",
                 ],
                 "results": {
                     "sections_analyzed": len(result.chunks),
-                    "similar_section_pairs": len(similarity_pairs),
-                    "section_similarity_recommendations": len(recommendations),
+                    "matched_section_pairs": len(similarity_pairs),
+                    "section_match_recommendations": len(recommendations),
                 },
             },
         },
         "supporting_results": {
-            "llm_document_pair_analyses": len(result.doc_pair_analyses),
+            "doc_pair_reviews": len(result.doc_pair_analyses),
+            "doc_pair_review": {
+                "label": DOCS_PAIR_REVIEW,
+                "slug": DOCS_PAIR_REVIEW_SLUG,
+                "pairs_analyzed": len(result.doc_pair_analyses),
+            },
             "stages_run": stages_run or [],
         },
     }
 
 
 def _pair_to_dict(pair: OverlapPair) -> dict:
-    """Convert a similar section pair to structured JSON."""
+    """Convert a matched section pair to structured JSON."""
     return {
         "chunk_a": {
             "document": pair.chunk_a.document_path,
@@ -172,7 +194,7 @@ def _pair_to_dict(pair: OverlapPair) -> dict:
 
 
 def _doc_pair_analysis_to_dict(analysis: DocPairAnalysis) -> dict:
-    """Convert an LLM document-pair analysis to structured JSON."""
+    """Convert a Doc Pair Review analysis to structured JSON."""
     return {
         "doc_a": analysis.doc_a_path,
         "doc_a_name": _short_path(analysis.doc_a_path),
@@ -195,8 +217,8 @@ def _doc_pair_analysis_to_dict(analysis: DocPairAnalysis) -> dict:
     }
 
 
-def _canonical_label_taxonomy_data(result: AnalysisResult) -> dict:
-    """Return canonical label taxonomy data without duplicating IA clusters."""
+def _docs_map_taxonomy_data(result: AnalysisResult) -> dict:
+    """Return canonical label taxonomy data without duplicating Docs Map clusters."""
     taxonomy = result.topic_taxonomy or {}
     canonical_topics = []
     for topic in taxonomy.get("canonical_topics", []):
@@ -222,7 +244,7 @@ def _report_structure(
 ) -> list[dict]:
     """Return the ordered report sections and backing data for JSON consumers."""
     taxonomy = result.topic_taxonomy or {}
-    similar_section_pairs = [_pair_to_dict(pair) for pair in similarity_pairs]
+    matched_section_pairs = [_pair_to_dict(pair) for pair in similarity_pairs]
     sections: list[dict] = [
         {
             "id": "run_overview",
@@ -235,42 +257,48 @@ def _report_structure(
             },
         },
     ]
-    if _information_architecture(result):
+    if _docs_map(result):
         sections.append({
-            "id": "information_architecture",
-            "title": "Information Architecture",
-            "data": _information_architecture(result),
+            "id": "docs_map",
+            "title": DOCS_MAP,
+            "slug": DOCS_MAP_SLUG,
+            "data": _docs_map(result),
         })
     if _topic_document_clusters(result):
         sections.append({
-            "id": "suggested_consolidation_clusters",
-            "title": "Suggested Consolidation Clusters",
+            "id": "docs_map_clusters",
+            "title": "Docs Map Clusters",
+            "slug": DOCS_MAP_SLUG,
             "data": _topic_document_clusters(result),
         })
     sections.append({
-        "id": "section_similarity",
-        "title": "Section Similarity",
+        "id": "docs_section_match",
+        "title": DOCS_SECTION_MATCH,
+        "slug": DOCS_SECTION_MATCH_SLUG,
         "data": {
-            "similar_section_pairs": len(similarity_pairs),
-            "section_similarity_recommendations": len(recommendations),
+            "matched_section_pairs": len(similarity_pairs),
+            "section_match_recommendations": len(recommendations),
         },
         "children": [
             {
-                "id": "section_similarity_recommendations",
-                "title": "Section Similarity Recommendations",
+                "id": "docs_section_match_recommendations",
+                "title": "Section Match Recommendations",
+                "slug": DOCS_SECTION_MATCH_SLUG,
                 "data": recommendations,
             },
             {
-                "id": "similar_section_pairs",
-                "title": "Similar Section Pairs",
-                "data": similar_section_pairs,
+                "id": "matched_section_pairs",
+                "title": "Matched Section Pairs",
+                "slug": DOCS_SECTION_MATCH_SLUG,
+                "data": matched_section_pairs,
             },
         ],
     })
     if result.doc_pair_analyses:
         sections.append({
-            "id": "document_pair_analysis",
-            "title": "Document Pair Analysis",
+            "id": "docs_pair_review",
+            "title": DOCS_PAIR_REVIEW,
+            "slug": DOCS_PAIR_REVIEW_SLUG,
             "data": [
                 _doc_pair_analysis_to_dict(analysis)
                 for analysis in result.doc_pair_analyses
@@ -278,9 +306,10 @@ def _report_structure(
         })
     if taxonomy:
         sections.append({
-            "id": "canonical_label_taxonomy",
-            "title": "Canonical Label Taxonomy",
-            "data": _canonical_label_taxonomy_data(result),
+            "id": "docs_map_taxonomy",
+            "title": "Docs Map Taxonomy",
+            "slug": DOCS_MAP_SLUG,
+            "data": _docs_map_taxonomy_data(result),
         })
     sections.append({"id": "methodology", "title": "Methodology", "data": {}})
 
@@ -369,13 +398,13 @@ def render_terminal(
     )
     console.print()
 
-    # Stage 1: Similarity
-    console.print("[bold]Stage 1: Semantic Similarity[/bold]", style="cyan")
-    console.print(f"Found [bold]{len(similarity_pairs)}[/bold] similar section pairs")
+    # Section Match
+    console.print(f"[bold]{DOCS_SECTION_MATCH}[/bold]", style="cyan")
+    console.print(f"Found [bold]{len(similarity_pairs)}[/bold] matched section pairs")
     console.print()
 
     if similarity_pairs:
-        table = Table(title="Top Similarity Matches", show_lines=True)
+        table = Table(title="Top Section Match Results", show_lines=True)
         table.add_column("Similarity", style="yellow", width=10)
         table.add_column("Section A", style="green")
         table.add_column("Section B", style="green")
@@ -391,9 +420,9 @@ def render_terminal(
         console.print(table)
         console.print()
 
-    # Stage 2: Document-Pair Analysis
+    # Doc Pair Review
     if result.doc_pair_analyses:
-        console.print("[bold]Stage 2: Document-Pair Analysis[/bold]", style="cyan")
+        console.print(f"[bold]{DOCS_PAIR_REVIEW}[/bold]", style="cyan")
         console.print(f"Analyzed [bold]{len(result.doc_pair_analyses)}[/bold] document pairs")
         console.print()
 
@@ -444,15 +473,15 @@ def render_terminal(
                 )
             console.print()
 
-    ia = _information_architecture(result)
-    if ia:
-        console.print("[bold]Information Architecture:[/bold]", style="cyan")
+    docs_map = _docs_map(result)
+    if docs_map:
+        console.print(f"[bold]{DOCS_MAP}:[/bold]", style="cyan")
         console.print(
-            f"  Topic groups: [bold]{len(ia.get('topic_tree', []))}[/bold], "
-            f"facets: [bold]{len(ia.get('facets', {}))}[/bold], "
-            f"diagnostics: [bold]{len(ia.get('diagnostics', []))}[/bold]"
+            f"  Topic groups: [bold]{len(docs_map.get('topic_tree', []))}[/bold], "
+            f"facets: [bold]{len(docs_map.get('facets', {}))}[/bold], "
+            f"diagnostics: [bold]{len(docs_map.get('diagnostics', []))}[/bold]"
         )
-        for parent in ia.get("topic_tree", [])[:8]:
+        for parent in docs_map.get("topic_tree", [])[:8]:
             children = parent.get("children", [])
             console.print(f"  • [bold]{parent.get('label', '(unnamed)')}[/bold] ({len(children)} children)")
         console.print()
@@ -488,8 +517,8 @@ def render_markdown(
     recommendations, and methodology sections.
 
     Args:
-        stages_run: List of stage names that actually executed,
-            e.g. ["Similarity", "Intent", "LLM Analysis"].
+        stages_run: List of track slugs that actually executed,
+            e.g. ["docs-section-match", "docs-map", "docs-pair-review"].
     """
     lines: list[str] = []
     lines.append("# dryscope Report\n")
@@ -509,39 +538,43 @@ def render_markdown(
     n_docs = len(result.documents)
     n_pairs = len(similarity_pairs)
     n_recs = len(recommendations)
-    pipeline_dots = "  ".join(f"● {s}" for s in stages_run) if stages_run else "—"
-    ia = _information_architecture(result)
+    pipeline_dots = (
+        "  ".join(f"● {DOCS_STAGE_LABELS.get(s, s)}" for s in stages_run)
+        if stages_run
+        else "—"
+    )
+    docs_map = _docs_map(result)
     n_profiled_docs = len(result.document_descriptors) or n_docs
-    n_ia_groups = len(ia.get("topic_tree", []))
-    n_ia_facets = len(ia.get("facets", {}))
+    n_docs_map_groups = len(docs_map.get("topic_tree", []))
+    n_docs_map_facets = len(docs_map.get("facets", {}))
     n_consolidation_clusters = len(_topic_document_clusters(result))
-    ia_ran = bool(ia or result.document_descriptors or result.topic_taxonomy)
-    section_similarity_ran = bool("Similarity" in set(stages_run) or similarity_pairs)
+    docs_map_ran = bool(docs_map or result.document_descriptors or result.topic_taxonomy)
+    section_match_ran = bool(DOCS_SECTION_MATCH_SLUG in set(stages_run) or similarity_pairs)
 
     metric_cards = [_metric_card(n_docs, "Documents")]
     track_bits: list[str] = []
-    if ia_ran:
+    if docs_map_ran:
         metric_cards.extend([
-            _metric_card(n_ia_groups, "IA Groups"),
-            _metric_card(n_consolidation_clusters, "IA Consolidation Clusters"),
+            _metric_card(n_docs_map_groups, "Docs Map Groups"),
+            _metric_card(n_consolidation_clusters, "Docs Map Clusters"),
         ])
         track_bits.append(
-            f"Information Architecture: {n_profiled_docs} docs profiled, "
-            f"{n_ia_groups} groups, {n_ia_facets} facets, "
+            f"{DOCS_MAP}: {n_profiled_docs} docs profiled, "
+            f"{n_docs_map_groups} groups, {n_docs_map_facets} facets, "
             f"{n_consolidation_clusters} consolidation clusters."
         )
-    if section_similarity_ran:
+    if section_match_ran:
         metric_cards.extend([
-            _metric_card(n_pairs, "Similar Section Pairs"),
-            _metric_card(n_recs, "Section Similarity Recs"),
+            _metric_card(n_pairs, "Matched Section Pairs"),
+            _metric_card(n_recs, "Section Match Recs"),
         ])
         track_bits.append(
-            f"Section Similarity: {n_pairs} similar section pairs, "
+            f"{DOCS_SECTION_MATCH}: {n_pairs} matched section pairs, "
             f"{n_recs} recommendations."
         )
-    if not ia_ran and not section_similarity_ran:
+    if not docs_map_ran and not section_match_ran:
         metric_cards.append(_metric_card(len(result.chunks), "Sections"))
-    track_summary = " ".join(track_bits) if track_bits else "No Doc DRY analysis tracks ran."
+    track_summary = " ".join(track_bits) if track_bits else "No docs analysis tracks ran."
 
     # Scan context
     scan_path_str = str(project_root) if project_root else "unknown"
@@ -598,10 +631,10 @@ def render_markdown(
         )
     lines.append("")
 
-    lines.append("### Doc DRY Result Summary\n")
+    lines.append("### Docs Track Summary\n")
     lines.append("| Aspect | Ran | Pipeline | Results |")
     lines.append("|--------|-----|----------|---------|")
-    for aspect in overview["doc_dry_aspects"].values():
+    for aspect in overview["docs_track_aspects"].values():
         results = ", ".join(
             f"{key.replace('_', ' ')}: {value}"
             for key, value in aspect["results"].items()
@@ -629,17 +662,17 @@ def render_markdown(
         )
         lines.append("")
 
-    # ── Information Architecture ───────────────────────────────────────
-    if ia:
-        lines.append(f"## {section_titles['information_architecture']}\n")
+    # ── Docs Map ───────────────────────────────────────────────────────
+    if docs_map:
+        lines.append(f"## {section_titles['docs_map']}\n")
         lines.append(
-            f"Method: `{ia.get('method', 'unknown')}`. "
-            f"Top-level topic groups: {len(ia.get('topic_tree', []))}. "
-            f"Facet dimensions: {len(ia.get('facets', {}))}. "
-            f"Diagnostics: {len(ia.get('diagnostics', []))}.\n"
+            f"Method: `{docs_map.get('method', 'unknown')}`. "
+            f"Top-level topic groups: {len(docs_map.get('topic_tree', []))}. "
+            f"Facet dimensions: {len(docs_map.get('facets', {}))}. "
+            f"Diagnostics: {len(docs_map.get('diagnostics', []))}.\n"
         )
 
-        topic_tree = ia.get("topic_tree", [])
+        topic_tree = docs_map.get("topic_tree", [])
         if topic_tree:
             lines.append("### Discovered Topic Tree\n")
             for parent in topic_tree:
@@ -690,7 +723,7 @@ def render_markdown(
                 )
             lines.append("")
 
-        facets = ia.get("facets", {})
+        facets = docs_map.get("facets", {})
         if facets:
             lines.append("### Facets\n")
             for facet_name, facet in sorted(facets.items()):
@@ -737,9 +770,9 @@ def render_markdown(
                 )
             lines.append("")
 
-        diagnostics = ia.get("diagnostics", [])
+        diagnostics = docs_map.get("diagnostics", [])
         if diagnostics:
-            lines.append("### IA Diagnostics\n")
+            lines.append("### Docs Map Diagnostics\n")
             lines.append("| Severity | Kind | Issue | Recommendation |")
             lines.append("|----------|------|-------|----------------|")
             for item in diagnostics:
@@ -751,10 +784,10 @@ def render_markdown(
                 )
             lines.append("")
 
-    # ── Suggested Consolidation Clusters ───────────────────────────────
+    # ── Docs Map Clusters ──────────────────────────────────────────────
     coverage_clusters = _topic_document_clusters(result)
     if coverage_clusters:
-        lines.append(f"## {section_titles['suggested_consolidation_clusters']}\n")
+        lines.append(f"## {section_titles['docs_map_clusters']}\n")
         lines.append(
             f"Found {len(coverage_clusters)} canonical labels covered by 2+ documents. "
             "These are candidates to inspect for consolidation, splitting, or stronger cross-links.\n"
@@ -788,20 +821,20 @@ def render_markdown(
             )
         lines.append("")
 
-    # ── Section Similarity ─────────────────────────────────────────────
-    lines.append(f"## {section_titles['section_similarity']}\n")
+    # ── Section Match ─────────────────────────────────────────────────
+    lines.append(f"## {section_titles['docs_section_match']}\n")
     lines.append(
-        "This is the Doc DRY section-level pass: split documents into sections, "
-        "embed them, and report similar cross-document section pairs.\n"
+        "Section Match is the docs section-level pass: split documents into sections, "
+        "embed them, and report matched cross-document section pairs.\n"
     )
-    lines.append(f"Found {len(similarity_pairs)} similar section pairs.\n")
+    lines.append(f"Found {len(similarity_pairs)} matched section pairs.\n")
 
     if recommendations:
-        lines.append(f"### {child_titles['section_similarity_recommendations']}\n")
+        lines.append(f"### {child_titles['docs_section_match_recommendations']}\n")
         lines.append(
-            "These recommendations are derived from the section similarity pairs in this track. "
-            "Information Architecture consolidation candidates are listed separately under "
-            "Suggested Consolidation Clusters.\n"
+            "These recommendations are derived from the matched section pairs in this track. "
+            "Docs Map consolidation candidates are listed separately under "
+            "Docs Map Clusters.\n"
         )
         for rec in recommendations:
             rec_body: list[str] = [
@@ -822,7 +855,7 @@ def render_markdown(
         lines.append("")
 
     if similarity_pairs:
-        lines.append(f"### {child_titles['similar_section_pairs']}\n")
+        lines.append(f"### {child_titles['matched_section_pairs']}\n")
         lines.append("| Similarity | Section A | Section B |")
         lines.append("|------------|-----------|-----------|")
         for pair in similarity_pairs:
@@ -834,9 +867,9 @@ def render_markdown(
             lines.append(f"| {sim_str} | {loc_a} | {loc_b} |")
         lines.append("")
 
-    # ── Doc-pair analysis ──────────────────────────────────────────────
+    # ── Doc Pair Review ────────────────────────────────────────────────
     if result.doc_pair_analyses:
-        lines.append(f"## {section_titles['document_pair_analysis']}\n")
+        lines.append(f"## {section_titles['docs_pair_review']}\n")
         lines.append(f"Analyzed {len(result.doc_pair_analyses)} document pairs\n")
 
         for analysis in result.doc_pair_analyses:
@@ -860,11 +893,11 @@ def render_markdown(
     if result.topic_taxonomy:
         canonical_topics = result.topic_taxonomy.get("canonical_topics", [])
         if canonical_topics:
-            lines.append(f"## {section_titles['canonical_label_taxonomy']}\n")
+            lines.append(f"## {section_titles['docs_map_taxonomy']}\n")
             lines.append(
                 "Canonical labels are the normalized vocabulary produced from document "
                 "descriptors. Document coverage for multi-document labels is listed above "
-                "under Suggested Consolidation Clusters; this section gives the full "
+                "under Docs Map Clusters; this section gives the full "
                 "vocabulary and alias map once.\n"
             )
             for topic in canonical_topics:
@@ -922,19 +955,18 @@ def render_markdown(
 
     # ── Methodology ────────────────────────────────────────────────────
     lines.append(f"## {section_titles['methodology']}\n")
-    lines.append("### Pipeline\n")
+    lines.append("### Tracks\n")
     lines.append(
-        "dryscope has two broad capabilities: Code DRY and Doc DRY. This report is for Doc DRY. "
-        "The Doc DRY pipeline has two main aspects:\n\n"
-        "1. **Information Architecture** — Extracts document descriptors, canonicalizes aboutness and "
+        "dryscope reports use stable track names and slugs. This report is for docs tracks:\n\n"
+        f"1. **{DOCS_MAP}** (`{DOCS_MAP_SLUG}`) — Extracts document descriptors, canonicalizes aboutness and "
         "reader-intent labels, discovers an IA topic tree and facets, and lists multi-document "
         "consolidation clusters.\n"
-        "2. **Section similarity** — Splits documents into sections, generates API or local embeddings, "
-        "finds cross-document section pairs above the similarity threshold, and produces section similarity "
+        f"2. **{DOCS_SECTION_MATCH}** (`{DOCS_SECTION_MATCH_SLUG}`) — Splits documents into sections, generates API or local embeddings, "
+        "finds cross-document section pairs above the similarity threshold, and produces section match "
         "recommendations.\n"
-        "3. **Document pair analysis** — Sends overlapping document pairs to an LLM for "
+        f"3. **{DOCS_PAIR_REVIEW}** (`{DOCS_PAIR_REVIEW_SLUG}`) — Sends selected document pairs to an LLM for "
         "relationship classification, topic-level canonical/action assignments, and "
-        "refactoring suggestions.\n"
+        "consolidation suggestions.\n"
     )
     lines.append("### Scoring\n")
     lines.append(
@@ -990,11 +1022,15 @@ def render_json(
     )
 
     data: dict = {
+        "report_pack": {
+            "label": DOCS_REPORT_PACK,
+            "slug": DOCS_REPORT_PACK_SLUG,
+        },
         "summary": {
             "documents_scanned": len(result.documents),
             "chunks_analyzed": len(result.chunks),
-            "similarity_pairs_found": len(similarity_pairs),
-            "section_similarity_recommendations_found": len(recommendations),
+            "matched_section_pairs_found": len(similarity_pairs),
+            "section_match_recommendations_found": len(recommendations),
         },
         "report_structure": _report_structure(
             overview,
@@ -1139,7 +1175,7 @@ def render_html(markdown_content: str) -> str:
 
     html_body = mistune.html(markdown_content)
 
-    # Post-process: wrap Stage 2 doc-pair h3 sections in <details>/<summary>
+    # Post-process: wrap Doc Pair Review h3 sections in <details>/<summary>
     # Each "### file_a / file_b" block becomes collapsible
     html_body = _wrap_doc_pairs_in_details(html_body)
 
@@ -1177,7 +1213,7 @@ def render_html(markdown_content: str) -> str:
 
 
 def _wrap_doc_pairs_in_details(html: str) -> str:
-    """Wrap Stage 2 doc-pair h3 sections in collapsible <details> elements.
+    """Wrap Doc Pair Review h3 sections in collapsible <details> elements.
 
     Looks for h3 tags that follow the "file_a / file_b" pattern and wraps
     each h3 + its following content (until the next h2/h3 or end) in a
@@ -1289,7 +1325,7 @@ def _wrap_subsections_in_details(html: str) -> str:
 def _inject_recommendation_slider(html: str) -> str:
     """Add data-score attributes to recommendation table rows and inject a slider.
 
-    Finds the first table after the Section Similarity Recommendations heading,
+    Finds the first table after the Section Match Recommendations heading,
     adds data-score to each body row, wraps it with an id, and inserts a range
     slider above it.
     """
@@ -1297,7 +1333,7 @@ def _inject_recommendation_slider(html: str) -> str:
 
     # Find the section-similarity recommendations heading and the first table after it.
     rec_match = re.search(
-        r'<h[23][^>]*>(?:\d+(?:\.\d+)*\.\s*)?Section Similarity Recommendations</h[23]>',
+        r'<h[23][^>]*>(?:\d+(?:\.\d+)*\.\s*)?Section Match Recommendations</h[23]>',
         html,
         re.IGNORECASE,
     )
@@ -1406,8 +1442,8 @@ def _build_metadata(settings: Settings, project_root: Path) -> dict:
             "exclude": settings.exclude,
             "model": settings.model,
             "embedding_model": settings.docs_embedding_model,
-            "ia_facet_dimensions": settings.docs_ia_facet_dimensions,
-            "ia_facet_values": settings.docs_ia_facet_values,
+            "docs_map_facet_dimensions": settings.docs_map_facet_dimensions,
+            "docs_map_facet_values": settings.docs_map_facet_values,
         },
     }
 
@@ -1436,27 +1472,29 @@ def _pair_to_rich_dict(pair: OverlapPair, root: Path) -> dict:
 # ─── Stage Serializers ─────────────────────────────────────────────────
 
 
-def serialize_similarity_stage(
+def serialize_section_match_stage(
     result: AnalysisResult,
     similarity_pairs: list[OverlapPair],
     settings: Settings,
     project_root: Path,
 ) -> dict:
-    """Serialize similarity stage output for persistent storage."""
+    """Serialize Section Match output for persistent storage."""
     return {
+        "track": DOCS_SECTION_MATCH,
+        "track_slug": DOCS_SECTION_MATCH_SLUG,
         "metadata": _build_metadata(settings, project_root),
         "summary": {
             "documents_scanned": len(result.documents),
             "chunks_analyzed": len(result.chunks),
-            "pairs_found": len(similarity_pairs),
+            "matched_section_pairs_found": len(similarity_pairs),
             "threshold": settings.threshold_similarity,
             "model": settings.docs_embedding_model,
         },
-        "pairs": [_pair_to_rich_dict(p, project_root) for p in similarity_pairs],
+        "matched_section_pairs": [_pair_to_rich_dict(p, project_root) for p in similarity_pairs],
     }
 
 
-def serialize_coding_stage(
+def serialize_doc_pair_review_stage(
     codes: list[Code],
     categories: list[Category],
     suggestions: list[dict] | None,
@@ -1464,8 +1502,10 @@ def serialize_coding_stage(
     project_root: Path,
     analyses: list[DocPairAnalysis] | None = None,
 ) -> dict:
-    """Serialize LLM coding stage output for persistent storage."""
+    """Serialize Doc Pair Review output for persistent storage."""
     data: dict = {
+        "track": DOCS_PAIR_REVIEW,
+        "track_slug": DOCS_PAIR_REVIEW_SLUG,
         "metadata": _build_metadata(settings, project_root),
         "summary": {
             "codes_found": len(codes),
@@ -1799,9 +1839,9 @@ def render_final_report(
         "summary": {
             "documents_scanned": len(result.documents),
             "chunks_analyzed": len(result.chunks),
-            "similarity_pairs_found": len(similarity_pairs),
+            "matched_section_pairs_found": len(similarity_pairs),
             "recommendations_count": len(recommendations),
-            "section_similarity_recommendations_found": len(recommendations),
+            "section_match_recommendations_found": len(recommendations),
         },
         "report_structure": _report_structure(
             overview,

@@ -1,4 +1,4 @@
-"""LLM doc-pair analysis for overlap detection."""
+"""Doc Pair Review: LLM analysis for related documentation pairs."""
 
 from __future__ import annotations
 
@@ -171,7 +171,7 @@ def analyze_doc_pair(
         intent_section = f"""
 ---
 
-Intent evidence (from canonical topic taxonomy stage):
+Docs Map evidence (from canonical topic taxonomy stage):
 {formatted}
 """
 

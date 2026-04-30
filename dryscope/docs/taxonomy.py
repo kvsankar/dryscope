@@ -12,7 +12,8 @@ from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 from pathlib import Path
 
-from dryscope.config import DEFAULT_DOCS_IA_FACET_DIMENSIONS, DEFAULT_DOCS_IA_FACET_VALUES
+from dryscope.config import DEFAULT_DOCS_MAP_FACET_DIMENSIONS, DEFAULT_DOCS_MAP_FACET_VALUES
+from dryscope.terminology import DOCS_MAP
 
 
 _TOPIC_STOPWORDS = {
@@ -21,7 +22,7 @@ _TOPIC_STOPWORDS = {
 }
 
 TAXONOMY_LLM_VERSION = "taxonomy_llm_v2"
-IA_LLM_VERSION = "information_architecture_v2"
+DOCS_MAP_LLM_VERSION = "docs_map_v1"
 
 
 def normalize_topic_text(text: str) -> str:
@@ -372,7 +373,7 @@ def _cluster_groups_with_llm(
             "existing_canonical_topics": existing,
             "topic_groups": batch,
         }
-        prompt = f"""You are normalizing topic labels for a documentation information architecture tool.
+        prompt = f"""You are normalizing topic labels for a Docs Map tool.
 
 The input topic groups came from per-document topic extraction plus deterministic
 pre-normalization. For each topic group, map it to either an existing canonical
@@ -529,7 +530,7 @@ def build_canonical_taxonomy(
 ) -> TopicTaxonomy:
     """Normalize raw per-document topics into a corpus-level canonical taxonomy.
 
-    This mirrors the useful part of the book builder's information architecture:
+    This mirrors the useful part of the book builder's Docs Map:
     deterministic exact/fuzzy matching first, then optional LLM clustering that
     maps preliminary topic groups into durable canonical topics.
     """
@@ -583,7 +584,7 @@ def build_canonical_taxonomy(
     )
 
 
-def _ia_topic_cluster_payload(
+def _docs_map_topic_cluster_payload(
     taxonomy: dict,
     *,
     max_topic_coverage_clusters: int,
@@ -622,7 +623,7 @@ def _ia_topic_cluster_payload(
     return clusters[:max_topic_coverage_clusters], singles[:max_single_doc_topics]
 
 
-def _ia_document_payload(
+def _docs_map_document_payload(
     taxonomy: dict,
     *,
     max_documents: int,
@@ -676,7 +677,7 @@ def _descriptor_facet_payload(
         "canonicality": False,
     }
     if facet_dimensions is None:
-        facet_dimensions = list(DEFAULT_DOCS_IA_FACET_DIMENSIONS)
+        facet_dimensions = list(DEFAULT_DOCS_MAP_FACET_DIMENSIONS)
     summaries: dict[str, dict[str, dict]] = {facet: {} for facet in facet_dimensions}
     for doc, descriptor in document_descriptors.items():
         compact_doc = _compact_doc_path(str(doc))
@@ -717,9 +718,9 @@ def _descriptor_facet_payload(
     }
 
 
-def _fallback_information_architecture(taxonomy: dict, method: str) -> dict:
-    """Build a deterministic fallback IA shape when no LLM is available."""
-    clusters, _singles = _ia_topic_cluster_payload(
+def _fallback_docs_map(taxonomy: dict, method: str) -> dict:
+    """Build a deterministic fallback Docs Map shape when no LLM is available."""
+    clusters, _singles = _docs_map_topic_cluster_payload(
         taxonomy,
         max_topic_coverage_clusters=80,
         max_single_doc_topics=0,
@@ -732,7 +733,7 @@ def _fallback_information_architecture(taxonomy: dict, method: str) -> dict:
         parent = parents.setdefault(
             parent_label,
             {
-                "id": f"ia_{len(parents) + 1:02d}",
+                "id": f"docs_map_{len(parents) + 1:02d}",
                 "label": parent_label,
                 "description": "Deterministically grouped by shared topic vocabulary.",
                 "children": [],
@@ -758,12 +759,12 @@ def _fallback_information_architecture(taxonomy: dict, method: str) -> dict:
         "facets": {},
         "diagnostics": [],
         "limits": {
-            "note": "LLM IA discovery was unavailable; this is a vocabulary-based fallback.",
+            "note": "LLM Docs Map discovery was unavailable; this is a vocabulary-based fallback.",
         },
     }
 
 
-def build_information_architecture(
+def build_docs_map(
     taxonomy: dict,
     *,
     document_descriptors: dict[str, dict] | None = None,
@@ -780,19 +781,19 @@ def build_information_architecture(
     cli_permission_mode: str | None = None,
     cli_dangerously_skip_permissions: bool = False,
 ) -> dict:
-    """Infer a generic information-architecture view from topic evidence.
+    """Infer a generic Docs Map view from topic evidence.
 
-    The returned structure is a candidate IA, not an authoritative site map:
+    The returned structure is a candidate Docs Map, not an authoritative site map:
     parent/child topic groups, generic facets, and diagnostics with evidence.
     """
-    topic_coverage_clusters, single_doc_topics = _ia_topic_cluster_payload(
+    topic_coverage_clusters, single_doc_topics = _docs_map_topic_cluster_payload(
         taxonomy,
         max_topic_coverage_clusters=max_topic_coverage_clusters,
         max_single_doc_topics=max_single_doc_topics,
     )
-    facet_dimensions = facet_dimensions or list(DEFAULT_DOCS_IA_FACET_DIMENSIONS)
-    facet_values = facet_values or DEFAULT_DOCS_IA_FACET_VALUES
-    documents = _ia_document_payload(
+    facet_dimensions = facet_dimensions or list(DEFAULT_DOCS_MAP_FACET_DIMENSIONS)
+    facet_values = facet_values or DEFAULT_DOCS_MAP_FACET_VALUES
+    documents = _docs_map_document_payload(
         taxonomy,
         max_documents=max_documents,
         document_descriptors=document_descriptors,
@@ -825,15 +826,15 @@ def build_information_architecture(
     }
 
     if not llm_model:
-        return _fallback_information_architecture(taxonomy, method="deterministic")
+        return _fallback_docs_map(taxonomy, method="deterministic")
 
     from dryscope.docs.coding import call_llm_cached
 
-    prompt = f"""You are an information architect analyzing a documentation corpus.
+    prompt = f"""You are building a Docs Map for a documentation corpus.
 
-You are given rich per-document IA descriptors, discovered canonical labels, their
+You are given rich per-document Docs Map descriptors, discovered canonical labels, their
 document coverage, co-occurrence signals, and a compact document-label inventory.
-Build a domain-agnostic candidate information architecture. Do not assume any
+Build a domain-agnostic candidate Docs Map. Do not assume any
 product-specific taxonomy in advance; infer labels from the evidence.
 
 Design principles:
@@ -865,12 +866,12 @@ Respond with ONLY valid JSON:
   "method": "llm",
   "topic_tree": [
     {{
-      "id": "ia_01",
+      "id": "docs_map_01",
       "label": "parent topic label",
       "description": "why this parent exists",
       "children": [
         {{
-          "id": "ia_01_01",
+          "id": "docs_map_01_01",
           "label": "child topic label",
           "description": "reader intent or content area",
           "topics": ["canonical topic name from input"],
@@ -904,7 +905,7 @@ Respond with ONLY valid JSON:
     cache_key = hashlib.sha256(
         json.dumps(payload, sort_keys=True).encode()
         + llm_model.encode()
-        + IA_LLM_VERSION.encode()
+        + DOCS_MAP_LLM_VERSION.encode()
     ).hexdigest()
     try:
         text = call_llm_cached(
@@ -912,7 +913,7 @@ Respond with ONLY valid JSON:
             prompt,
             cache,
             cache_key,
-            IA_LLM_VERSION,
+            DOCS_MAP_LLM_VERSION,
             backend,
             ollama_host=ollama_host,
             cli_strip_api_key=cli_strip_api_key,
@@ -922,15 +923,15 @@ Respond with ONLY valid JSON:
         ia = _parse_json_object_response(text)
     except Exception as exc:
         print(
-            "warning: information architecture LLM pass failed; "
-            f"falling back to deterministic IA grouping "
+            f"warning: {DOCS_MAP} LLM pass failed; "
+            f"falling back to deterministic {DOCS_MAP} grouping "
             f"({type(exc).__name__}: {exc})",
             file=sys.stderr,
         )
         ia = {}
 
     if not ia:
-        return _fallback_information_architecture(taxonomy, method="deterministic-fallback")
+        return _fallback_docs_map(taxonomy, method="deterministic-fallback")
 
     ia.setdefault("method", "llm")
     ia.setdefault("topic_tree", [])

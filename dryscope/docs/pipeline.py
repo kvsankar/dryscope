@@ -13,6 +13,15 @@ from dryscope.config import Settings
 from dryscope.docs.embeddings import embed_chunks, find_similar_pairs
 from dryscope.docs.models import AnalysisResult, Chunk, Document, OverlapPair
 from dryscope.run_store import RunStore
+from dryscope.terminology import (
+    DOCS_MAP,
+    DOCS_MAP_SLUG,
+    DOCS_PAIR_REVIEW,
+    DOCS_PAIR_REVIEW_SLUG,
+    DOCS_REPORT_PACK_SLUG,
+    DOCS_SECTION_MATCH,
+    DOCS_SECTION_MATCH_SLUG,
+)
 
 
 def _chunk_key(chunk: Chunk) -> str:
@@ -237,7 +246,7 @@ def _save_all_reports(
 def run_pipeline(
     scan_path: Path,
     settings: Settings,
-    stage: str = "full",
+    stage: str = DOCS_REPORT_PACK_SLUG,
     output_format: str = "terminal",
     output_file: str | None = None,
     skip_confirm: bool = False,
@@ -250,7 +259,7 @@ def run_pipeline(
     Args:
         scan_path: Directory to scan for documentation.
         settings: Merged configuration settings.
-        stage: "similarity" or "full".
+        stage: "docs-section-match" or "docs-report-pack".
         output_format: "terminal", "markdown", or "json".
         output_file: Optional file path to write output.
         skip_confirm: Skip cost confirmation for LLM stage.
@@ -259,6 +268,11 @@ def run_pipeline(
     Returns:
         AnalysisResult with all analysis data.
     """
+    valid_stages = {DOCS_SECTION_MATCH_SLUG, DOCS_REPORT_PACK_SLUG}
+    if stage not in valid_stages:
+        allowed = ", ".join(sorted(valid_stages))
+        raise ValueError(f"Unknown docs stage {stage!r}; expected one of: {allowed}")
+
     if console is None:
         console = Console(stderr=True)
 
@@ -287,22 +301,22 @@ def run_pipeline(
         console.print("[yellow]No documentation sections found.[/yellow]")
         return result
 
-    # ─── Stage 1: Similarity ───
+    # ─── Section Match ───
     console.print()
-    console.print("[bold cyan]Stage 1: Semantic Similarity[/bold cyan]")
+    console.print(f"[bold cyan]{DOCS_SECTION_MATCH}[/bold cyan]")
 
     cache = None
     if settings.cache_enabled:
         cache = Cache(settings.resolved_cache_path)
 
     similarity_resumed = False
-    if run_store and run_store.stage_exists("stage1_similarity.json"):
-        saved = run_store.load_stage("stage1_similarity.json")
+    if run_store and run_store.stage_exists("docs_section_match.json"):
+        saved = run_store.load_stage("docs_section_match.json")
         if saved:
-            similarity_pairs = _deserialize_pairs(saved.get("pairs", []), result.chunks)
+            similarity_pairs = _deserialize_pairs(saved.get("matched_section_pairs", []), result.chunks)
             if similarity_pairs:
                 similarity_resumed = True
-                console.print(f"[green]Resumed {len(similarity_pairs)} similarity pairs from previous run.[/green]")
+                console.print(f"[green]Resumed {len(similarity_pairs)} matched section pairs from previous run.[/green]")
 
     if not similarity_resumed:
         # Detect boilerplate headings
@@ -350,29 +364,29 @@ def run_pipeline(
         )
 
         if run_store:
-            from dryscope.docs.report import serialize_similarity_stage
+            from dryscope.docs.report import serialize_section_match_stage
             run_store.save_stage(
-                "stage1_similarity.json",
-                serialize_similarity_stage(result, similarity_pairs, settings, scan_path),
+                "docs_section_match.json",
+                serialize_section_match_stage(result, similarity_pairs, settings, scan_path),
             )
 
     result.overlaps = similarity_pairs
-    stages_run.append("Similarity")
+    stages_run.append(DOCS_SECTION_MATCH_SLUG)
 
     console.print(
-        f"Found [bold]{len(similarity_pairs)}[/bold] similar pairs "
+        f"Found [bold]{len(similarity_pairs)}[/bold] matched section pairs "
         f"(cosine > {settings.threshold_similarity})"
     )
 
     try:
-        if stage == "similarity":
+        if stage == DOCS_SECTION_MATCH_SLUG:
             if run_store:
                 _save_all_reports(run_store, result, similarity_pairs, suggestions, settings, scan_path, stages_run)
             _output_results(result, similarity_pairs, suggestions,
                             output_format, output_file, console, settings, scan_path, stages_run)
             return result
 
-        # ─── Stage 1b: Intent Overlap Detection ───
+        # ─── Docs Map ───
         doc_chunks_map = _build_doc_chunks_map(result.documents)
         doc_pair_groups = _group_pairs_by_doc_pair(similarity_pairs)
         intent_evidence: dict[tuple[str, str], list[dict]] = {}
@@ -388,8 +402,8 @@ def run_pipeline(
             intent_resumed = False
             doc_topics: dict[str, list[str]] = {}
 
-            if run_store and run_store.stage_exists("stage1b_topics.json"):
-                saved = run_store.load_stage("stage1b_topics.json")
+            if run_store and run_store.stage_exists("docs_map.json"):
+                saved = run_store.load_stage("docs_map.json")
                 if saved:
                     result.document_descriptors = saved.get("document_descriptors", {})
                     result.topic_taxonomy = saved.get("topic_taxonomy")
@@ -403,20 +417,20 @@ def run_pipeline(
                             f"[green]Resumed descriptor-based intent detection: {len(doc_topics)} documents, "
                             f"{len(intent_evidence)} intent pairs.[/green]"
                         )
-                    existing_ia = (
-                        result.topic_taxonomy.get("information_architecture")
+                    existing_docs_map = (
+                        result.topic_taxonomy.get("docs_map")
                         if result.topic_taxonomy else None
                     )
-                    needs_ia = (
-                        not isinstance(existing_ia, dict)
-                        or not existing_ia
-                        or str(existing_ia.get("method", "")).startswith("deterministic")
+                    needs_docs_map = (
+                        not isinstance(existing_docs_map, dict)
+                        or not existing_docs_map
+                        or str(existing_docs_map.get("method", "")).startswith("deterministic")
                     )
-                    if intent_resumed and result.topic_taxonomy and needs_ia:
-                        from dryscope.docs.taxonomy import build_information_architecture
+                    if intent_resumed and result.topic_taxonomy and needs_docs_map:
+                        from dryscope.docs.taxonomy import build_docs_map
 
-                        with console.status("[bold green]Discovering information architecture..."):
-                            result.topic_taxonomy["information_architecture"] = build_information_architecture(
+                        with console.status(f"[bold green]Discovering {DOCS_MAP}..."):
+                            result.topic_taxonomy["docs_map"] = build_docs_map(
                                 result.topic_taxonomy,
                                 document_descriptors=result.document_descriptors,
                                 llm_model=settings.model,
@@ -426,29 +440,29 @@ def run_pipeline(
                                 cli_strip_api_key=settings.cli_strip_api_key,
                                 cli_permission_mode=settings.cli_permission_mode,
                                 cli_dangerously_skip_permissions=settings.cli_dangerously_skip_permissions,
-                                facet_dimensions=settings.docs_ia_facet_dimensions,
-                                facet_values=settings.docs_ia_facet_values,
+                                facet_dimensions=settings.docs_map_facet_dimensions,
+                                facet_values=settings.docs_map_facet_values,
                             )
-                        ia = result.topic_taxonomy.get("information_architecture", {})
+                        docs_map = result.topic_taxonomy.get("docs_map", {})
                         console.print(
-                            "Discovered IA: "
-                            f"[bold]{len(ia.get('topic_tree', []))}[/bold] top-level topic groups, "
-                            f"[bold]{len(ia.get('facets', {}))}[/bold] facet dimensions, "
-                            f"[bold]{len(ia.get('diagnostics', []))}[/bold] diagnostics"
+                            f"Discovered {DOCS_MAP}: "
+                            f"[bold]{len(docs_map.get('topic_tree', []))}[/bold] top-level topic groups, "
+                            f"[bold]{len(docs_map.get('facets', {}))}[/bold] facet dimensions, "
+                            f"[bold]{len(docs_map.get('diagnostics', []))}[/bold] diagnostics"
                         )
                         saved["topic_taxonomy"] = result.topic_taxonomy
-                        run_store.save_stage("stage1b_topics.json", saved)
+                        run_store.save_stage("docs_map.json", saved)
                         if cache:
                             cache.commit()
 
             if not intent_resumed:
                 console.print()
-                console.print("[bold cyan]Stage 1b: Intent Overlap Detection[/bold cyan]")
+                console.print(f"[bold cyan]{DOCS_MAP}[/bold cyan]")
 
                 intent_doc_chunks_map = doc_chunks_map
                 if _should_skip_intent_extraction(doc_chunks_map, doc_pair_groups, settings):
                     console.print(
-                        "Skipping intent extraction because there is no stage-1 similarity evidence "
+                        "Skipping Docs Map extraction because there is no Section Match evidence "
                         f"and the corpus is large ([bold]{len(doc_chunks_map)}[/bold] docs)."
                     )
                     intent_doc_chunks_map = {}
@@ -461,7 +475,7 @@ def run_pipeline(
                         console.print(
                             "Limiting intent extraction to "
                             f"[bold]{len(intent_doc_chunks_map)}[/bold] documents "
-                            "with the strongest similarity evidence"
+                            "with the strongest Section Match evidence"
                         )
 
                 if intent_doc_chunks_map:
@@ -477,8 +491,8 @@ def run_pipeline(
                         cli_strip_api_key=settings.cli_strip_api_key,
                         cli_permission_mode=settings.cli_permission_mode,
                         cli_dangerously_skip_permissions=settings.cli_dangerously_skip_permissions,
-                        facet_dimensions=settings.docs_ia_facet_dimensions,
-                        facet_values=settings.docs_ia_facet_values,
+                        facet_dimensions=settings.docs_map_facet_dimensions,
+                        facet_values=settings.docs_map_facet_values,
                     )
 
                     if cache:
@@ -491,10 +505,10 @@ def run_pipeline(
                     total_topics = sum(len(t) for t in raw_doc_topics.values())
                     console.print(
                         f"Extracted [bold]{len(result.document_descriptors)}[/bold] descriptors "
-                        f"and [bold]{total_topics}[/bold] IA labels"
+                        f"and [bold]{total_topics}[/bold] Docs Map labels"
                     )
 
-                    from dryscope.docs.taxonomy import build_canonical_taxonomy, build_information_architecture
+                    from dryscope.docs.taxonomy import build_canonical_taxonomy, build_docs_map
 
                     with console.status("[bold green]Canonicalizing topics..."):
                         taxonomy = build_canonical_taxonomy(
@@ -521,8 +535,8 @@ def run_pipeline(
                         f"[bold]{len(topic_document_clusters)}[/bold] topic coverage clusters "
                         "(canonical topics covered by 2+ documents)"
                     )
-                    with console.status("[bold green]Discovering information architecture..."):
-                        result.topic_taxonomy["information_architecture"] = build_information_architecture(
+                    with console.status(f"[bold green]Discovering {DOCS_MAP}..."):
+                        result.topic_taxonomy["docs_map"] = build_docs_map(
                             result.topic_taxonomy,
                             document_descriptors=result.document_descriptors,
                             llm_model=settings.model,
@@ -532,15 +546,15 @@ def run_pipeline(
                             cli_strip_api_key=settings.cli_strip_api_key,
                             cli_permission_mode=settings.cli_permission_mode,
                             cli_dangerously_skip_permissions=settings.cli_dangerously_skip_permissions,
-                            facet_dimensions=settings.docs_ia_facet_dimensions,
-                            facet_values=settings.docs_ia_facet_values,
+                            facet_dimensions=settings.docs_map_facet_dimensions,
+                            facet_values=settings.docs_map_facet_values,
                         )
-                    ia = result.topic_taxonomy.get("information_architecture", {})
+                    docs_map = result.topic_taxonomy.get("docs_map", {})
                     console.print(
-                        "Discovered IA: "
-                        f"[bold]{len(ia.get('topic_tree', []))}[/bold] top-level topic groups, "
-                        f"[bold]{len(ia.get('facets', {}))}[/bold] facet dimensions, "
-                        f"[bold]{len(ia.get('diagnostics', []))}[/bold] diagnostics"
+                        f"Discovered {DOCS_MAP}: "
+                        f"[bold]{len(docs_map.get('topic_tree', []))}[/bold] top-level topic groups, "
+                        f"[bold]{len(docs_map.get('facets', {}))}[/bold] facet dimensions, "
+                        f"[bold]{len(docs_map.get('diagnostics', []))}[/bold] diagnostics"
                     )
 
                     if cache:
@@ -571,7 +585,7 @@ def run_pipeline(
                             }
                             for key, matches in intent_evidence.items()
                         ]
-                        run_store.save_stage("stage1b_topics.json", {
+                        run_store.save_stage("docs_map.json", {
                             "metadata": {},
                             "descriptor_based": True,
                             "document_descriptors": result.document_descriptors,
@@ -582,7 +596,7 @@ def run_pipeline(
                             "intent_matches": intent_matches_data,
                         })
 
-            stages_run.append("Intent")
+            stages_run.append(DOCS_MAP_SLUG)
 
             # Add intent-only doc-pairs to groups (no content overlap, just topics)
             for key in intent_evidence:
@@ -596,9 +610,9 @@ def run_pipeline(
                 max_pairs=settings.docs_llm_max_doc_pairs,
             )
             console.print(
-                "Limiting LLM doc-pair analysis to "
+                f"Limiting {DOCS_PAIR_REVIEW} to "
                 f"[bold]{len(doc_pair_groups)}[/bold] of [bold]{original_count}[/bold] pairs "
-                "with the strongest similarity evidence"
+                "with the strongest Section Match evidence"
             )
 
         if not doc_pair_groups:
@@ -608,11 +622,11 @@ def run_pipeline(
                             output_format, output_file, console, settings, scan_path, stages_run)
             return result
 
-        # ─── Stage 2: LLM Doc-Pair Analysis ───
+        # ─── Doc Pair Review ───
         est_cost = estimate_doc_pair_cost(doc_pair_groups, doc_chunks_map, settings.model)
 
         console.print()
-        console.print("[bold cyan]Stage 2: Document-Pair Analysis (LLM)[/bold cyan]")
+        console.print(f"[bold cyan]{DOCS_PAIR_REVIEW} (LLM)[/bold cyan]")
         console.print(
             f"  Analyzing [bold]{len(doc_pair_groups)}[/bold] document pairs "
             f"→ ~${est_cost:.2f} ({settings.model})"
@@ -649,7 +663,7 @@ def run_pipeline(
             prior_analyses: dict[str, dict] = {}
             doc_pairs_path = None
             if run_store:
-                doc_pairs_path = run_store.run_dir / "stage2_doc_pairs.jsonl"
+                doc_pairs_path = run_store.run_dir / "docs_pair_review.jsonl"
                 if doc_pairs_path.exists():
                     for line in doc_pairs_path.read_text().splitlines():
                         if line.strip():
@@ -682,16 +696,16 @@ def run_pipeline(
             result.doc_pair_analyses = analyses
             result.codes = codes
             result.categories = categories
-            stages_run.append("LLM Analysis")
+            stages_run.append(DOCS_PAIR_REVIEW_SLUG)
 
             if cache:
                 cache.commit()
 
             if run_store:
-                from dryscope.docs.report import serialize_coding_stage
+                from dryscope.docs.report import serialize_doc_pair_review_stage
                 run_store.save_stage(
-                    "stage2_coding.json",
-                    serialize_coding_stage(codes, categories, suggestions, settings, scan_path, analyses=analyses),
+                    "docs_pair_review.json",
+                    serialize_doc_pair_review_stage(codes, categories, suggestions, settings, scan_path, analyses=analyses),
                 )
         except Exception as e:
             console.print(f"[yellow]LLM analysis stage failed: {e}[/yellow]")
@@ -739,7 +753,7 @@ def _output_results(
             console.print(f"Report written to [bold]{output_file}[/bold]")
             console.print(f"HTML report written to [bold]{html_path}[/bold]")
         else:
-            stdout_console = Console()
+            stdout_console = Console(soft_wrap=True)
             stdout_console.print(content)
     elif output_format == "html":
         md_content = render_markdown(
@@ -752,7 +766,7 @@ def _output_results(
             Path(output_file).write_text(content)
             console.print(f"Report written to [bold]{output_file}[/bold]")
         else:
-            stdout_console = Console()
+            stdout_console = Console(soft_wrap=True)
             stdout_console.print(content)
     elif output_format == "json":
         content = render_json(result, similarity_pairs, suggestions,
@@ -762,5 +776,5 @@ def _output_results(
             Path(output_file).write_text(content)
             console.print(f"Report written to [bold]{output_file}[/bold]")
         else:
-            stdout_console = Console()
+            stdout_console = Console(soft_wrap=True)
             stdout_console.print(content)

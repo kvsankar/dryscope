@@ -18,10 +18,10 @@ Source Files (.py, .ts, .tsx)
 [Similarity Engine] ──> Hybrid cosine+Jaccard with size-ratio filtering
     |
     v
-[Union-Find Clustering] ──> Candidate duplicate clusters
+[Union-Find Clustering] ──> Code Match candidate clusters
     |
     v
-[LLM Verifier] ──> (optional) Classifies clusters as refactor/review/noise
+[LLM Verifier] ──> Code Review: optional refactor/review/noise classification
     |
     v
 [Escalation Policy] ──> Keeps review + higher-value refactor clusters
@@ -33,7 +33,7 @@ Source Files (.py, .ts, .tsx)
 ## Docs Pipeline
 
 ```
-Documentation Files (.md, .rst, .txt, .adoc)
+Documentation Files (.md, .mdx, .rst, .txt, .adoc)
     |
     v
 [Chunker] ──> Heading-based sections with line tracking
@@ -42,10 +42,10 @@ Documentation Files (.md, .rst, .txt, .adoc)
 [Embedder] ──> Vector embeddings per section (API embeddings or local sentence-transformers)
     |
     v
-[Similarity] ──> Cross-document section pairs above threshold
-    |                              (similarity stage)
+[Section Match] ──> Cross-document section pairs above threshold
+    |                              (docs-section-match)
     v
-[Section Recommendations] ──> Ranked section-level consolidation/link suggestions
+[Section Match Recommendations] ──> Ranked section-level consolidation/link suggestions
     |
     +──────────────────────────────────────────────────────────────┐
                                                                    |
@@ -58,26 +58,26 @@ Documentation Files (.md, .rst, .txt, .adoc)
     |                            aboutness and reader-intent labels
     |
     v
-[Information Architecture] ──> Topic tree, facets, diagnostics,
-    |                           suggested consolidation clusters
-    |                              (intent/full stage)
+[Docs Map] ──> Topic tree, facets, diagnostics, docs map clusters
+    |                              (docs-map, docs-report-pack)
     v
 [Intent Pair Evidence] ──> Canonical labels are embedded to find related doc pairs
     |
     v
-[Doc-Pair Analysis] ──> Optional LLM classification with recommendations
-    |                              (full stage, cost-capped)
+[Doc Pair Review] ──> Optional LLM classification with recommendations
+    |                              (docs-pair-review, cost-capped)
     v
-[Reporter] ──> numbered collapsible markdown/html + structured json
+[Reporter] ──> Docs Report Pack: markdown/html/json + stage artifacts
 ```
 
-The docs report has two top-level Doc DRY tracks:
+The docs report has named tracks:
 
-1. **Information Architecture** — document descriptors, canonical labels, IA topic tree, facets, diagnostics, and suggested consolidation clusters.
-2. **Section Similarity** — heading chunks, embedding comparison, similar section pairs, and section similarity recommendations.
+1. **Docs Map** (`docs-map`) — document descriptors, canonical labels, topic tree, facets, diagnostics, and consolidation clusters.
+2. **Section Match** (`docs-section-match`) — heading chunks, embedding comparison, matched section pairs, and section-level recommendations.
+3. **Doc Pair Review** (`docs-pair-review`) — optional LLM review of selected related document pairs.
 
-The IA track is corpus-level and helps decide how to organize documentation. The
-Section Similarity track is section-level and points at concrete repeated text.
+Docs Map is corpus-level and helps decide how to organize documentation. Section
+Match is section-level and points at concrete repeated text.
 
 ## Core Components
 
@@ -127,7 +127,7 @@ Section Similarity track is section-level and points at concrete repeated text.
 ### Docs Pipeline (`dryscope/docs/`)
 
 **Chunker** (`docs/chunker.py`)
-- Heading-based markdown chunking via mistune AST
+- Heading-based Markdown/MDX chunking via mistune AST
 - Plaintext paragraph chunking with line tracking
 - File discovery via git ls-files or recursive glob
 - Boilerplate heading detection across document corpus
@@ -147,33 +147,33 @@ Section Similarity track is section-level and points at concrete repeated text.
 - Deterministic exact/fuzzy label normalization
 - Optional LLM canonicalization of descriptor labels into a durable corpus vocabulary
 - Canonical label taxonomy with document coverage, aliases, and co-occurrence
-- Information Architecture discovery: topic tree, facets, diagnostics, and suggested consolidation clusters
-- Facet seeds are configurable under `[docs.ia]`; they guide generic dimensions but do not impose a product-specific taxonomy
+- Docs Map discovery: topic tree, facets, diagnostics, and consolidation clusters
+- Facet seeds are configurable under `[docs.map]`; they guide generic dimensions but do not impose a product-specific taxonomy
 
 **Coding** (`docs/coding.py`)
-- LLM doc-pair analysis with relationship classification
+- Doc Pair Review with relationship classification
 - Topic-level canonical/action assignments
 - Content-aware chunk-to-topic attribution
 
 **Pipeline** (`docs/pipeline.py`)
-- Multi-stage orchestrator: section similarity → descriptors/canonical taxonomy/IA → optional intent pair evidence → optional LLM doc-pair analysis
+- Multi-stage orchestrator: Section Match → Docs Map descriptors/taxonomy → optional intent pair evidence → optional Doc Pair Review
 - Descriptor extraction and canonicalization run across the selected docs corpus; `intent_max_docs = 0` means no doc cap
-- Caps LLM doc-pair analysis to strongest pairs when many related pairs are found
+- Caps Doc Pair Review to strongest pairs when many related pairs are found
 - Cost estimation with model-specific pricing
 - Run persistence via RunStore, with cleanup support for keeping the newest N runs or runs newer than a date cutoff
 - Progress tracking with rich console
 
 **Report Generation** (`docs/report.py`)
 - Produces matching markdown, HTML, and JSON report structures
-- Numbered sections: Run Overview, Information Architecture, Suggested Consolidation Clusters, Section Similarity, optional Document Pair Analysis, Canonical Label Taxonomy, Methodology
+- Numbered sections: Run Overview, Docs Map, Docs Map Clusters, Section Match, optional Doc Pair Review, Docs Map Taxonomy, Methodology
 - HTML sections and subsections are collapsible
 - JSON uses the same ordered `report_structure` section list and avoids duplicate top-level IA/taxonomy payloads
-- Builds prioritized section similarity recommendations from overlap pairs
-- Separates IA consolidation clusters from section similarity recommendations so the report does not mix corpus organization signals with repeated-section findings
+- Builds prioritized Section Match recommendations from overlap pairs
+- Separates Docs Map clusters from Section Match recommendations so the report does not mix corpus organization signals with repeated-section findings
 
 ### Shared (`dryscope/`)
 
-**Similarity Engine** (`similarity.py`)
+**Match Engine** (`similarity.py`)
 - Hybrid similarity: 70% embedding cosine + 30% token Jaccard (configurable)
 - Size-ratio filter (max 3x) prevents mismatched unit pairing
 - Union-Find clustering with max cluster size
@@ -181,9 +181,9 @@ Section Similarity track is section-level and points at concrete repeated text.
 
 **Config** (`config.py`)
 - Settings dataclass with `[code]`, `[docs]`, `[llm]`, `[cache]` sections
-- `[docs.ia]` facet seed settings for generic IA dimensions and suggested values
+- `[docs.map]` facet seed settings for generic Docs Map dimensions and suggested values
 - 3-layer merge: defaults → `.dryscope.toml` → CLI flags
-- TOML loading with backward compatibility
+- TOML loading for the current `.dryscope.toml` schema
 - Includes code escalation policy knobs for post-verify filtering
 
 **Cache** (`cache.py`)
@@ -212,7 +212,7 @@ Section Similarity track is section-level and points at concrete repeated text.
 - **LiteLLM embeddings** by default, with optional **sentence-transformers** local embeddings
 - **numpy** (vector math, cosine similarity)
 - **click** (CLI), **rich** (docs terminal output)
-- **litellm** + **tenacity** (LLM verification/analysis)
+- **litellm** + **tenacity** (Code Review and Doc Pair Review calls)
 - **mistune** (markdown parsing)
 - **uv** (package management)
 
@@ -224,13 +224,13 @@ Section Similarity track is section-level and points at concrete repeated text.
 ### M4: Multi-language ✓
 - Go/Java/JavaScript/JSX/TypeScript/TSX support (parsing, normalization, arrow functions)
 
-### M5: LLM Verification ✓
-- Provider-agnostic LLM verification, project profiles, min-tokens filter
+### M5: Code Review ✓
+- Provider-agnostic Code Review, project profiles, min-tokens filter
 - Shared code/docs backend support for `litellm` and `claude -p`
-- Deterministic escalation policy after verification
+- Deterministic escalation policy after Code Review
 
-### M6: Docs Pipeline ✓
-- Documentation overlap detection merged from doclens project
+### M6: Docs Tracks ✓
+- Section Match and Docs Map pipeline merged from doclens project
 - Unified CLI with `--code`/`--docs` flags
 - Shared embedding abstraction for API and optional local models
 - Unified JSON `findings[]` schema

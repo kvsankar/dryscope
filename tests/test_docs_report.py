@@ -5,7 +5,7 @@ from pathlib import Path
 
 from dryscope.config import Settings
 from dryscope.docs.models import AnalysisResult, Chunk, DocPairAnalysis, Document, OverlapPair, TopicAnalysis
-from dryscope.docs.report import build_recommendations, render_html, render_json, render_markdown, serialize_coding_stage
+from dryscope.docs.report import build_recommendations, render_html, render_json, render_markdown, serialize_doc_pair_review_stage
 
 
 def _make_analysis() -> tuple[AnalysisResult, list[DocPairAnalysis]]:
@@ -79,16 +79,16 @@ def test_render_outputs_include_topic_taxonomy() -> None:
             "/tmp/project/docs/a.md": ["context window management"],
         },
         "co_occurrence": [],
-        "information_architecture": {
+        "docs_map": {
             "method": "llm",
             "topic_tree": [
                 {
-                    "id": "ia_01",
+                    "id": "docs_map_01",
                     "label": "context engineering",
                     "description": "Context-related docs.",
                     "children": [
                         {
-                            "id": "ia_01_01",
+                            "id": "docs_map_01_01",
                             "label": "context windows",
                             "description": "Managing context budgets.",
                             "topics": ["context window management"],
@@ -119,26 +119,26 @@ def test_render_outputs_include_topic_taxonomy() -> None:
     json_report = render_json(result, [], None)
 
     assert "Run Overview" in markdown
-    assert "Doc DRY Result Summary" in markdown
-    assert "Information Architecture" in markdown
-    assert "Suggested Consolidation Clusters" in markdown
+    assert "Docs Track Summary" in markdown
+    assert "Docs Map" in markdown
+    assert "Docs Map Clusters" in markdown
     assert "context engineering" in markdown
-    assert "Canonical Label Taxonomy" in markdown
+    assert "Docs Map Taxonomy" in markdown
     assert "context window management" in markdown
     assert '"report_structure"' in json_report
     assert '"document_descriptors"' in json_report
-    assert '"information_architecture"' in json_report
+    assert '"docs_map"' in json_report
     assert '"topic_taxonomy"' not in json_report
     assert '"topic_document_clusters"' not in json_report
     data = json.loads(json_report)
     section_ids = [section["id"] for section in data["report_structure"]]
     assert section_ids == [
         "run_overview",
-        "information_architecture",
-        "suggested_consolidation_clusters",
-        "section_similarity",
-        "document_pair_analysis",
-        "canonical_label_taxonomy",
+        "docs_map",
+        "docs_map_clusters",
+        "docs_section_match",
+        "docs_pair_review",
+        "docs_map_taxonomy",
         "methodology",
     ]
     run_overview = data["report_structure"][0]["data"]
@@ -149,10 +149,10 @@ def test_render_outputs_include_topic_taxonomy() -> None:
     assert "documents" not in taxonomy["canonical_topics"][0]
 
 
-def test_serialize_coding_stage_handles_missing_canonical() -> None:
+def test_serialize_doc_pair_review_stage_handles_missing_canonical() -> None:
     _, analyses = _make_analysis()
 
-    payload = serialize_coding_stage(
+    payload = serialize_doc_pair_review_stage(
         codes=[],
         categories=[],
         suggestions=None,
@@ -201,7 +201,7 @@ def test_build_recommendations_keeps_simple_pairwise_overlap() -> None:
     assert len(recs[0]["affected_files"]) == 2
 
 
-def test_section_similarity_recommendations_are_labeled_in_report() -> None:
+def test_section_match_recommendations_are_labeled_in_report() -> None:
     result = AnalysisResult(
         documents=[
             Document(
@@ -223,16 +223,16 @@ def test_section_similarity_recommendations_are_labeled_in_report() -> None:
         suggestions=None,
         settings=Settings(),
         project_root=Path("/tmp/project"),
-        stages_run=["Similarity"],
+        stages_run=["docs-section-match"],
     )
 
-    assert "## 2. Information Architecture" not in markdown
+    assert "## 2. Docs Map" not in markdown
     assert "## Recommendations" not in markdown
-    assert "## 2. Section Similarity" in markdown
-    assert "### 2.1. Section Similarity Recommendations" in markdown
-    assert "These recommendations are derived from the section similarity pairs" in markdown
-    assert "Similar Section Pairs" in markdown
-    assert "Section Similarity Recs" in markdown
+    assert "## 2. Section Match" in markdown
+    assert "### 2.1. Section Match Recommendations" in markdown
+    assert "These recommendations are derived from the matched section pairs" in markdown
+    assert "Matched Section Pairs" in markdown
+    assert "Section Match Recs" in markdown
 
 
 def test_dashboard_reflects_all_tracks_that_ran() -> None:
@@ -262,7 +262,7 @@ def test_dashboard_reflects_all_tracks_that_ran() -> None:
                 "aliases": ["context window management"],
             }
         ],
-        "information_architecture": {
+        "docs_map": {
             "method": "llm",
             "topic_tree": [{"label": "context engineering", "children": []}],
             "facets": {"doc_role": {"values": []}},
@@ -277,15 +277,15 @@ def test_dashboard_reflects_all_tracks_that_ran() -> None:
         suggestions=None,
         settings=Settings(),
         project_root=Path("/tmp/project"),
-        stages_run=["Similarity", "Intent"],
+        stages_run=["docs-section-match", "docs-map"],
     )
 
-    assert "IA Groups" in markdown
-    assert "IA Consolidation Clusters" in markdown
-    assert "Similar Section Pairs" in markdown
-    assert "Section Similarity Recs" in markdown
-    assert "Information Architecture:" in markdown
-    assert "Section Similarity:" in markdown
+    assert "Docs Map Groups" in markdown
+    assert "Docs Map Clusters" in markdown
+    assert "Matched Section Pairs" in markdown
+    assert "Section Match Recs" in markdown
+    assert "Docs Map:" in markdown
+    assert "Section Match:" in markdown
 
 
 def test_html_wraps_sections_and_renders_diagnostics_table() -> None:
@@ -295,7 +295,7 @@ def test_html_wraps_sections_and_renders_diagnostics_table() -> None:
         "raw_to_canonical": {},
         "doc_topics": {},
         "co_occurrence": [],
-        "information_architecture": {
+        "docs_map": {
             "method": "llm",
             "topic_tree": [],
             "facets": {},
@@ -362,7 +362,7 @@ def test_report_uses_full_collapsible_lists_without_samples() -> None:
                 "mention_count": 9,
             }
         ],
-        "information_architecture": {
+        "docs_map": {
             "method": "llm",
             "topic_tree": [
                 {
@@ -389,7 +389,7 @@ def test_report_uses_full_collapsible_lists_without_samples() -> None:
         suggestions=None,
         settings=Settings(),
         project_root=Path("/tmp/project"),
-        stages_run=["Similarity", "Intent"],
+        stages_run=["docs-section-match", "docs-map"],
     )
     html = render_html(markdown)
     json_report = render_json(
@@ -398,7 +398,7 @@ def test_report_uses_full_collapsible_lists_without_samples() -> None:
         suggestions=None,
         settings=Settings(),
         project_root=Path("/tmp/project"),
-        stages_run=["Similarity", "Intent"],
+        stages_run=["docs-section-match", "docs-map"],
     )
     data = json.loads(json_report)
 
@@ -413,10 +413,10 @@ def test_report_uses_full_collapsible_lists_without_samples() -> None:
     assert "stages_run" not in data
     assert "topic_taxonomy" not in data
     assert "topic_document_clusters" not in data
-    assert "information_architecture" not in data
+    assert "docs_map" not in data
     assert "similarity_pairs" not in data
     section_by_id = {section["id"]: section for section in data["report_structure"]}
-    cluster_docs = section_by_id["suggested_consolidation_clusters"]["data"][0]["documents"]
+    cluster_docs = section_by_id["docs_map_clusters"]["data"][0]["documents"]
     assert "/tmp/project/docs/g.md" in cluster_docs
-    pair_rows = section_by_id["section_similarity"]["children"][1]["data"]
+    pair_rows = section_by_id["docs_section_match"]["children"][1]["data"]
     assert len(pair_rows) == 1

@@ -1,14 +1,21 @@
 """Tests for docs pipeline scaling helpers."""
 
-from dryscope.docs.models import Chunk, OverlapPair
+import json
+
+import pytest
+from rich.console import Console
+
+from dryscope.config import Settings
+from dryscope.docs.models import AnalysisResult, Chunk, Document, OverlapPair
 from dryscope.docs.pipeline import (
     _filter_doc_chunks_map,
     _group_pairs_by_doc_pair,
+    _output_results,
     _rank_doc_paths_by_similarity_evidence,
     _restrict_doc_pair_groups,
     _should_skip_intent_extraction,
+    run_pipeline,
 )
-from dryscope.config import Settings
 
 
 def _pair(doc_a: str, doc_b: str, line_a: int, line_b: int, similarity: float) -> OverlapPair:
@@ -94,3 +101,36 @@ def test_should_not_skip_intent_extraction_for_small_negative_repo() -> None:
     }
 
     assert _should_skip_intent_extraction(doc_chunks_map, {}, settings) is False
+
+
+def test_run_pipeline_rejects_unknown_stage(tmp_path) -> None:
+    with pytest.raises(ValueError, match="Unknown docs stage"):
+        run_pipeline(tmp_path, Settings(), stage="similarity", console=Console(stderr=True))
+
+
+def test_output_results_json_stdout_is_parseable(capsys, tmp_path) -> None:
+    chunk = Chunk(
+        document_path=str(tmp_path / "docs" / "a.md"),
+        heading_path=["Intro"],
+        content="alpha beta gamma",
+        line_start=1,
+        line_end=2,
+    )
+    result = AnalysisResult(documents=[Document(path=chunk.document_path, chunks=[chunk])])
+    result.chunks = [chunk]
+
+    _output_results(
+        result,
+        [],
+        None,
+        "json",
+        None,
+        Console(stderr=True),
+        settings=Settings(),
+        scan_path=tmp_path,
+        stages_run=["docs-section-match"],
+    )
+
+    captured = capsys.readouterr()
+    data = json.loads(captured.out)
+    assert data["summary"]["documents_scanned"] == 1

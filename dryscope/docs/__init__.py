@@ -1,1 +1,1 @@
-"""Documentation overlap detection pipeline."""
+"""Docs track pipeline."""

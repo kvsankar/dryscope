@@ -1,4 +1,4 @@
-"""Format and output duplicate clusters with tiered classification."""
+"""Format and output Code Match clusters with tiered classification."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ from enum import Enum
 
 from dryscope.code.parser import CodeUnit
 from dryscope.similarity import DuplicatePair
+from dryscope.terminology import CODE_MATCH, CODE_MATCH_SLUG, CODE_REPORT_PACK, CODE_REPORT_PACK_SLUG
 
 
 class Tier(str, Enum):
@@ -158,6 +159,12 @@ def format_json(clusters: list[Cluster]) -> str:
 
     return json.dumps(
         {
+            "report_pack": {
+                "label": CODE_REPORT_PACK,
+                "slug": CODE_REPORT_PACK_SLUG,
+            },
+            "track": CODE_MATCH,
+            "track_slug": CODE_MATCH_SLUG,
             "summary": {
                 "total_clusters": len(clusters),
                 "by_tier": by_tier,
@@ -201,7 +208,7 @@ def _format_cluster(cluster: Cluster) -> list[str]:
 def format_terminal(clusters: list[Cluster]) -> str:
     """Pretty-print clusters grouped by tier, cross-file first within each tier."""
     if not clusters:
-        return "No duplicate clusters found."
+        return f"No {CODE_MATCH} clusters found."
 
     lines: list[str] = []
 
@@ -213,7 +220,7 @@ def format_terminal(clusters: list[Cluster]) -> str:
     # Summary
     total = len(clusters)
     parts = [f"{len(by_tier[t])} {t.value}" for t in Tier if by_tier[t]]
-    lines.append(f"Found {total} cluster(s): {', '.join(parts)}\n")
+    lines.append(f"{CODE_MATCH}: found {total} cluster(s): {', '.join(parts)}\n")
 
     for tier in Tier:
         tier_clusters = by_tier[tier]

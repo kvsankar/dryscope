@@ -47,22 +47,22 @@ uv run python benchmarks/run_public_benchmark.py --group public-ai-generated-dup
 
 Outputs are written to `/tmp/dryscope-public-benchmark-results` by default.
 
-For a bounded verified pass over the AI-generated group:
+For a bounded Code Review pass over the AI-generated group:
 
 ```bash
 uv run python benchmarks/run_public_benchmark.py --group public-ai-generated-duplicates --verify-max-findings 15
 ```
 
-By default the public benchmark harness pins structural scans to
+By default the public benchmark harness pins Code Match scans to
 `all-MiniLM-L6-v2` so benchmark results do not depend on API embedding
 credentials. Run it from the development environment, or install
 `dryscope[local-embeddings]`, because the lightweight default install does not
 include local sentence-transformers. Use `--embedding-model` to test another
 embedding backend.
 
-Use `--structural-only` when you only need candidate counts and saved structural
-JSON outputs. Omit it when you want the full LLM verification and label scoring
-pass. Use `--verify-max-findings 15` for a bounded verification pass over the
+Use `--structural-only` when you only need Code Match candidate counts and saved
+JSON outputs. Omit it when you want the full Code Review and label scoring
+pass. Use `--verify-max-findings 15` for a bounded Code Review pass over the
 highest-ranked candidates in each repo.
 
 ## Label Semantics

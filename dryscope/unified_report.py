@@ -6,6 +6,16 @@ import json
 
 from dryscope import __version__
 from dryscope.code.reporter import Cluster, Tier, format_terminal as code_format_terminal
+from dryscope.terminology import (
+    CODE_MATCH,
+    CODE_MATCH_SLUG,
+    CODE_REVIEW,
+    CODE_REVIEW_SLUG,
+    DOCS_PAIR_REVIEW,
+    DOCS_PAIR_REVIEW_SLUG,
+    DOCS_SECTION_MATCH,
+    DOCS_SECTION_MATCH_SLUG,
+)
 
 
 def _code_cluster_to_finding(cluster: Cluster, finding_id: int) -> dict:
@@ -13,6 +23,12 @@ def _code_cluster_to_finding(cluster: Cluster, finding_id: int) -> dict:
     d = cluster.to_dict()
     d["id"] = finding_id
     d["mode"] = "code"
+    if d.get("verdict"):
+        d["track"] = CODE_REVIEW
+        d["track_slug"] = CODE_REVIEW_SLUG
+    else:
+        d["track"] = CODE_MATCH
+        d["track_slug"] = CODE_MATCH_SLUG
     d["similarity"] = d.pop("max_similarity")
     d.pop("cluster_id", None)
     return d
@@ -47,6 +63,8 @@ def _doc_pair_to_finding(
     return {
         "id": finding_id,
         "mode": "docs",
+        "track": DOCS_PAIR_REVIEW if analysis is not None else DOCS_SECTION_MATCH,
+        "track_slug": DOCS_PAIR_REVIEW_SLUG if analysis is not None else DOCS_SECTION_MATCH_SLUG,
         "similarity": round(pair.embedding_similarity, 4) if pair.embedding_similarity is not None else None,
         "files": sorted(set([pair.chunk_a.document_path, pair.chunk_b.document_path])),
         "sections": sections,
@@ -126,17 +144,19 @@ def format_unified_terminal(
     parts: list[str] = []
 
     if code_clusters is not None:
-        parts.append("=== Code Duplicates ===\n")
+        title = CODE_REVIEW if any(c.verdict for c in code_clusters) else CODE_MATCH
+        parts.append(f"=== {title} ===\n")
         parts.append(code_format_terminal(code_clusters))
 
     if doc_pairs is not None:
         if parts:
             parts.append("")
-        parts.append("=== Documentation Overlap ===\n")
+        title = DOCS_PAIR_REVIEW if doc_analyses else DOCS_SECTION_MATCH
+        parts.append(f"=== {title} ===\n")
         if not doc_pairs:
-            parts.append("No documentation overlap found.")
+            parts.append("No matched documentation sections found.")
         else:
-            parts.append(f"Found {len(doc_pairs)} overlapping section pair(s).\n")
+            parts.append(f"Found {len(doc_pairs)} matched section pair(s).\n")
             for pair in doc_pairs:
                 sim = f"{pair.embedding_similarity:.4f}" if pair.embedding_similarity is not None else "N/A"
                 file_a = pair.chunk_a.document_path

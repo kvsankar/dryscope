@@ -1,4 +1,4 @@
-"""CLI entry point for dryscope — unified code duplicate and doc overlap detection."""
+"""CLI entry point for dryscope — Code Match and docs track scanning."""
 
 from __future__ import annotations
 
@@ -12,6 +12,8 @@ from pathlib import Path
 import click
 
 from dryscope import __version__
+from dryscope.terminology import CODE_MATCH, CODE_REVIEW, DOCS_MAP, DOCS_PAIR_REVIEW, DOCS_SECTION_MATCH
+from dryscope.terminology import DOCS_REPORT_PACK_SLUG, DOCS_SECTION_MATCH_SLUG
 
 SKILL_TEMPLATE = Path(__file__).parent / "skill" / "SKILL.md"
 SKILL_DESTS = [
@@ -60,7 +62,7 @@ def _find_git_root(scan_path: Path) -> Path:
 @click.pass_context
 @click.version_option(version=__version__)
 def main(ctx: click.Context) -> None:
-    """dryscope — code duplicate and documentation overlap detection."""
+    """dryscope — Code Match, Code Review, and docs track scanning."""
     if ctx.invoked_subcommand is None:
         click.echo(ctx.get_help())
 
@@ -78,7 +80,7 @@ def _run_code_scan(
     lang: str | None,
     max_findings: int | None = None,
 ) -> list | None:
-    """Run the code duplicate detection pipeline and return clusters.
+    """Run Code Match and return clusters.
 
     Returns a list of Cluster objects, or None if no units were found.
     """
@@ -166,12 +168,12 @@ def _run_code_scan(
         click.echo(f"Limiting to top {max_findings} clusters.", err=True)
         clusters = clusters[:max_findings]
 
-    # LLM verification pass
+    # Code Review pass
     if verify:
         from dryscope.code.verifier import verify_clusters, VERDICT_NOISE
         from dryscope.code.policy import EscalationPolicy, should_escalate_cluster
 
-        click.echo(f"Verifying {len(clusters)} clusters with {llm_model}...", err=True)
+        click.echo(f"{CODE_REVIEW}: verifying {len(clusters)} clusters with {llm_model}...", err=True)
         results = verify_clusters(
             clusters,
             model=llm_model,
@@ -224,7 +226,7 @@ def _run_docs_scan(
     stage: str,
     resume: bool,
 ) -> None:
-    """Run the documentation overlap detection pipeline."""
+    """Run the docs track pipeline."""
     from rich.console import Console
 
     from dryscope.docs.pipeline import run_pipeline
@@ -233,7 +235,7 @@ def _run_docs_scan(
     scan_path = Path(path).resolve()
     err_console = Console(stderr=True)
 
-    doc_stage = "full" if verify else stage
+    doc_stage = DOCS_REPORT_PACK_SLUG if verify else stage
 
     project_root = _find_git_root(scan_path)
 
@@ -265,29 +267,35 @@ def _run_docs_scan(
 @main.command()
 @click.argument("path", type=click.Path(exists=True))
 # Mode flags
-@click.option("--code/--no-code", default=None, help="Scan for code duplicates")
-@click.option("--docs/--no-docs", default=None, help="Scan for documentation overlap")
+@click.option("--code/--no-code", default=None, help=f"Run {CODE_MATCH}")
+@click.option("--docs/--no-docs", default=None, help=f"Run docs tracks ({DOCS_SECTION_MATCH}; {DOCS_REPORT_PACK_SLUG} adds {DOCS_MAP} and {DOCS_PAIR_REVIEW})")
 @click.option("--lang", type=click.Choice(["python", "go", "java", "js", "jsx", "ts", "tsx"]), default=None, help="Filter to specific language (code mode)")
 # Shared options
 @click.option("--threshold", "-t", default=0.90, type=click.FloatRange(0.0, 1.0), help="Similarity threshold (0.0-1.0)")
 @click.option("--format", "-f", "output_format", type=click.Choice(["terminal", "json", "markdown", "html"]), default="terminal")
-@click.option("--verify", is_flag=True, default=False, help="Use LLM to verify/analyze findings")
+@click.option("--verify", is_flag=True, default=False, help=f"Run {CODE_REVIEW} for code; run {DOCS_REPORT_PACK_SLUG} for docs")
 @click.option("--llm-model", default="claude-haiku-4-5-20251001", envvar="DRYSCOPE_LLM_MODEL", help="LLM model for --verify")
 @click.option("--llm-api-key", default=None, help="API key for --verify")
 # Code-specific options
 @click.option("--min-lines", "-m", default=6, type=int, help="Minimum lines for a code unit")
 @click.option("--min-tokens", default=0, type=int, help="Minimum unique normalized tokens")
 @click.option("--max-cluster-size", default=15, type=int, help="Drop clusters larger than this")
-@click.option("--max-findings", default=None, type=int, help="Limit output/verification to the top N code findings")
+@click.option("--max-findings", default=None, type=int, help=f"Limit {CODE_MATCH}/{CODE_REVIEW} to the top N code findings")
 @click.option("--exclude", "-e", multiple=True, help="Glob patterns to exclude")
 @click.option("--exclude-type", multiple=True, help="Base class types to exclude")
 @click.option("--embedding-model", "model", default="text-embedding-3-small", help="Embedding model name")
 # Docs-specific options
-@click.option("--stage", type=click.Choice(["similarity", "full"]), default="similarity", help="Docs pipeline stage")
+@click.option(
+    "--stage",
+    type=click.Choice([DOCS_SECTION_MATCH_SLUG, DOCS_REPORT_PACK_SLUG]),
+    default=DOCS_SECTION_MATCH_SLUG,
+    help=f"Docs stage: {DOCS_SECTION_MATCH_SLUG}={DOCS_SECTION_MATCH}; {DOCS_REPORT_PACK_SLUG}={DOCS_MAP}+{DOCS_SECTION_MATCH}+{DOCS_PAIR_REVIEW}",
+)
 @click.option("--resume", is_flag=True, default=False, help="Resume from latest docs run")
 @click.option("--intra", is_flag=True, default=False, help="Include intra-document section overlap")
 @click.option("--min-words", default=None, type=int, help="Minimum words per doc section")
-@click.option("--threshold-intent", default=None, type=float, help="Intent overlap threshold (docs)")
+@click.option("--threshold-intent", default=None, type=float, help="Docs Map topic-pair threshold")
+@click.option("--llm-max-doc-pairs", default=None, type=int, help=f"Maximum document pairs for {DOCS_PAIR_REVIEW}")
 @click.option("--concurrency", default=None, type=int, help="Max parallel LLM calls (docs)")
 @click.option("--backend", type=click.Choice(["litellm", "cli", "codex-cli", "ollama"]), default=None, help="LLM backend for --verify")
 @click.option("--token-weight", default=None, type=float, help="Token Jaccard weight in hybrid similarity")
@@ -315,14 +323,15 @@ def scan(
     intra: bool,
     min_words: int | None,
     threshold_intent: float | None,
+    llm_max_doc_pairs: int | None,
     concurrency: int | None,
     backend: str | None,
     token_weight: float | None,
 ) -> None:
-    """Scan PATH for code duplicates and/or documentation overlap.
+    """Scan PATH with Code Match and/or docs tracks.
 
-    By default, scans for code duplicates (--code is implied).
-    Use --docs to scan for documentation overlap instead.
+    By default, runs Code Match (--code is implied).
+    Use --docs to run docs analysis tracks instead.
     Use --code --docs to run both pipelines.
     """
     from dryscope.config import load_settings
@@ -355,10 +364,12 @@ def scan(
         # Docs overrides
         docs_embedding_model=model if _explicit("model") else None,
         threshold=threshold if _explicit("threshold") else None,
+        exclude=exclude if exclude else None,
         threshold_intent=threshold_intent,
         backend=backend,
         model=llm_model if _explicit("llm_model") else None,
         min_words=min_words,
+        llm_max_doc_pairs=llm_max_doc_pairs,
         concurrency=concurrency,
         intra=intra if ctx.get_parameter_source("intra") != click.core.ParameterSource.DEFAULT else None,
         token_weight=token_weight,

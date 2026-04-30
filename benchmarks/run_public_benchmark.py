@@ -40,7 +40,7 @@ def main() -> None:
         default=DEFAULT_EMBEDDING_MODEL,
         help="Embedding model used for benchmark scans",
     )
-    parser.add_argument("--structural-only", action="store_true", help="Skip LLM verification")
+    parser.add_argument("--structural-only", action="store_true", help="Run Code Match only; skip Code Review")
     parser.add_argument(
         "--verify-max-findings",
         type=int,

@@ -1,3 +1,3 @@
-"""dryscope — code duplicate detection using tree-sitter and embeddings."""
+"""dryscope — Code Match and docs track scanning."""
 
 __version__ = "0.1.0"

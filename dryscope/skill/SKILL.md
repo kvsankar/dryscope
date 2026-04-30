@@ -1,6 +1,6 @@
 ---
 name: dryscope
-description: Preflight repositories before AI-assisted refactors and documentation consolidation by finding duplicate-code candidates, repeated documentation sections, and docs IA overlap. Use when the user asks to narrow a repo for an agent/model, find duplicate code, detect code clones, check for copy-paste code, find repeated patterns, DRY violations, documentation overlap, redundant docs, or doc consolidation targets. Keywords - AI preflight, repo narrowing, duplicate, clone, copy-paste, DRY, repetition, similarity, refactor duplicates, documentation overlap, redundant docs, doc overlap.
+description: Preflight repositories before AI-assisted refactors and documentation consolidation with Code Match, Code Review, Docs Map, Section Match, and Doc Pair Review. Use when the user asks to narrow a repo for an agent/model, find duplicate code, detect code clones, check for copy-paste code, find repeated patterns, DRY violations, redundant docs, repeated docs, or doc consolidation targets. Keywords - AI preflight, repo narrowing, Code Match, Code Review, Docs Map, Section Match, Doc Pair Review, duplicate, clone, copy-paste, DRY, repetition, similarity, refactor duplicates, redundant docs, repeated docs, doc overlap.
 allowed-tools: [Bash, Read, Glob, Grep]
 ---
 
@@ -9,9 +9,12 @@ allowed-tools: [Bash, Read, Glob, Grep]
 Runs **dryscope** — a preflight scanner for narrowing a repository before
 AI-assisted refactors and documentation consolidation. It uses tree-sitter to
 parse code into units (functions, classes, methods), normalizes them, generates
-embeddings, and clusters similar items together. For docs, it has two tracks:
-- **Information Architecture**: document descriptors, canonical labels, IA topic tree, facets, diagnostics, and suggested consolidation clusters
-- **Section Similarity**: heading-based section comparison and concrete section-level recommendations
+embeddings, and clusters similar items together. User-facing outputs use these tracks:
+- **Code Match** (`code-match`): structural duplicate-code candidates
+- **Code Review** (`code-review`): optional LLM/policy filtering of Code Match findings
+- **Docs Map** (`docs-map`): document descriptors, canonical labels, topic tree, facets, diagnostics, and consolidation clusters
+- **Section Match** (`docs-section-match`): heading-based section comparison and concrete section-level recommendations
+- **Doc Pair Review** (`docs-pair-review`): optional LLM review of selected related document pairs
 
 The intended use is narrowing:
 - use `dryscope` to find candidate duplicate code, repeated docs, and IA overlap
@@ -21,14 +24,14 @@ The intended use is narrowing:
 ## How to use
 
 ```bash
-# Code duplicates (default)
+# Code Match (default)
 {{DRYSCOPE_BIN}} scan <target-path> --code
 
-# Documentation overlap
+# Section Match
 {{DRYSCOPE_BIN}} scan <target-path> --docs
 
-# Full documentation IA + section similarity report
-{{DRYSCOPE_BIN}} scan <target-path> --docs --stage full --backend cli -f html
+# Full docs run: Docs Map + Section Match + Doc Pair Review
+{{DRYSCOPE_BIN}} scan <target-path> --docs --stage docs-report-pack --backend cli -f html
 
 # Both at once
 {{DRYSCOPE_BIN}} scan <target-path> --code --docs
@@ -38,20 +41,21 @@ The intended use is narrowing:
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--code` | on | Scan for code duplicates |
-| `--docs` | off | Scan for documentation overlap |
+| `--code` | on | Run Code Match |
+| `--docs` | off | Run docs tracks |
 | `--lang` | auto | Language filter: `python`, `go`, `java`, `js`, `jsx`, `ts`, `tsx` |
 | `-t, --threshold` | `0.90` | Similarity threshold (0.0-1.0). Higher = stricter. |
 | `-m, --min-lines` | `6` | Minimum lines for a code unit to be considered |
 | `--min-tokens` | `0` | Minimum unique normalized tokens (filters trivial units) |
 | `--max-cluster-size` | `15` | Drop clusters larger than this |
-| `--max-findings` | | Limit output and verification to the top N code findings |
+| `--max-findings` | | Limit Code Match/Code Review to the top N code findings |
 | `-e, --exclude` | | Glob patterns to exclude (e.g. `*/tests/*`) |
 | `--exclude-type` | | Base class types to exclude (e.g. `TextChoices`) |
 | `-f, --format` | `terminal` | Output format: `terminal`, `json`, `markdown`, or `html` |
 | `--embedding-model` | `text-embedding-3-small` | Embedding model; API models use LiteLLM, local sentence-transformers require `.[local-embeddings]` |
-| `--verify` | off | Use LLM verification plus deterministic escalation policy |
+| `--verify` | off | Run Code Review for code; run full docs tracks for docs |
 | `--llm-model` | `claude-haiku-4-5-20251001` | LLM model for verification |
+| `--llm-max-doc-pairs` | config | Maximum document pairs for Doc Pair Review |
 
 ### Recommended usage
 
@@ -60,22 +64,22 @@ The intended use is narrowing:
 For documentation repos, `--docs --verify` now also:
 - extracts rich document descriptors across the selected docs corpus
 - canonicalizes aboutness and reader-intent labels into a corpus taxonomy
-- discovers a candidate Information Architecture topic tree, facets, and diagnostics
-- separates IA consolidation clusters from Section Similarity recommendations
+- discovers a candidate Docs Map topic tree, facets, and diagnostics
+- separates Docs Map clusters from Section Match recommendations
 - writes markdown, HTML, and JSON reports with the same top-down section structure and no duplicate sample/full-list sections
 
 ```bash
-# Code duplicates with LLM verification
+# Code Review
 {{DRYSCOPE_BIN}} scan /path/to/project --code --verify --min-tokens 15
 
-# Bounded verification for duplicate-rich repos
+# Bounded Code Review for duplicate-rich repos
 {{DRYSCOPE_BIN}} scan /path/to/project --code --verify --max-findings 15
 
-# Documentation overlap detection
+# Full docs tracks
 {{DRYSCOPE_BIN}} scan /path/to/project --docs --verify
 
-# Full docs IA report
-{{DRYSCOPE_BIN}} scan /path/to/project --docs --stage full --backend cli -f html
+# Docs Report Pack
+{{DRYSCOPE_BIN}} scan /path/to/project --docs --stage docs-report-pack --backend cli -f html
 
 # Preview cleanup of saved report runs
 {{DRYSCOPE_BIN}} reports clean /path/to/project --keep-last 10
@@ -119,15 +123,15 @@ Saved report cleanup:
 
 ## Interpreting results
 
-### Code duplicates
+### Code Match and Code Review
 - **Similarity 1.0**: Identical after normalization (Type-1/Type-2 clones) — strong candidates, but still check whether the payoff is meaningful
 - **Similarity 0.95-0.99**: Near-identical structure with minor differences (Type-3 clones)
 - **Similarity 0.85-0.95**: Structurally similar, may be legitimate patterns or true duplicates
 
-### Documentation overlap
-- **Information Architecture**: Corpus-level topic groups, facets, diagnostics, and consolidation clusters. Use this to understand how docs should be organized.
-- **Section Similarity**: Similar section pairs and section similarity recommendations. Use this to find repeated text that should be consolidated or cross-referenced.
-- **Doc-pair analysis**: Optional deeper LLM analysis of related document pairs when enabled and within the configured cost cap.
+### Docs tracks
+- **Docs Map**: Corpus-level topic groups, facets, diagnostics, and consolidation clusters. Use this to understand how docs should be organized.
+- **Section Match**: Matched section pairs and section-level recommendations. Use this to find repeated text that should be consolidated or cross-referenced.
+- **Doc Pair Review**: Optional deeper LLM analysis of related document pairs when enabled and within the configured cost cap.
 
 ## What it detects
 
@@ -136,8 +140,8 @@ Saved report cleanup:
 - Structural clones with shared implementation shape
 - Repeated boilerplate can still appear structurally, but `--verify` is intended to filter much of it back out
 - For large duplicate-rich repos, `--max-findings` keeps verification focused on the highest-ranked candidates
-- Documentation IA overlap across documents that cover the same subjects or reader intents
-- Overlapping documentation sections across markdown/text files
+- Docs Map overlap across documents that cover the same subjects or reader intents
+- Overlapping documentation sections across Markdown, MDX, reStructuredText, AsciiDoc, and text files
 - Redundant explanations that could be consolidated or cross-referenced
 
 ## What it skips
@@ -151,8 +155,8 @@ Saved report cleanup:
 Summarize the findings for the user, highlighting:
 1. **Exact copies** that should definitely be refactored
 2. **Structural clones** that could benefit from abstraction
-3. **Information Architecture findings**: topic groups, facets, diagnostics, and suggested consolidation clusters
-4. **Section Similarity findings**: concrete repeated sections and recommendations
+3. **Docs Map findings**: topic groups, facets, diagnostics, and suggested consolidation clusters
+4. **Section Match findings**: concrete repeated sections and recommendations
 5. **Legitimate patterns** that look similar but serve different purposes
 
-If the repo is docs-heavy and the tool returns no section recommendations, still check whether the IA track found consolidation clusters or diagnostics. A clean negative result is a useful outcome, not a failure.
+If the repo is docs-heavy and Section Match returns no recommendations, still check whether Docs Map found consolidation clusters or diagnostics. A clean negative result is a useful outcome, not a failure.

@@ -88,25 +88,25 @@ class TestFormatUnifiedTerminal:
     def test_with_code_clusters(self):
         clusters = [_make_cluster()]
         result = format_unified_terminal(code_clusters=clusters)
-        assert "Code Duplicates" in result
+        assert "Code Match" in result
 
     def test_none_clusters_no_output(self):
         result = format_unified_terminal(code_clusters=None)
-        assert "Code Duplicates" not in result
+        assert "Code Match" not in result
 
     def test_empty_clusters_shows_no_duplicates(self):
         result = format_unified_terminal(code_clusters=[])
-        assert "Code Duplicates" in result
-        assert "No duplicate clusters found" in result
+        assert "Code Match" in result
+        assert "No Code Match clusters found" in result
 
     def test_doc_pairs_none(self):
         result = format_unified_terminal(doc_pairs=None)
-        assert "Documentation Overlap" not in result
+        assert "Section Match" not in result
 
     def test_doc_pairs_empty(self):
         result = format_unified_terminal(doc_pairs=[])
-        assert "Documentation Overlap" in result
-        assert "No documentation overlap found" in result
+        assert "Section Match" in result
+        assert "No matched documentation sections found" in result
 
 
 # ── format_unified_json with doc_pairs ─────────────────────────────────

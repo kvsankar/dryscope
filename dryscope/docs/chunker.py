@@ -174,7 +174,7 @@ def chunk_file(file_path: Path) -> list[Chunk]:
     text = file_path.read_text(encoding="utf-8", errors="replace")
     path_str = str(file_path)
 
-    if file_path.suffix.lower() in (".md", ".markdown"):
+    if file_path.suffix.lower() in (".md", ".markdown", ".mdx"):
         return chunk_markdown(text, path_str)
     else:
         return chunk_plaintext(text, path_str)

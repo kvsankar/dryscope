@@ -1,4 +1,4 @@
-"""Tests for rich documentation IA descriptors."""
+"""Tests for rich Docs Map descriptors."""
 
 from dryscope.docs.models import Chunk
 from dryscope.docs.topics import _descriptor_fallback, descriptor_labels
