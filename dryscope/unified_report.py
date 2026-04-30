@@ -9,6 +9,8 @@ from dryscope.code.reporter import Cluster, Tier, format_terminal as code_format
 from dryscope.terminology import (
     CODE_MATCH,
     CODE_MATCH_SLUG,
+    CODE_REPORT_PACK,
+    CODE_REPORT_PACK_SLUG,
     CODE_REVIEW,
     CODE_REVIEW_SLUG,
     DOCS_PAIR_REVIEW,
@@ -128,6 +130,15 @@ def format_unified_json(
         "findings": findings,
         "summary": summary,
     }
+    if code_clusters is not None and doc_pairs is None:
+        track = CODE_REVIEW if any(c.verdict for c in code_clusters) else CODE_MATCH
+        track_slug = CODE_REVIEW_SLUG if track == CODE_REVIEW else CODE_MATCH_SLUG
+        output["report_pack"] = {
+            "label": CODE_REPORT_PACK,
+            "slug": CODE_REPORT_PACK_SLUG,
+        }
+        output["track"] = track
+        output["track_slug"] = track_slug
 
     return json.dumps(output, indent=2)
 

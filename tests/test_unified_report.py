@@ -41,6 +41,12 @@ class TestFormatUnifiedJson:
         result = format_unified_json(code_clusters=clusters)
         data = json.loads(result)
         assert "dryscope_version" in data
+        assert data["report_pack"] == {
+            "label": "Code Report Pack",
+            "slug": "code-report-pack",
+        }
+        assert data["track"] == "Code Match"
+        assert data["track_slug"] == "code-match"
         assert len(data["findings"]) == 1
         assert data["findings"][0]["mode"] == "code"
         assert data["findings"][0]["tier"] == "exact"
@@ -52,6 +58,14 @@ class TestFormatUnifiedJson:
         data = json.loads(result)
         assert data["findings"] == []
         assert data["summary"]["code"]["total"] == 0
+
+    def test_with_verified_code_clusters_uses_code_review_track(self):
+        cluster = _make_cluster()
+        cluster.verdict = "review"
+        result = format_unified_json(code_clusters=[cluster])
+        data = json.loads(result)
+        assert data["track"] == "Code Review"
+        assert data["track_slug"] == "code-review"
 
     def test_none_clusters_no_code_summary(self):
         result = format_unified_json(code_clusters=None)
