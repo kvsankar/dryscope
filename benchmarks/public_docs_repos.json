@@ -1,0 +1,52 @@
+{
+  "repos": [
+    {
+      "name": "fastapi-en",
+      "url": "https://github.com/fastapi/fastapi.git",
+      "group": "public-docs-default",
+      "docs_path": "docs/en/docs"
+    },
+    {
+      "name": "astro-en",
+      "url": "https://github.com/withastro/docs.git",
+      "group": "public-docs-default",
+      "docs_path": "src/content/docs/en"
+    },
+    {
+      "name": "react-dev",
+      "url": "https://github.com/reactjs/react.dev.git",
+      "group": "public-docs-default",
+      "docs_path": "src/content"
+    },
+    {
+      "name": "rust-book",
+      "url": "https://github.com/rust-lang/book.git",
+      "group": "public-docs-default",
+      "docs_path": "src"
+    },
+    {
+      "name": "prometheus-docs",
+      "url": "https://github.com/prometheus/docs.git",
+      "group": "public-docs-default",
+      "docs_path": "docs"
+    },
+    {
+      "name": "docker-manuals",
+      "url": "https://github.com/docker/docs.git",
+      "group": "public-docs-stress",
+      "docs_path": "content/manuals"
+    },
+    {
+      "name": "godot-tutorials",
+      "url": "https://github.com/godotengine/godot-docs.git",
+      "group": "public-docs-stress",
+      "docs_path": "tutorials"
+    },
+    {
+      "name": "pandas-doc",
+      "url": "https://github.com/pandas-dev/pandas.git",
+      "group": "public-docs-stress",
+      "docs_path": "doc/source"
+    }
+  ]
+}

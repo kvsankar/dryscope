@@ -21,6 +21,38 @@ DEFAULT_LABELS = Path(__file__).with_name("public_labels.json")
 DEFAULT_EMBEDDING_MODEL = "all-MiniLM-L6-v2"
 
 
+def _git_commit(path: Path) -> str | None:
+    proc = subprocess.run(
+        ["git", "-C", str(path), "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0:
+        return None
+    return proc.stdout.strip() or None
+
+
+def _git_dirty(path: Path) -> bool | None:
+    proc = subprocess.run(
+        ["git", "-C", str(path), "status", "--short"],
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0:
+        return None
+    return bool(proc.stdout.strip())
+
+
+def _benchmark_metadata(repo: dict, repo_path: Path) -> dict:
+    return {
+        "dryscope_git_commit": _git_commit(REPO_ROOT),
+        "dryscope_git_dirty": _git_dirty(REPO_ROOT),
+        "repo_git_commit": _git_commit(repo_path),
+        "repo_git_dirty": _git_dirty(repo_path),
+        "repo_url": repo["url"],
+    }
+
+
 def _run_json(args: list[str]) -> dict:
     proc = subprocess.run(args, cwd=REPO_ROOT, capture_output=True, text=True)
     if proc.returncode != 0:
@@ -82,7 +114,8 @@ def main() -> None:
                 })
                 continue
 
-        row = {"repo": repo["name"], "group": repo["group"]}
+        metadata = _benchmark_metadata(repo, dest)
+        row = {"repo": repo["name"], "group": repo["group"], **metadata}
         try:
             structural = _run_json([
                 str(DRYSCOPE_BIN), "scan", str(dest),
@@ -108,6 +141,7 @@ def main() -> None:
             rows.append(row)
             continue
 
+        structural["benchmark_metadata"] = metadata
         structural_findings = structural.get("findings", [])
         (out_dir / f"{repo['name']}_structural.json").write_text(json.dumps(structural, indent=2))
 
@@ -117,6 +151,7 @@ def main() -> None:
             "embedding_model": args.embedding_model,
         })
         if verified is not None:
+            verified["benchmark_metadata"] = metadata
             verified_findings = verified.get("findings", [])
             score = score_labeled_findings(repo["name"], verified_findings, dest, labels)
             (out_dir / f"{repo['name']}_verify.json").write_text(json.dumps(verified, indent=2))
@@ -132,7 +167,13 @@ def main() -> None:
             })
         rows.append(row)
 
-    summary = {"repos": rows}
+    summary = {
+        "benchmark_metadata": {
+            "dryscope_git_commit": _git_commit(REPO_ROOT),
+            "dryscope_git_dirty": _git_dirty(REPO_ROOT),
+        },
+        "repos": rows,
+    }
     (out_dir / "summary.json").write_text(json.dumps(summary, indent=2))
     print(json.dumps(summary, indent=2))
 

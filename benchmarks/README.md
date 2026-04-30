@@ -5,8 +5,10 @@ This directory contains the checked-in, public-only benchmark harness for `drysc
 It exists to turn exploratory testing into a repeatable workflow:
 
 - `public_repos.json` defines the public repositories used for benchmarking
+- `public_docs_repos.json` defines the public documentation repositories used for docs benchmarking
 - `public_labels.json` stores reviewed labels for a subset of findings
 - `run_public_benchmark.py` clones the public repos, runs `dryscope`, and scores any findings that match the stored labels
+- `run_public_docs_benchmark.py` clones docs repos, runs the docs tracks, and saves report artifacts
 
 This benchmark pack is intentionally conservative:
 - it is for repeatable public regression checks
@@ -46,6 +48,8 @@ uv run python benchmarks/run_public_benchmark.py --group public-ai-generated-dup
 ```
 
 Outputs are written to `/tmp/dryscope-public-benchmark-results` by default.
+Each summary row and saved JSON output records the dryscope git commit and the
+cloned benchmark repository git commit.
 
 For a bounded Code Review pass over the AI-generated group:
 
@@ -64,6 +68,41 @@ Use `--structural-only` when you only need Code Match candidate counts and saved
 JSON outputs. Omit it when you want the full Code Review and label scoring
 pass. Use `--verify-max-findings 15` for a bounded Code Review pass over the
 highest-ranked candidates in each repo.
+
+## Docs Benchmarks
+
+Run the default docs benchmark set:
+
+```bash
+uv run python benchmarks/run_public_docs_benchmark.py --group public-docs-default
+```
+
+Outputs are written to `/tmp/dryscope-public-docs-benchmark-results` by default.
+For each repo, the harness writes:
+
+- `<repo>.json` with the docs report JSON plus benchmark metadata
+- `artifacts/<repo>/report.md`
+- `artifacts/<repo>/report.html`
+- `artifacts/<repo>/report.json`
+- `artifacts/<repo>/benchmark_metadata.json`
+- track stage artifacts such as `docs_section_match.json`, `docs_map.json`, and `docs_pair_review.json`
+
+Each row and saved report JSON records both the dryscope git commit and the
+cloned documentation repository git commit.
+
+The default docs group contains:
+
+- `fastapi-en`
+- `astro-en`
+- `react-dev`
+- `rust-book`
+- `prometheus-docs`
+
+The `public-docs-stress` group currently contains larger or slower docs sets:
+
+- `docker-manuals`
+- `godot-tutorials`
+- `pandas-doc`
 
 ## Label Semantics
 

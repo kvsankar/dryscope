@@ -96,6 +96,23 @@ def test_public_benchmark_has_ai_generated_duplicate_group():
     }
 
 
+def test_public_docs_benchmark_has_default_group():
+    manifest = json.loads((REPO_ROOT / "benchmarks" / "public_docs_repos.json").read_text())
+    repos = manifest["repos"]
+    names = [repo["name"] for repo in repos]
+
+    assert len(names) == len(set(names))
+    default_docs = {repo["name"] for repo in repos if repo["group"] == "public-docs-default"}
+    assert default_docs == {
+        "fastapi-en",
+        "astro-en",
+        "react-dev",
+        "rust-book",
+        "prometheus-docs",
+    }
+    assert all(repo["docs_path"] for repo in repos)
+
+
 def test_public_benchmark_pins_local_embedding_model():
     path = REPO_ROOT / "benchmarks" / "run_public_benchmark.py"
     spec = importlib.util.spec_from_file_location("run_public_benchmark", path)
@@ -105,3 +122,19 @@ def test_public_benchmark_pins_local_embedding_model():
     spec.loader.exec_module(module)
 
     assert module.DEFAULT_EMBEDDING_MODEL == "all-MiniLM-L6-v2"
+
+
+def test_public_benchmark_metadata_records_commits(tmp_path):
+    path = REPO_ROOT / "benchmarks" / "run_public_benchmark.py"
+    spec = importlib.util.spec_from_file_location("run_public_benchmark", path)
+    assert spec is not None
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+
+    metadata = module._benchmark_metadata({"url": "https://example.invalid/repo.git"}, REPO_ROOT)
+
+    assert metadata["dryscope_git_commit"]
+    assert metadata["repo_git_commit"]
+    assert "dryscope_git_dirty" in metadata
+    assert "repo_git_dirty" in metadata
