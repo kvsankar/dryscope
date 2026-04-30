@@ -234,18 +234,28 @@ Guidelines:
     ).hexdigest()[:16]
     cache_key = f"docpair|{sorted_paths}|{pair_hash}"
 
-    text = call_llm_cached(
-        model,
-        prompt,
-        cache,
-        cache_key,
-        DOC_PAIR_VERSION,
-        backend,
-        ollama_host=ollama_host,
-        cli_strip_api_key=cli_strip_api_key,
-        cli_permission_mode=cli_permission_mode,
-        cli_dangerously_skip_permissions=cli_dangerously_skip_permissions,
-    )
+    try:
+        text = call_llm_cached(
+            model,
+            prompt,
+            cache,
+            cache_key,
+            DOC_PAIR_VERSION,
+            backend,
+            ollama_host=ollama_host,
+            cli_strip_api_key=cli_strip_api_key,
+            cli_permission_mode=cli_permission_mode,
+            cli_dangerously_skip_permissions=cli_dangerously_skip_permissions,
+        )
+    except Exception as exc:
+        return {
+            "doc_a_purpose": "unknown",
+            "doc_b_purpose": "unknown",
+            "relationship": "complementary",
+            "topics": [],
+            "confidence": "low",
+            "analysis_error": f"{type(exc).__name__}: {exc}"[:500],
+        }
 
     try:
         text = _strip_code_fences(text)

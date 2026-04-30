@@ -103,6 +103,14 @@ def _descriptor_fallback(doc_path: str, chunks: list[Chunk]) -> dict:
     }
 
 
+def _descriptor_error_fallback(doc_path: str, chunks: list[Chunk], error: Exception) -> dict:
+    """Build a descriptor fallback that records a per-document LLM failure."""
+    descriptor = _descriptor_fallback(doc_path, chunks)
+    descriptor["summary"] = "Descriptor extraction failed; using deterministic fallback."
+    descriptor["extraction_error"] = f"{type(error).__name__}: {error}"[:500]
+    return descriptor
+
+
 def _normalize_descriptor(raw: dict, doc_path: str, chunks: list[Chunk]) -> dict:
     """Normalize an LLM descriptor into the expected schema."""
     fallback = _descriptor_fallback(doc_path, chunks)
@@ -224,18 +232,21 @@ Rules:
 - Do not invent product-specific facet names.
 - Maximum 12 about labels and 12 reader intents."""
 
-    text = call_llm_cached(
-        model,
-        prompt,
-        cache,
-        cache_key,
-        DESCRIPTORS_VERSION,
-        backend,
-        ollama_host=ollama_host,
-        cli_strip_api_key=cli_strip_api_key,
-        cli_permission_mode=cli_permission_mode,
-        cli_dangerously_skip_permissions=cli_dangerously_skip_permissions,
-    )
+    try:
+        text = call_llm_cached(
+            model,
+            prompt,
+            cache,
+            cache_key,
+            DESCRIPTORS_VERSION,
+            backend,
+            ollama_host=ollama_host,
+            cli_strip_api_key=cli_strip_api_key,
+            cli_permission_mode=cli_permission_mode,
+            cli_dangerously_skip_permissions=cli_dangerously_skip_permissions,
+        )
+    except Exception as exc:
+        return _descriptor_error_fallback(doc_path, chunks, exc)
 
     try:
         data = json.loads(_strip_code_fences(text))
@@ -286,18 +297,21 @@ Example: ["pre-commit hook configuration", "ESLint rule setup", "Python type che
 
 JSON array:"""
 
-    text = call_llm_cached(
-        model,
-        prompt,
-        cache,
-        cache_key,
-        TOPICS_VERSION,
-        backend,
-        ollama_host=ollama_host,
-        cli_strip_api_key=cli_strip_api_key,
-        cli_permission_mode=cli_permission_mode,
-        cli_dangerously_skip_permissions=cli_dangerously_skip_permissions,
-    )
+    try:
+        text = call_llm_cached(
+            model,
+            prompt,
+            cache,
+            cache_key,
+            TOPICS_VERSION,
+            backend,
+            ollama_host=ollama_host,
+            cli_strip_api_key=cli_strip_api_key,
+            cli_permission_mode=cli_permission_mode,
+            cli_dangerously_skip_permissions=cli_dangerously_skip_permissions,
+        )
+    except Exception:
+        return []
 
     try:
         text = _strip_code_fences(text)

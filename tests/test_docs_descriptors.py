@@ -1,7 +1,7 @@
 """Tests for rich Docs Map descriptors."""
 
 from dryscope.docs.models import Chunk
-from dryscope.docs.topics import _descriptor_fallback, descriptor_labels
+from dryscope.docs.topics import _descriptor_fallback, extract_document_descriptor, descriptor_labels
 
 
 def test_descriptor_labels_combines_about_and_reader_intents() -> None:
@@ -33,3 +33,31 @@ def test_descriptor_fallback_infers_role_and_lifecycle_from_path() -> None:
     assert descriptor["doc_role"] == "status"
     assert descriptor["lifecycle"] == "historical"
     assert descriptor["about"] == ["API Audit"]
+
+
+def test_descriptor_extraction_falls_back_when_llm_call_fails(monkeypatch) -> None:
+    chunks = [
+        Chunk(
+            "/repo/docs/reference/api.md",
+            ["API Reference"],
+            "Reference content",
+            1,
+            2,
+        )
+    ]
+
+    def fail_call(*args, **kwargs):
+        raise RuntimeError("backend unavailable")
+
+    monkeypatch.setattr("dryscope.docs.topics.call_llm_cached", fail_call)
+
+    descriptor = extract_document_descriptor(
+        chunks[0].document_path,
+        chunks,
+        model="test-model",
+        cache=None,
+    )
+
+    assert descriptor["doc_role"] == "reference"
+    assert descriptor["about"] == ["API Reference"]
+    assert "backend unavailable" in descriptor["extraction_error"]
