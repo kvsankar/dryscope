@@ -61,7 +61,7 @@ Progressive help is available from the installed binary:
 | `-e, --exclude` | | Glob patterns to exclude (e.g. `*/tests/*`) |
 | `--exclude-type` | | Base class types to exclude (e.g. `TextChoices`) |
 | `-f, --format` | `terminal` | Output format: `terminal`, `json`, `markdown`, or `html` |
-| `--embedding-model` | `text-embedding-3-small` | Embedding model; API models use LiteLLM, local sentence-transformers require `.[local-embeddings]` |
+| `--embedding-model` | `text-embedding-3-small` | Embedding model; API models use LiteLLM, local sentence-transformers require the `dryscope[local-embeddings]` extra |
 | `--verify` | off | Run Code Review for code; run full docs tracks for docs |
 | `--llm-model` | `claude-haiku-4-5-20251001` | LLM model for verification |
 | `--llm-max-doc-pairs` | config | Maximum document pairs for Doc Pair Review |
@@ -102,7 +102,7 @@ For documentation repos, `--docs --verify` now also:
 
 Backend options:
 - embedding models such as `text-embedding-3-small` use provider API keys such as `OPENAI_API_KEY`
-- local embedding models such as `all-MiniLM-L6-v2` require installing dryscope with `.[local-embeddings]`
+- local embedding models such as `all-MiniLM-L6-v2` require installing dryscope with the `dryscope[local-embeddings]` extra
 - `backend = "cli"` uses `claude -p` and can work with Claude OAuth/session auth
 - `backend = "codex-cli"` uses `codex exec` and works with Codex CLI auth
 - `backend = "litellm"` uses provider API keys such as `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`

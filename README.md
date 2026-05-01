@@ -183,27 +183,59 @@ consolidation targets worth spending attention on."
 
 ## Installation
 
-From PyPI, run the CLI without a permanent install:
+`dryscope` is published on PyPI: <https://pypi.org/project/dryscope/>.
+
+For one-off CLI runs without a persistent install, use `uvx` or `pipx run`:
 
 ```bash
 uvx dryscope --help
 uvx dryscope scan .
 ```
 
-For a persistent command on your `PATH`:
+```bash
+pipx run dryscope --help
+```
+
+For a persistent isolated tool install, use either `uv tool install` or `pipx`:
 
 ```bash
 uv tool install dryscope
 dryscope --help
 ```
 
+```bash
+pipx install dryscope
+dryscope --help
+```
+
+For a project virtual environment, use `pip` or `uv pip`:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install dryscope
+dryscope --help
+```
+
+```bash
+uv venv
+uv pip install dryscope
+uv run dryscope --help
+```
+
+There is no separate `uv pipx` command. The uv equivalents are `uvx` for
+one-off tool runs and `uv tool install` for persistent tool installs.
+
 The default install supports API embedding models through LiteLLM. Set the
 provider API key for your embedding model, such as `OPENAI_API_KEY` for
 `text-embedding-3-small`. Local sentence-transformer embeddings are optional
-because they pull in PyTorch:
+because they pull in PyTorch. Install the extra only when you need local
+embeddings:
 
 ```bash
 uv tool install "dryscope[local-embeddings]"
+pipx install "dryscope[local-embeddings]"
+python -m pip install "dryscope[local-embeddings]"
 ```
 
 For repository development from a source checkout:
@@ -264,7 +296,7 @@ dryscope scan /path/to/project
 # Section Match (docs default)
 dryscope scan /path/to/docs --docs
 
-# Code Match with local embeddings, after installing .[local-embeddings]
+# Code Match with local embeddings, after installing dryscope[local-embeddings]
 dryscope scan /path/to/project --embedding-model all-MiniLM-L6-v2
 
 # Docs Report Pack: Docs Map + Section Match + Doc Pair Review
@@ -516,7 +548,7 @@ dryscope scan <path> [OPTIONS]
 | `--max-findings` | | Limit Code Match/Code Review to the top N code findings |
 | `-e, --exclude` | | Glob patterns to exclude; applies to Code Match and docs tracks |
 | `--exclude-type` | | Base class types to exclude (code) |
-| `--embedding-model` | `text-embedding-3-small` | Embedding model; API models use LiteLLM, local sentence-transformers such as `all-MiniLM-L6-v2` require `.[local-embeddings]` |
+| `--embedding-model` | `text-embedding-3-small` | Embedding model; API models use LiteLLM, local sentence-transformers such as `all-MiniLM-L6-v2` require the `dryscope[local-embeddings]` extra |
 | `--verify` | off | Run Code Review for code; run full docs tracks for docs |
 | `--llm-model` | `claude-haiku-4-5-20251001` | LLM model for Code Review and Doc Pair Review |
 | `--stage` | `docs-section-match` | Docs stage: `docs-section-match` runs Section Match; `docs-report-pack` adds Docs Map and Doc Pair Review |
