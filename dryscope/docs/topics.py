@@ -5,17 +5,16 @@ from __future__ import annotations
 import hashlib
 import json
 import threading
-from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import numpy as np
+
 from dryscope.cache import Cache
 from dryscope.config import DEFAULT_DOCS_MAP_FACET_DIMENSIONS, DEFAULT_DOCS_MAP_FACET_VALUES
-from dryscope.docs.coding import call_llm_cached, _strip_code_fences
-from dryscope.docs.embeddings import _get_sentence_transformer, get_embedding, _is_api_model
+from dryscope.docs.coding import _strip_code_fences, call_llm_cached
+from dryscope.docs.embeddings import _get_sentence_transformer, _is_api_model, get_embedding
 from dryscope.docs.models import Chunk
 from dryscope.similarity import cosine_similarity_matrix
-
 
 TOPICS_VERSION = "topics_v1"
 DESCRIPTORS_VERSION = "doc_descriptors_v1"
@@ -133,7 +132,8 @@ def _normalize_descriptor(raw: dict, doc_path: str, chunks: list[Chunk]) -> dict
         "facets": raw.get("facets") if isinstance(raw.get("facets"), dict) else {},
         "evidence": {
             "path": doc_path,
-            "headings": _string_list(evidence.get("headings"), limit=12) or fallback["evidence"]["headings"],
+            "headings": _string_list(evidence.get("headings"), limit=12)
+            or fallback["evidence"]["headings"],
             "phrases": _string_list(evidence.get("phrases"), limit=8),
         },
     }
@@ -176,14 +176,10 @@ def extract_document_descriptor(
     facet_seed = {
         "facet_dimensions": facet_dimensions,
         "suggested_values": {
-            name: facet_values.get(name, [])
-            for name in facet_dimensions
-            if facet_values.get(name)
+            name: facet_values.get(name, []) for name in facet_dimensions if facet_values.get(name)
         },
         "custom_dimensions": [
-            name
-            for name in facet_dimensions
-            if name not in DEFAULT_DOCS_MAP_FACET_VALUES
+            name for name in facet_dimensions if name not in DEFAULT_DOCS_MAP_FACET_VALUES
         ],
     }
     cache_key_raw = f"{doc_path}|{content}|{model}|{DESCRIPTORS_VERSION}|{json.dumps(facet_seed, sort_keys=True)}"
@@ -384,11 +380,13 @@ def _compute_topic_matches(
         for bi in range(len(filtered_b)):
             sim = float(sim_matrix[ai, bi])
             if sim >= threshold:
-                matches.append({
-                    "topic_a": filtered_a[ai],
-                    "topic_b": filtered_b[bi],
-                    "similarity": sim,
-                })
+                matches.append(
+                    {
+                        "topic_a": filtered_a[ai],
+                        "topic_b": filtered_b[bi],
+                        "similarity": sim,
+                    }
+                )
     return matches
 
 
@@ -415,9 +413,7 @@ def find_intent_doc_pairs(
             if not topics_a or not topics_b:
                 continue
 
-            matches = _compute_topic_matches(
-                topics_a, topics_b, topic_embeddings, threshold
-            )
+            matches = _compute_topic_matches(topics_a, topics_b, topic_embeddings, threshold)
 
             if matches:
                 matches.sort(key=lambda m: -m["similarity"])
@@ -433,7 +429,7 @@ def run_topic_extraction(
     cache: Cache | None,
     backend: str = "litellm",
     concurrency: int = 1,
-    on_progress: "callable | None" = None,
+    on_progress: callable | None = None,
     prior_topics: dict[str, list[str]] | None = None,
     ollama_host: str | None = None,
     cli_strip_api_key: bool = True,
@@ -484,10 +480,7 @@ def run_topic_extraction(
 
     if concurrency > 1 and pending:
         with ThreadPoolExecutor(max_workers=concurrency) as executor:
-            futures = {
-                executor.submit(_extract_one, doc_path): doc_path
-                for doc_path in pending
-            }
+            futures = {executor.submit(_extract_one, doc_path): doc_path for doc_path in pending}
             for future in as_completed(futures):
                 doc_path, topics = future.result()
                 with callback_lock:
@@ -512,7 +505,7 @@ def run_document_descriptor_extraction(
     cache: Cache | None,
     backend: str = "litellm",
     concurrency: int = 1,
-    on_progress: "callable | None" = None,
+    on_progress: callable | None = None,
     prior_descriptors: dict[str, dict] | None = None,
     ollama_host: str | None = None,
     cli_strip_api_key: bool = True,
@@ -564,10 +557,7 @@ def run_document_descriptor_extraction(
 
     if concurrency > 1 and pending:
         with ThreadPoolExecutor(max_workers=concurrency) as executor:
-            futures = {
-                executor.submit(_extract_one, doc_path): doc_path
-                for doc_path in pending
-            }
+            futures = {executor.submit(_extract_one, doc_path): doc_path for doc_path in pending}
             for future in as_completed(futures):
                 doc_path, descriptor = future.result()
                 with callback_lock:

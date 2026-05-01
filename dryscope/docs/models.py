@@ -18,7 +18,9 @@ class Chunk:
     id: str = field(default="", init=False)
 
     def __post_init__(self) -> None:
-        self.id = hashlib.sha256(f"{self.document_path}:{self.line_start}:{self.content}".encode()).hexdigest()[:16]
+        self.id = hashlib.sha256(
+            f"{self.document_path}:{self.line_start}:{self.content}".encode()
+        ).hexdigest()[:16]
 
 
 @dataclass
@@ -61,9 +63,9 @@ class Document:
 class TopicAnalysis:
     """A single overlap topic identified between two documents."""
 
-    name: str                  # kebab-case topic label
-    canonical: str | None      # path of canonical document, if specified
-    action_for_other: str      # "consolidate" | "link" | "brief-reference" | "keep"
+    name: str  # kebab-case topic label
+    canonical: str | None  # path of canonical document, if specified
+    action_for_other: str  # "consolidate" | "link" | "brief-reference" | "keep"
     reason: str
     chunks_a: list[Chunk] = field(default_factory=list)
     chunks_b: list[Chunk] = field(default_factory=list)
@@ -88,9 +90,9 @@ class DocPairAnalysis:
     doc_b_path: str
     doc_a_purpose: str
     doc_b_purpose: str
-    relationship: str          # "subset" | "complementary" | "stale-copy" | "divergent-versions" | "different-audiences" | "fragmented"
+    relationship: str  # "subset" | "complementary" | "stale-copy" | "divergent-versions" | "different-audiences" | "fragmented"
     topics: list[TopicAnalysis] = field(default_factory=list)
-    confidence: str = "medium" # "high" | "medium" | "low"
+    confidence: str = "medium"  # "high" | "medium" | "low"
     overlap_pairs: list[OverlapPair] = field(default_factory=list)
 
 

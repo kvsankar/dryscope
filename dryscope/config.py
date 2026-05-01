@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
-import tomllib
+import sys
+
+if sys.version_info >= (3, 11):
+    import tomllib
+else:  # pragma: no cover - Python 3.10 compatibility
+    import tomli as tomllib
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-
 
 DEFAULT_INCLUDE = ["*.md", "*.mdx", "*.rst", "*.txt", "*.adoc"]
 DEFAULT_EXCLUDE = ["node_modules", "venv", ".git", ".dryscope", "*.lock"]
@@ -144,8 +148,7 @@ class Settings:
     )
     docs_map_facet_values: dict[str, list[str]] = field(
         default_factory=lambda: {
-            key: list(values)
-            for key, values in DEFAULT_DOCS_MAP_FACET_VALUES.items()
+            key: list(values) for key, values in DEFAULT_DOCS_MAP_FACET_VALUES.items()
         }
     )
 
@@ -252,7 +255,9 @@ def load_settings(
         if "escalate_refactor_min_lines" in code_cfg:
             settings.code_escalate_refactor_min_lines = code_cfg["escalate_refactor_min_lines"]
         if "escalate_refactor_min_actionability" in code_cfg:
-            settings.code_escalate_refactor_min_actionability = code_cfg["escalate_refactor_min_actionability"]
+            settings.code_escalate_refactor_min_actionability = code_cfg[
+                "escalate_refactor_min_actionability"
+            ]
         if "escalate_refactor_min_units" in code_cfg:
             settings.code_escalate_refactor_min_units = code_cfg["escalate_refactor_min_units"]
         if "keep_same_file_refactors" in code_cfg:
@@ -280,27 +285,24 @@ def load_settings(
         if "llm_max_doc_pairs" in docs_cfg:
             settings.docs_llm_max_doc_pairs = docs_cfg["llm_max_doc_pairs"]
         if "intent_skip_without_similarity_min_docs" in docs_cfg:
-            settings.docs_intent_skip_without_similarity_min_docs = docs_cfg["intent_skip_without_similarity_min_docs"]
+            settings.docs_intent_skip_without_similarity_min_docs = docs_cfg[
+                "intent_skip_without_similarity_min_docs"
+            ]
         if "facet_dimensions" in docs_map_cfg:
             settings.docs_map_facet_dimensions = [
-                str(item).strip()
-                for item in docs_map_cfg["facet_dimensions"]
-                if str(item).strip()
+                str(item).strip() for item in docs_map_cfg["facet_dimensions"] if str(item).strip()
             ]
         if "facet_values" in docs_map_cfg:
             merged_facet_values = {
-                key: list(values)
-                for key, values in settings.docs_map_facet_values.items()
+                key: list(values) for key, values in settings.docs_map_facet_values.items()
             }
-            merged_facet_values.update({
-                str(key).strip(): [
-                    str(item).strip()
-                    for item in values
-                    if str(item).strip()
-                ]
-                for key, values in docs_map_cfg["facet_values"].items()
-                if str(key).strip() and isinstance(values, list)
-            })
+            merged_facet_values.update(
+                {
+                    str(key).strip(): [str(item).strip() for item in values if str(item).strip()]
+                    for key, values in docs_map_cfg["facet_values"].items()
+                    if str(key).strip() and isinstance(values, list)
+                }
+            )
             settings.docs_map_facet_values = merged_facet_values
 
         # LLM section

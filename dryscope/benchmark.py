@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
-
 
 ACTIONABLE_CODE_LABELS = {"real_refactor_candidate"}
 NON_ACTIONABLE_CODE_LABELS = {"not_worth_refactoring"}
-ACTIONABLE_DOCS_LABELS = {"useful_section_match", "useful_docs_map_candidate", "useful_doc_pair_review"}
+ACTIONABLE_DOCS_LABELS = {
+    "useful_section_match",
+    "useful_docs_map_candidate",
+    "useful_doc_pair_review",
+}
 NON_ACTIONABLE_DOCS_LABELS = {"intentional_repetition", "not_actionable"}
 
 
@@ -59,12 +62,14 @@ def score_labeled_findings(
         label = label_index.get((repo_name, signature))
         if label is None:
             continue
-        matched.append({
-            "label": label["label"],
-            "units": list(signature),
-            "verdict": finding.get("verdict"),
-            "tier": finding.get("tier"),
-        })
+        matched.append(
+            {
+                "label": label["label"],
+                "units": list(signature),
+                "verdict": finding.get("verdict"),
+                "tier": finding.get("tier"),
+            }
+        )
         label_counts[label["label"]] += 1
 
     return {
@@ -165,13 +170,11 @@ def score_code_quality(
     negative_labels = negative_labels or NON_ACTIONABLE_CODE_LABELS
     repo_labels = [label for label in labels if label.get("repo") == repo_name]
     scored_labels = [
-        label for label in repo_labels
+        label
+        for label in repo_labels
         if _label_quality_kind(str(label.get("label", "")), positive_labels, negative_labels)
     ]
-    positive_gold = [
-        label for label in scored_labels
-        if str(label.get("label")) in positive_labels
-    ]
+    positive_gold = [label for label in scored_labels if str(label.get("label")) in positive_labels]
 
     matched_label_ids: set[int] = set()
     true_positive_items: list[dict] = []
@@ -244,10 +247,12 @@ def _docs_label_signature(label: dict) -> tuple[tuple[str, int], tuple[str, int]
     sections = label.get("sections", [])
     if len(sections) != 2:
         raise ValueError("docs section labels must contain exactly two sections")
-    return tuple(sorted(
-        (Path(str(section["path"])).as_posix(), int(section["line_start"]))
-        for section in sections
-    ))
+    return tuple(
+        sorted(
+            (Path(str(section["path"])).as_posix(), int(section["line_start"]))
+            for section in sections
+        )
+    )
 
 
 def score_docs_section_quality(
@@ -263,11 +268,13 @@ def score_docs_section_quality(
     positive_labels = positive_labels or ACTIONABLE_DOCS_LABELS
     negative_labels = negative_labels or NON_ACTIONABLE_DOCS_LABELS
     repo_labels = [
-        label for label in labels
+        label
+        for label in labels
         if label.get("repo") == repo_name and label.get("track") == "docs-section-match"
     ]
     scored_labels = [
-        label for label in repo_labels
+        label
+        for label in repo_labels
         if _label_quality_kind(str(label.get("label", "")), positive_labels, negative_labels)
     ]
     positive_gold = [label for label in scored_labels if label["label"] in positive_labels]

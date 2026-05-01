@@ -41,7 +41,9 @@ class TestNormalizePython:
         assert "UNIQUE_MARKER" not in result
 
     def test_structurally_identical_functions_normalize_same(self):
-        code_a = "def calculate_area(width, height):\n    result = width * height\n    return result"
+        code_a = (
+            "def calculate_area(width, height):\n    result = width * height\n    return result"
+        )
         code_b = "def compute_surface(w, h):\n    area = w * h\n    return area"
         norm_a = normalize(code_a, lang="python")
         norm_b = normalize(code_b, lang="python")
@@ -108,8 +110,8 @@ class TestNormalizeJavaScript:
     def test_js_structurally_identical_functions_normalize_same(self):
         code_a = "function greet(name) { const msg = name; return msg; }"
         code_b = "function hello(person) { const text = person; return text; }"
-        norm_a = normalize(code_a, lang='javascript')
-        norm_b = normalize(code_b, lang='javascript')
+        norm_a = normalize(code_a, lang="javascript")
+        norm_b = normalize(code_b, lang="javascript")
         assert norm_a == norm_b
 
 

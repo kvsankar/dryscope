@@ -51,7 +51,9 @@ def main() -> None:
     parser.add_argument("--manifest", default=str(DEFAULT_MANIFEST))
     parser.add_argument("--repos-dir", default=None)
     parser.add_argument("--out-dir", default=None)
-    parser.add_argument("--group", action="append", default=[], help="Only run selected benchmark groups")
+    parser.add_argument(
+        "--group", action="append", default=[], help="Only run selected benchmark groups"
+    )
     parser.add_argument(
         "--embedding-model",
         default=DEFAULT_EMBEDDING_MODEL,
@@ -64,11 +66,15 @@ def main() -> None:
         help="Docs track stage to run",
     )
     parser.add_argument("--llm-model", default="claude-haiku-4-5-20251001")
-    parser.add_argument("--backend", default="cli", choices=["cli", "codex-cli", "litellm", "ollama"])
+    parser.add_argument(
+        "--backend", default="cli", choices=["cli", "codex-cli", "litellm", "ollama"]
+    )
     parser.add_argument("--concurrency", type=int, default=8)
     parser.add_argument("--llm-max-doc-pairs", type=int, default=250)
     parser.add_argument("--fresh-clone", action="store_true")
-    parser.add_argument("--overwrite", action="store_true", help="Replace an existing benchmark output directory")
+    parser.add_argument(
+        "--overwrite", action="store_true", help="Replace an existing benchmark output directory"
+    )
     args = parser.parse_args()
 
     manifest = json.loads(Path(args.manifest).read_text())
@@ -101,14 +107,16 @@ def main() -> None:
                 text=True,
             )
             if clone.returncode != 0:
-                rows.append({
-                    "repo": repo["name"],
-                    "group": repo["group"],
-                    "clone_error": clone.stderr.strip(),
-                    "dryscope_git_commit": _git_commit(REPO_ROOT),
-                    "dryscope_git_dirty": _git_dirty(REPO_ROOT),
-                    "repo_url": repo["url"],
-                })
+                rows.append(
+                    {
+                        "repo": repo["name"],
+                        "group": repo["group"],
+                        "clone_error": clone.stderr.strip(),
+                        "dryscope_git_commit": _git_commit(REPO_ROOT),
+                        "dryscope_git_dirty": _git_dirty(REPO_ROOT),
+                        "repo_url": repo["url"],
+                    }
+                )
                 continue
 
         metadata = _benchmark_metadata(repo, dest)
@@ -128,15 +136,24 @@ def main() -> None:
             continue
 
         cmd = [
-            str(DRYSCOPE_BIN), "scan", str(scan_path),
+            str(DRYSCOPE_BIN),
+            "scan",
+            str(scan_path),
             "--docs",
-            "--stage", args.stage,
-            "--embedding-model", args.embedding_model,
-            "--backend", args.backend,
-            "--llm-model", args.llm_model,
-            "--concurrency", str(args.concurrency),
-            "--llm-max-doc-pairs", str(args.llm_max_doc_pairs),
-            "-f", "json",
+            "--stage",
+            args.stage,
+            "--embedding-model",
+            args.embedding_model,
+            "--backend",
+            args.backend,
+            "--llm-model",
+            args.llm_model,
+            "--concurrency",
+            str(args.concurrency),
+            "--llm-max-doc-pairs",
+            str(args.llm_max_doc_pairs),
+            "-f",
+            "json",
         ]
         try:
             report = _run_json(cmd)
@@ -149,14 +166,18 @@ def main() -> None:
         summary = report.get("summary", {})
         report_output = f"{input_stem}.json"
         artifact_dir = artifact_root / input_stem
-        row.update({
-            "documents_scanned": summary.get("documents_scanned"),
-            "chunks_analyzed": summary.get("chunks_analyzed"),
-            "matched_section_pairs_found": summary.get("matched_section_pairs_found"),
-            "section_match_recommendations_found": summary.get("section_match_recommendations_found"),
-            "report_output": report_output,
-            "artifact_dir": str(Path("artifacts") / input_stem),
-        })
+        row.update(
+            {
+                "documents_scanned": summary.get("documents_scanned"),
+                "chunks_analyzed": summary.get("chunks_analyzed"),
+                "matched_section_pairs_found": summary.get("matched_section_pairs_found"),
+                "section_match_recommendations_found": summary.get(
+                    "section_match_recommendations_found"
+                ),
+                "report_output": report_output,
+                "artifact_dir": str(Path("artifacts") / input_stem),
+            }
+        )
         (out_dir / report_output).write_text(json.dumps(report, indent=2))
         _copy_report_artifacts(dest, artifact_dir, metadata)
         rows.append(row)

@@ -27,11 +27,21 @@ dependencies = [
     "litellm>=1.0",
     "tenacity>=8.0",
     "tree-sitter-java>=0.23.5",
+    "tomli>=2 ; python_full_version < '3.11'",
 ]
 
 [project.optional-dependencies]
 local-embeddings = ["sentence-transformers>=3.0"]
-dev = ["pytest>=7.0", "pytest-cov", "sentence-transformers>=3.0"]
+dev = [
+    "pre-commit>=4.6.0",
+    "pytest>=7.0",
+    "pytest-cov",
+    "ruff>=0.15.12",
+    "sentence-transformers>=3.0",
+    "tomli>=2.4.0",
+    "ty>=0.0.33",
+    "xenon>=0.9.3",
+]
 
 [project.urls]
 Homepage = "https://github.com/sankar/dryscope"
@@ -49,3 +59,19 @@ packages = ["dryscope"]
 
 [tool.hatch.build]
 include = ["dryscope/**"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+extend-exclude = [".dryscope", "wheels"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "C4", "UP", "C90"]
+ignore = ["E501"]
+fixable = ["ALL"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 60
+
+[tool.ruff.lint.per-file-ignores]
+"benchmarks/run_*.py" = ["E402"]

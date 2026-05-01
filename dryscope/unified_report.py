@@ -5,7 +5,8 @@ from __future__ import annotations
 import json
 
 from dryscope import __version__
-from dryscope.code.reporter import Cluster, Tier, format_terminal as code_format_terminal
+from dryscope.code.reporter import Cluster
+from dryscope.code.reporter import format_terminal as code_format_terminal
 from dryscope.terminology import (
     CODE_MATCH,
     CODE_MATCH_SLUG,
@@ -44,13 +45,15 @@ def _doc_pair_to_finding(
     """Convert a docs OverlapPair to a unified finding dict."""
     sections = []
     for chunk in (pair.chunk_a, pair.chunk_b):
-        sections.append({
-            "file": chunk.document_path,
-            "heading": " > ".join(chunk.heading_path) if chunk.heading_path else "",
-            "line_start": chunk.line_start,
-            "line_end": chunk.line_end,
-            "content": chunk.content[:500],
-        })
+        sections.append(
+            {
+                "file": chunk.document_path,
+                "heading": " > ".join(chunk.heading_path) if chunk.heading_path else "",
+                "line_start": chunk.line_start,
+                "line_end": chunk.line_end,
+                "content": chunk.content[:500],
+            }
+        )
 
     verdict = None
     verdict_reason = None
@@ -58,17 +61,17 @@ def _doc_pair_to_finding(
         # DocPairAnalysis has relationship and topics
         verdict = analysis.relationship
         if analysis.topics:
-            verdict_reason = "; ".join(
-                f"{t.name}: {t.action_for_other}" for t in analysis.topics
-            )
+            verdict_reason = "; ".join(f"{t.name}: {t.action_for_other}" for t in analysis.topics)
 
     return {
         "id": finding_id,
         "mode": "docs",
         "track": DOCS_PAIR_REVIEW if analysis is not None else DOCS_SECTION_MATCH,
         "track_slug": DOCS_PAIR_REVIEW_SLUG if analysis is not None else DOCS_SECTION_MATCH_SLUG,
-        "similarity": round(pair.embedding_similarity, 4) if pair.embedding_similarity is not None else None,
-        "files": sorted(set([pair.chunk_a.document_path, pair.chunk_b.document_path])),
+        "similarity": round(pair.embedding_similarity, 4)
+        if pair.embedding_similarity is not None
+        else None,
+        "files": sorted({pair.chunk_a.document_path, pair.chunk_b.document_path}),
         "sections": sections,
         "verdict": verdict,
         "verdict_reason": verdict_reason,
@@ -169,11 +172,23 @@ def format_unified_terminal(
         else:
             parts.append(f"Found {len(doc_pairs)} matched section pair(s).\n")
             for pair in doc_pairs:
-                sim = f"{pair.embedding_similarity:.4f}" if pair.embedding_similarity is not None else "N/A"
+                sim = (
+                    f"{pair.embedding_similarity:.4f}"
+                    if pair.embedding_similarity is not None
+                    else "N/A"
+                )
                 file_a = pair.chunk_a.document_path
                 file_b = pair.chunk_b.document_path
-                heading_a = " > ".join(pair.chunk_a.heading_path) if pair.chunk_a.heading_path else "(no heading)"
-                heading_b = " > ".join(pair.chunk_b.heading_path) if pair.chunk_b.heading_path else "(no heading)"
+                heading_a = (
+                    " > ".join(pair.chunk_a.heading_path)
+                    if pair.chunk_a.heading_path
+                    else "(no heading)"
+                )
+                heading_b = (
+                    " > ".join(pair.chunk_b.heading_path)
+                    if pair.chunk_b.heading_path
+                    else "(no heading)"
+                )
                 parts.append(f"  sim={sim}")
                 parts.append(f"    {file_a} :: {heading_a}")
                 parts.append(f"    {file_b} :: {heading_b}")

@@ -6,22 +6,39 @@ import os
 import shutil
 import subprocess
 import sys
+from collections.abc import Sequence
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 import click
 
 from dryscope import __version__
 from dryscope.help_topics import OUTPUT_FORMATS, get_topic, render_topic, topic_summaries
-from dryscope.terminology import CODE_MATCH, CODE_REVIEW, DOCS_MAP, DOCS_PAIR_REVIEW, DOCS_SECTION_MATCH
-from dryscope.terminology import DOCS_REPORT_PACK_SLUG, DOCS_SECTION_MATCH_SLUG
+from dryscope.terminology import (
+    CODE_MATCH,
+    CODE_REVIEW,
+    DOCS_MAP,
+    DOCS_PAIR_REVIEW,
+    DOCS_REPORT_PACK_SLUG,
+    DOCS_SECTION_MATCH,
+    DOCS_SECTION_MATCH_SLUG,
+)
+
+if TYPE_CHECKING:
+    from dryscope.config import Settings
+    from dryscope.docs.models import AnalysisResult
 
 SKILL_TEMPLATE = Path(__file__).parent / "skill" / "SKILL.md"
 SKILL_DESTS = [
     Path.home() / ".claude" / "skills" / "dryscope",
     Path.home() / ".codex" / "skills" / "dryscope",
 ]
-SHARED_SKILL_VENV = Path(os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local" / "share"))) / "dryscope" / "skill-venv"
+SHARED_SKILL_VENV = (
+    Path(os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local" / "share")))
+    / "dryscope"
+    / "skill-venv"
+)
 CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
 OUTPUT_FORMAT_CHOICES = [name for name, _modes, _meaning in OUTPUT_FORMATS]
 
@@ -31,13 +48,13 @@ class DryscopeGroup(click.Group):
 
     def main(
         self,
-        args: list[str] | tuple[str, ...] | None = None,
+        args: Sequence[str] | None = None,
         prog_name: str | None = None,
         complete_var: str | None = None,
         standalone_mode: bool = True,
         windows_expand_args: bool = True,
-        **extra: object,
-    ) -> object:
+        **extra: Any,
+    ) -> Any:
         arg_list = list(sys.argv[1:] if args is None else args)
         if arg_list and arg_list[0] in ("--help", "-h") and len(arg_list) > 1:
             text = _render_help_target(self, arg_list[1:], prog_name or "dryscope")
@@ -111,7 +128,9 @@ def _find_git_root(scan_path: Path) -> Path:
     try:
         proc = subprocess.run(
             ["git", "-C", str(scan_path), "rev-parse", "--show-toplevel"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
         if proc.returncode == 0:
             return Path(proc.stdout.strip())
@@ -159,9 +178,7 @@ def help_topic(topic: tuple[str, ...]) -> None:
     topic_name = "-".join(topic)
     found = get_topic(topic_name) or get_topic(topic[0])
     if found is None:
-        raise click.UsageError(
-            f"unknown help topic: {' '.join(topic)}\n\n{topic_summaries()}"
-        )
+        raise click.UsageError(f"unknown help topic: {' '.join(topic)}\n\n{topic_summaries()}")
     click.echo(render_topic(found.name))
 
 
@@ -170,7 +187,7 @@ def help_topic(topic: tuple[str, ...]) -> None:
 
 def _run_code_scan(
     path: str,
-    settings: "Settings",
+    settings: Settings,
     exclude: tuple[str, ...],
     exclude_type: tuple[str, ...],
     verify: bool,
@@ -182,12 +199,12 @@ def _run_code_scan(
 
     Returns a list of Cluster objects, or None if no units were found.
     """
-    from dryscope.code.parser import parse_directory
-    from dryscope.code.normalizer import normalize
-    from dryscope.code.profiles import detect_profiles, merge_profiles
     from dryscope.code.embedder import Embedder
-    from dryscope.similarity import find_duplicates, cluster_duplicates
+    from dryscope.code.normalizer import normalize
+    from dryscope.code.parser import parse_directory
+    from dryscope.code.profiles import detect_profiles, merge_profiles
     from dryscope.code.reporter import build_clusters
+    from dryscope.similarity import cluster_duplicates, find_duplicates
 
     threshold = settings.code_threshold
     min_lines = settings.code_min_lines
@@ -205,7 +222,9 @@ def _run_code_scan(
     user_patterns = list(exclude) if exclude else None
     user_types = set(exclude_type) if exclude_type else None
     exclude_patterns, exclude_types, extra_dirs = merge_profiles(
-        profiles, user_patterns, user_types,
+        profiles,
+        user_patterns,
+        user_types,
     )
 
     click.echo(f"Parsing source files in {path}...", err=True)
@@ -219,7 +238,12 @@ def _run_code_scan(
 
     # Filter by language if specified
     if lang:
-        lang_map = {"python": "python", "ts": "typescript", "tsx": "tsx", "typescript": "typescript"}
+        lang_map = {
+            "python": "python",
+            "ts": "typescript",
+            "tsx": "tsx",
+            "typescript": "typescript",
+        }
         target_lang = lang_map.get(lang)
         if target_lang:
             units = [u for u in units if u.lang == target_lang]
@@ -235,13 +259,14 @@ def _run_code_scan(
     # Filter by unique token count after normalization
     if min_tokens > 0:
         filtered = [
-            (u, n) for u, n in zip(units, normalized)
+            (u, n)
+            for u, n in zip(units, normalized, strict=True)
             if len(set(n.split())) >= min_tokens
         ]
         removed = len(units) - len(filtered)
         if removed:
             click.echo(f"Filtered {removed} units with < {min_tokens} unique tokens.", err=True)
-            units, normalized = zip(*filtered) if filtered else ([], [])
+            units, normalized = zip(*filtered, strict=True) if filtered else ([], [])
             units, normalized = list(units), list(normalized)
         if not units:
             click.echo("No code units remaining after token filter.", err=True)
@@ -268,10 +293,12 @@ def _run_code_scan(
 
     # Code Review pass
     if verify:
-        from dryscope.code.verifier import verify_clusters, VERDICT_NOISE
         from dryscope.code.policy import EscalationPolicy, should_escalate_cluster
+        from dryscope.code.verifier import VERDICT_NOISE, verify_clusters
 
-        click.echo(f"{CODE_REVIEW}: verifying {len(clusters)} clusters with {llm_model}...", err=True)
+        click.echo(
+            f"{CODE_REVIEW}: verifying {len(clusters)} clusters with {llm_model}...", err=True
+        )
         results = verify_clusters(
             clusters,
             model=llm_model,
@@ -318,13 +345,13 @@ def _run_code_scan(
 
 def _run_docs_scan(
     path: str,
-    settings: "Settings",
+    settings: Settings,
     output_format: str,
     verify: bool,
     stage: str,
     resume: bool,
     emit_output: bool = True,
-) -> "AnalysisResult":
+) -> AnalysisResult:
     """Run the docs track pipeline."""
     from rich.console import Console
 
@@ -373,22 +400,56 @@ def _run_docs_scan(
 @click.argument("path", type=click.Path(exists=True))
 # Mode flags
 @click.option("--code/--no-code", default=None, help=f"Run {CODE_MATCH}")
-@click.option("--docs/--no-docs", default=None, help=f"Run docs tracks ({DOCS_SECTION_MATCH}; {DOCS_REPORT_PACK_SLUG} adds {DOCS_MAP} and {DOCS_PAIR_REVIEW})")
-@click.option("--lang", type=click.Choice(["python", "go", "java", "js", "jsx", "ts", "tsx"]), default=None, help="Filter to specific language (code mode)")
+@click.option(
+    "--docs/--no-docs",
+    default=None,
+    help=f"Run docs tracks ({DOCS_SECTION_MATCH}; {DOCS_REPORT_PACK_SLUG} adds {DOCS_MAP} and {DOCS_PAIR_REVIEW})",
+)
+@click.option(
+    "--lang",
+    type=click.Choice(["python", "go", "java", "js", "jsx", "ts", "tsx"]),
+    default=None,
+    help="Filter to specific language (code mode)",
+)
 # Shared options
-@click.option("--threshold", "-t", default=0.90, type=click.FloatRange(0.0, 1.0), help="Similarity threshold (0.0-1.0)")
-@click.option("--format", "-f", "output_format", type=click.Choice(OUTPUT_FORMAT_CHOICES), default="terminal")
-@click.option("--verify", is_flag=True, default=False, help=f"Run {CODE_REVIEW} for code; run {DOCS_REPORT_PACK_SLUG} for docs")
-@click.option("--llm-model", default="claude-haiku-4-5-20251001", envvar="DRYSCOPE_LLM_MODEL", help="LLM model for --verify")
+@click.option(
+    "--threshold",
+    "-t",
+    default=0.90,
+    type=click.FloatRange(0.0, 1.0),
+    help="Similarity threshold (0.0-1.0)",
+)
+@click.option(
+    "--format", "-f", "output_format", type=click.Choice(OUTPUT_FORMAT_CHOICES), default="terminal"
+)
+@click.option(
+    "--verify",
+    is_flag=True,
+    default=False,
+    help=f"Run {CODE_REVIEW} for code; run {DOCS_REPORT_PACK_SLUG} for docs",
+)
+@click.option(
+    "--llm-model",
+    default="claude-haiku-4-5-20251001",
+    envvar="DRYSCOPE_LLM_MODEL",
+    help="LLM model for --verify",
+)
 @click.option("--llm-api-key", default=None, help="API key for --verify")
 # Code-specific options
 @click.option("--min-lines", "-m", default=6, type=int, help="Minimum lines for a code unit")
 @click.option("--min-tokens", default=0, type=int, help="Minimum unique normalized tokens")
 @click.option("--max-cluster-size", default=15, type=int, help="Drop clusters larger than this")
-@click.option("--max-findings", default=None, type=int, help=f"Limit {CODE_MATCH}/{CODE_REVIEW} to the top N code findings")
+@click.option(
+    "--max-findings",
+    default=None,
+    type=int,
+    help=f"Limit {CODE_MATCH}/{CODE_REVIEW} to the top N code findings",
+)
 @click.option("--exclude", "-e", multiple=True, help="Glob patterns to exclude")
 @click.option("--exclude-type", multiple=True, help="Base class types to exclude")
-@click.option("--embedding-model", "model", default="text-embedding-3-small", help="Embedding model name")
+@click.option(
+    "--embedding-model", "model", default="text-embedding-3-small", help="Embedding model name"
+)
 # Docs-specific options
 @click.option(
     "--stage",
@@ -400,10 +461,22 @@ def _run_docs_scan(
 @click.option("--intra", is_flag=True, default=False, help="Include intra-document section overlap")
 @click.option("--min-words", default=None, type=int, help="Minimum words per doc section")
 @click.option("--threshold-intent", default=None, type=float, help="Docs Map topic-pair threshold")
-@click.option("--llm-max-doc-pairs", default=None, type=int, help=f"Maximum document pairs for {DOCS_PAIR_REVIEW}")
+@click.option(
+    "--llm-max-doc-pairs",
+    default=None,
+    type=int,
+    help=f"Maximum document pairs for {DOCS_PAIR_REVIEW}",
+)
 @click.option("--concurrency", default=None, type=int, help="Max parallel LLM calls (docs)")
-@click.option("--backend", type=click.Choice(["litellm", "cli", "codex-cli", "ollama"]), default=None, help="LLM backend for --verify")
-@click.option("--token-weight", default=None, type=float, help="Token Jaccard weight in hybrid similarity")
+@click.option(
+    "--backend",
+    type=click.Choice(["litellm", "cli", "codex-cli", "ollama"]),
+    default=None,
+    help="LLM backend for --verify",
+)
+@click.option(
+    "--token-weight", default=None, type=float, help="Token Jaccard weight in hybrid similarity"
+)
 @click.pass_context
 def scan(
     ctx: click.Context,
@@ -460,7 +533,8 @@ def scan(
         click.echo("Error: must enable at least one of --code or --docs.", err=True)
         sys.exit(1)
 
-    _explicit = lambda param: ctx.get_parameter_source(param) != click.core.ParameterSource.DEFAULT
+    def _explicit(param: str) -> bool:
+        return ctx.get_parameter_source(param) != click.core.ParameterSource.DEFAULT
 
     # Build a single Settings object with all CLI overrides
     scan_path = Path(path).resolve()
@@ -482,7 +556,9 @@ def scan(
         min_words=min_words,
         llm_max_doc_pairs=llm_max_doc_pairs,
         concurrency=concurrency,
-        intra=intra if ctx.get_parameter_source("intra") != click.core.ParameterSource.DEFAULT else None,
+        intra=intra
+        if ctx.get_parameter_source("intra") != click.core.ParameterSource.DEFAULT
+        else None,
         token_weight=token_weight,
     )
 
@@ -491,7 +567,10 @@ def scan(
 
     if code:
         if output_format not in ("terminal", "json"):
-            click.echo(f"Error: --format {output_format} is not supported for code scan (use terminal or json).", err=True)
+            click.echo(
+                f"Error: --format {output_format} is not supported for code scan (use terminal or json).",
+                err=True,
+            )
             sys.exit(1)
 
         code_clusters = _run_code_scan(
@@ -520,11 +599,13 @@ def scan(
     if code and output_format == "json":
         from dryscope.unified_report import format_unified_json
 
-        click.echo(format_unified_json(
-            code_clusters=code_clusters or [],
-            doc_pairs=docs_result.overlaps if docs_result is not None else None,
-            doc_analyses=docs_result.doc_pair_analyses if docs_result is not None else None,
-        ))
+        click.echo(
+            format_unified_json(
+                code_clusters=code_clusters or [],
+                doc_pairs=docs_result.overlaps if docs_result is not None else None,
+                doc_analyses=docs_result.doc_pair_analyses if docs_result is not None else None,
+            )
+        )
     elif code and code_clusters is not None:
         from dryscope.unified_report import format_unified_terminal
 
@@ -559,7 +640,15 @@ def install() -> None:
 
     click.echo("Installing dryscope into skill venv...", err=True)
     subprocess.run(
-        ["uv", "pip", "install", "--upgrade", "--python", str(venv_dir / "bin" / "python"), install_source],
+        [
+            "uv",
+            "pip",
+            "install",
+            "--upgrade",
+            "--python",
+            str(venv_dir / "bin" / "python"),
+            install_source,
+        ],
         check=True,
     )
 
@@ -628,10 +717,24 @@ def reports() -> None:
 
 @reports.command("clean", context_settings=CONTEXT_SETTINGS)
 @click.argument("path", type=click.Path(exists=True), default=".", required=False)
-@click.option("--keep-last", type=click.IntRange(min=0), default=None, help="Keep the newest N report runs.")
-@click.option("--keep-since", default=None, help="Keep report runs on or after YYYY-MM-DD or YYYY-MM.")
-@click.option("--keep-days", type=click.IntRange(min=0), default=None, help="Keep report runs from the last N days.")
-@click.option("--force", is_flag=True, default=False, help="Actually delete old report runs. Without this, dry-run only.")
+@click.option(
+    "--keep-last", type=click.IntRange(min=0), default=None, help="Keep the newest N report runs."
+)
+@click.option(
+    "--keep-since", default=None, help="Keep report runs on or after YYYY-MM-DD or YYYY-MM."
+)
+@click.option(
+    "--keep-days",
+    type=click.IntRange(min=0),
+    default=None,
+    help="Keep report runs from the last N days.",
+)
+@click.option(
+    "--force",
+    is_flag=True,
+    default=False,
+    help="Actually delete old report runs. Without this, dry-run only.",
+)
 def reports_clean(
     path: str,
     keep_last: int | None,

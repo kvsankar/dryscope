@@ -95,13 +95,15 @@ def chunk_markdown(text: str, file_path: str) -> list[Chunk]:
         # No headings at all — entire document is one chunk
         content = text.strip()
         if content:
-            return [Chunk(
-                document_path=file_path,
-                heading_path=[],
-                content=content,
-                line_start=1,
-                line_end=total_lines,
-            )]
+            return [
+                Chunk(
+                    document_path=file_path,
+                    heading_path=[],
+                    content=content,
+                    line_start=1,
+                    line_end=total_lines,
+                )
+            ]
         return []
 
     # Content before first heading
@@ -133,13 +135,15 @@ def chunk_markdown(text: str, file_path: str) -> list[Chunk]:
         # line_start and line_end are 1-indexed inclusive for output
         content = "\n".join(lines[line_start - 1 : line_end]).strip()
         if content:
-            chunks.append(Chunk(
-                document_path=file_path,
-                heading_path=list(heading_path),
-                content=content,
-                line_start=line_start,
-                line_end=line_end,
-            ))
+            chunks.append(
+                Chunk(
+                    document_path=file_path,
+                    heading_path=list(heading_path),
+                    content=content,
+                    line_start=line_start,
+                    line_end=line_end,
+                )
+            )
 
     return chunks
 
@@ -156,13 +160,15 @@ def chunk_plaintext(text: str, file_path: str) -> list[Chunk]:
             current_line += para.count("\n") + 1
             continue
         line_count = content.count("\n") + 1
-        chunks.append(Chunk(
-            document_path=file_path,
-            heading_path=[],
-            content=content,
-            line_start=current_line,
-            line_end=current_line + line_count - 1,
-        ))
+        chunks.append(
+            Chunk(
+                document_path=file_path,
+                heading_path=[],
+                content=content,
+                line_start=current_line,
+                line_end=current_line + line_count - 1,
+            )
+        )
         # Advance past this paragraph plus the blank line(s)
         current_line += para.count("\n") + 2  # +2 for the split delimiter
 

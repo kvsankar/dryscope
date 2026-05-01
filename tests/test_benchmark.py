@@ -14,7 +14,6 @@ from dryscope.benchmark import (
     score_labeled_findings,
 )
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -243,7 +242,9 @@ def test_public_benchmark_has_ai_generated_duplicate_group():
     names = [repo["name"] for repo in repos]
 
     assert len(names) == len(set(names))
-    ai_generated = {repo["name"] for repo in repos if repo["group"] == "public-ai-generated-duplicates"}
+    ai_generated = {
+        repo["name"] for repo in repos if repo["group"] == "public-ai-generated-duplicates"
+    }
     assert ai_generated == {
         "CLI-Anything-WEB",
         "nanowave",
@@ -270,7 +271,9 @@ def test_public_docs_benchmark_has_default_group():
 
 
 def test_public_docs_labels_use_known_schema():
-    labels = json.loads((REPO_ROOT / "benchmarks" / "public_docs_labels.json").read_text())["labels"]
+    labels = json.loads((REPO_ROOT / "benchmarks" / "public_docs_labels.json").read_text())[
+        "labels"
+    ]
 
     assert labels
     assert {label["track"] for label in labels} == {"docs-section-match"}

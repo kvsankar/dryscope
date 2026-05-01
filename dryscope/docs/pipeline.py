@@ -7,9 +7,9 @@ from pathlib import Path
 from rich.console import Console
 
 from dryscope.cache import Cache
+from dryscope.config import Settings
 from dryscope.docs.chunker import chunk_documents, chunk_file_list, detect_boilerplate_headings
 from dryscope.docs.coding import run_doc_pair_pipeline
-from dryscope.config import Settings
 from dryscope.docs.embeddings import embed_chunks, find_similar_pairs
 from dryscope.docs.models import AnalysisResult, Chunk, Document, OverlapPair
 from dryscope.run_store import RunStore
@@ -33,17 +33,20 @@ def _serialize_pairs(pairs: list[OverlapPair]) -> list[dict]:
     """Serialize overlap pairs for JSON storage."""
     result = []
     for p in pairs:
-        result.append({
-            "chunk_a_key": _chunk_key(p.chunk_a),
-            "chunk_b_key": _chunk_key(p.chunk_b),
-            "embedding_similarity": p.embedding_similarity,
-            "shared_codes": p.shared_codes,
-        })
+        result.append(
+            {
+                "chunk_a_key": _chunk_key(p.chunk_a),
+                "chunk_b_key": _chunk_key(p.chunk_b),
+                "embedding_similarity": p.embedding_similarity,
+                "shared_codes": p.shared_codes,
+            }
+        )
     return result
 
 
 def _deserialize_pairs(
-    data: list[dict], chunks: list[Chunk],
+    data: list[dict],
+    chunks: list[Chunk],
 ) -> list[OverlapPair]:
     """Deserialize overlap pairs, matching back to in-memory Chunk objects."""
     chunk_map = {_chunk_key(c): c for c in chunks}
@@ -53,12 +56,14 @@ def _deserialize_pairs(
         b = chunk_map.get(d["chunk_b_key"])
         if a is None or b is None:
             continue
-        pairs.append(OverlapPair(
-            chunk_a=a,
-            chunk_b=b,
-            embedding_similarity=d.get("embedding_similarity"),
-            shared_codes=d.get("shared_codes", []),
-        ))
+        pairs.append(
+            OverlapPair(
+                chunk_a=a,
+                chunk_b=b,
+                embedding_similarity=d.get("embedding_similarity"),
+                shared_codes=d.get("shared_codes", []),
+            )
+        )
     return pairs
 
 
@@ -100,9 +105,7 @@ def _filter_doc_chunks_map(
 ) -> dict[str, list[Chunk]]:
     """Keep only documents allowed to proceed to later stages."""
     return {
-        doc_path: chunks
-        for doc_path, chunks in doc_chunks_map.items()
-        if doc_path in allowed_docs
+        doc_path: chunks for doc_path, chunks in doc_chunks_map.items() if doc_path in allowed_docs
     }
 
 
@@ -184,7 +187,7 @@ def estimate_doc_pair_cost(
     document size (capped at ~32k chars = ~8k tokens per call).
     """
     total_input_tokens = 0
-    for (doc_a, doc_b), pairs in doc_pair_groups.items():
+    for doc_a, doc_b in doc_pair_groups:
         chars_a = sum(len(c.content) for c in doc_chunks_map.get(doc_a, []))
         chars_b = sum(len(c.content) for c in doc_chunks_map.get(doc_b, []))
         # Cap each doc at 16k chars in the prompt
@@ -235,8 +238,11 @@ def _save_all_reports(
         render_final_report(result, similarity_pairs, suggestions, settings, scan_path, stages_run),
     )
     md_content = render_markdown(
-        result, similarity_pairs, suggestions,
-        settings=settings, project_root=scan_path,
+        result,
+        similarity_pairs,
+        suggestions,
+        settings=settings,
+        project_root=scan_path,
         stages_run=stages_run,
     )
     (run_store.run_dir / "report.md").write_text(md_content)
@@ -252,7 +258,7 @@ def run_pipeline(
     skip_confirm: bool = False,
     console: Console | None = None,
     file_list: list[Path] | None = None,
-    run_store: "RunStore | None" = None,
+    run_store: RunStore | None = None,
 ) -> AnalysisResult:
     """Run the analysis pipeline.
 
@@ -287,7 +293,9 @@ def run_pipeline(
             result.documents = chunk_file_list(file_list, scan_path)
         else:
             result.documents = chunk_documents(
-                scan_path, settings.include, settings.exclude,
+                scan_path,
+                settings.include,
+                settings.exclude,
             )
         for doc in result.documents:
             result.chunks.extend(doc.chunks)
@@ -313,10 +321,14 @@ def run_pipeline(
     if run_store and run_store.stage_exists("docs_section_match.json"):
         saved = run_store.load_stage("docs_section_match.json")
         if saved:
-            similarity_pairs = _deserialize_pairs(saved.get("matched_section_pairs", []), result.chunks)
+            similarity_pairs = _deserialize_pairs(
+                saved.get("matched_section_pairs", []), result.chunks
+            )
             if similarity_pairs:
                 similarity_resumed = True
-                console.print(f"[green]Resumed {len(similarity_pairs)} matched section pairs from previous run.[/green]")
+                console.print(
+                    f"[green]Resumed {len(similarity_pairs)} matched section pairs from previous run.[/green]"
+                )
 
     if not similarity_resumed:
         # Detect boilerplate headings
@@ -344,8 +356,11 @@ def run_pipeline(
 
         with console.status("[bold green]Embedding all chunks..."):
             embeddings = embed_chunks(
-                result.chunks, settings.docs_embedding_model, cache,
-                on_progress=emb_progress, concurrency=settings.concurrency,
+                result.chunks,
+                settings.docs_embedding_model,
+                cache,
+                on_progress=emb_progress,
+                concurrency=settings.concurrency,
             )
 
         if cache:
@@ -355,7 +370,8 @@ def run_pipeline(
 
         # Find similar pairs
         similarity_pairs = find_similar_pairs(
-            result.chunks, embeddings,
+            result.chunks,
+            embeddings,
             threshold=settings.threshold_similarity,
             min_content_words=settings.min_content_words,
             boilerplate_headings=boilerplate_headings,
@@ -365,6 +381,7 @@ def run_pipeline(
 
         if run_store:
             from dryscope.docs.report import serialize_section_match_stage
+
             run_store.save_stage(
                 "docs_section_match.json",
                 serialize_section_match_stage(result, similarity_pairs, settings, scan_path),
@@ -381,9 +398,26 @@ def run_pipeline(
     try:
         if stage == DOCS_SECTION_MATCH_SLUG:
             if run_store:
-                _save_all_reports(run_store, result, similarity_pairs, suggestions, settings, scan_path, stages_run)
-            _output_results(result, similarity_pairs, suggestions,
-                            output_format, output_file, console, settings, scan_path, stages_run)
+                _save_all_reports(
+                    run_store,
+                    result,
+                    similarity_pairs,
+                    suggestions,
+                    settings,
+                    scan_path,
+                    stages_run,
+                )
+            _output_results(
+                result,
+                similarity_pairs,
+                suggestions,
+                output_format,
+                output_file,
+                console,
+                settings,
+                scan_path,
+                stages_run,
+            )
             return result
 
         # ─── Docs Map ───
@@ -407,10 +441,17 @@ def run_pipeline(
                 if saved:
                     result.document_descriptors = saved.get("document_descriptors", {})
                     result.topic_taxonomy = saved.get("topic_taxonomy")
-                    if saved.get("descriptor_based") and result.document_descriptors and result.topic_taxonomy:
+                    if (
+                        saved.get("descriptor_based")
+                        and result.document_descriptors
+                        and result.topic_taxonomy
+                    ):
                         doc_topics = saved.get("doc_topics", {})
                         for match in saved.get("intent_matches", []):
-                            key = (min(match["doc_a"], match["doc_b"]), max(match["doc_a"], match["doc_b"]))
+                            key = (
+                                min(match["doc_a"], match["doc_b"]),
+                                max(match["doc_a"], match["doc_b"]),
+                            )
                             intent_evidence[key] = match["matched_topics"]
                         intent_resumed = True
                         console.print(
@@ -418,8 +459,7 @@ def run_pipeline(
                             f"{len(intent_evidence)} intent pairs.[/green]"
                         )
                     existing_docs_map = (
-                        result.topic_taxonomy.get("docs_map")
-                        if result.topic_taxonomy else None
+                        result.topic_taxonomy.get("docs_map") if result.topic_taxonomy else None
                     )
                     needs_docs_map = (
                         not isinstance(existing_docs_map, dict)
@@ -467,10 +507,13 @@ def run_pipeline(
                     )
                     intent_doc_chunks_map = {}
                     doc_topics = {}
-                elif settings.docs_intent_max_docs > 0 and len(doc_chunks_map) > settings.docs_intent_max_docs:
+                elif (
+                    settings.docs_intent_max_docs > 0
+                    and len(doc_chunks_map) > settings.docs_intent_max_docs
+                ):
                     ranked_docs = _rank_doc_paths_by_similarity_evidence(doc_pair_groups)
                     if ranked_docs:
-                        allowed_docs = set(ranked_docs[:settings.docs_intent_max_docs])
+                        allowed_docs = set(ranked_docs[: settings.docs_intent_max_docs])
                         intent_doc_chunks_map = _filter_doc_chunks_map(doc_chunks_map, allowed_docs)
                         console.print(
                             "Limiting intent extraction to "
@@ -479,11 +522,14 @@ def run_pipeline(
                         )
 
                 if intent_doc_chunks_map:
+
                     def descriptor_progress(done: int, total: int) -> None:
                         console.print(f"  Extracting descriptors {done}/{total}...", end="\r")
 
                     result.document_descriptors = run_document_descriptor_extraction(
-                        intent_doc_chunks_map, settings.model, cache,
+                        intent_doc_chunks_map,
+                        settings.model,
+                        cache,
                         backend=settings.backend,
                         concurrency=settings.concurrency,
                         on_progress=descriptor_progress,
@@ -524,7 +570,9 @@ def run_pipeline(
                         )
                     doc_topics = taxonomy.doc_topics
                     result.topic_taxonomy = taxonomy.to_dict()
-                    topic_document_clusters = result.topic_taxonomy.get("topic_document_clusters", [])
+                    topic_document_clusters = result.topic_taxonomy.get(
+                        "topic_document_clusters", []
+                    )
                     console.print(
                         "Normalized to "
                         f"[bold]{len(taxonomy.canonical_topics)}[/bold] canonical topics "
@@ -563,11 +611,15 @@ def run_pipeline(
                     # Embed all unique topics
                     all_topics = list({t for topics in doc_topics.values() for t in topics})
                     if all_topics:
-                        topic_embeddings = embed_topics(all_topics, settings.docs_embedding_model, cache)
+                        topic_embeddings = embed_topics(
+                            all_topics, settings.docs_embedding_model, cache
+                        )
 
                         # Find intent doc-pairs
                         intent_evidence = find_intent_doc_pairs(
-                            doc_topics, topic_embeddings, settings.threshold_intent,
+                            doc_topics,
+                            topic_embeddings,
+                            settings.threshold_intent,
                         )
 
                     console.print(
@@ -585,16 +637,19 @@ def run_pipeline(
                             }
                             for key, matches in intent_evidence.items()
                         ]
-                        run_store.save_stage("docs_map.json", {
-                            "metadata": {},
-                            "descriptor_based": True,
-                            "document_descriptors": result.document_descriptors,
-                            "descriptor_labels": raw_doc_topics,
-                            "raw_doc_topics": raw_doc_topics,
-                            "doc_topics": doc_topics,
-                            "topic_taxonomy": result.topic_taxonomy,
-                            "intent_matches": intent_matches_data,
-                        })
+                        run_store.save_stage(
+                            "docs_map.json",
+                            {
+                                "metadata": {},
+                                "descriptor_based": True,
+                                "document_descriptors": result.document_descriptors,
+                                "descriptor_labels": raw_doc_topics,
+                                "raw_doc_topics": raw_doc_topics,
+                                "doc_topics": doc_topics,
+                                "topic_taxonomy": result.topic_taxonomy,
+                                "intent_matches": intent_matches_data,
+                            },
+                        )
 
             stages_run.append(DOCS_MAP_SLUG)
 
@@ -603,7 +658,10 @@ def run_pipeline(
                 if key not in doc_pair_groups:
                     doc_pair_groups[key] = []
 
-        if settings.docs_llm_max_doc_pairs > 0 and len(doc_pair_groups) > settings.docs_llm_max_doc_pairs:
+        if (
+            settings.docs_llm_max_doc_pairs > 0
+            and len(doc_pair_groups) > settings.docs_llm_max_doc_pairs
+        ):
             original_count = len(doc_pair_groups)
             doc_pair_groups = _restrict_doc_pair_groups(
                 doc_pair_groups,
@@ -617,9 +675,26 @@ def run_pipeline(
 
         if not doc_pair_groups:
             if run_store:
-                _save_all_reports(run_store, result, similarity_pairs, suggestions, settings, scan_path, stages_run)
-            _output_results(result, similarity_pairs, suggestions,
-                            output_format, output_file, console, settings, scan_path, stages_run)
+                _save_all_reports(
+                    run_store,
+                    result,
+                    similarity_pairs,
+                    suggestions,
+                    settings,
+                    scan_path,
+                    stages_run,
+                )
+            _output_results(
+                result,
+                similarity_pairs,
+                suggestions,
+                output_format,
+                output_file,
+                console,
+                settings,
+                scan_path,
+                stages_run,
+            )
             return result
 
         # ─── Doc Pair Review ───
@@ -638,19 +713,54 @@ def run_pipeline(
                 f"Skipping LLM stage.[/red]"
             )
             if run_store:
-                _save_all_reports(run_store, result, similarity_pairs, suggestions, settings, scan_path, stages_run)
-            _output_results(result, similarity_pairs, suggestions,
-                            output_format, output_file, console, settings, scan_path, stages_run)
+                _save_all_reports(
+                    run_store,
+                    result,
+                    similarity_pairs,
+                    suggestions,
+                    settings,
+                    scan_path,
+                    stages_run,
+                )
+            _output_results(
+                result,
+                similarity_pairs,
+                suggestions,
+                output_format,
+                output_file,
+                console,
+                settings,
+                scan_path,
+                stages_run,
+            )
             return result
 
         if not skip_confirm:
             import click
+
             if not click.confirm("Proceed?"):
                 console.print("[yellow]Skipping LLM stage.[/yellow]")
                 if run_store:
-                    _save_all_reports(run_store, result, similarity_pairs, suggestions, settings, scan_path, stages_run)
-                _output_results(result, similarity_pairs, suggestions,
-                                output_format, output_file, console, settings, scan_path, stages_run)
+                    _save_all_reports(
+                        run_store,
+                        result,
+                        similarity_pairs,
+                        suggestions,
+                        settings,
+                        scan_path,
+                        stages_run,
+                    )
+                _output_results(
+                    result,
+                    similarity_pairs,
+                    suggestions,
+                    output_format,
+                    output_file,
+                    console,
+                    settings,
+                    scan_path,
+                    stages_run,
+                )
                 return result
 
         try:
@@ -681,7 +791,10 @@ def run_pipeline(
                         f.write(_json.dumps({"pair_key": pair_key, "analysis": raw}) + "\n")
 
             analyses, codes, categories, suggestions = run_doc_pair_pipeline(
-                doc_pair_groups, doc_chunks_map, settings.model, cache,
+                doc_pair_groups,
+                doc_chunks_map,
+                settings.model,
+                cache,
                 on_progress=doc_pair_progress,
                 backend=settings.backend,
                 prior_analyses=prior_analyses,
@@ -703,19 +816,33 @@ def run_pipeline(
 
             if run_store:
                 from dryscope.docs.report import serialize_doc_pair_review_stage
+
                 run_store.save_stage(
                     "docs_pair_review.json",
-                    serialize_doc_pair_review_stage(codes, categories, suggestions, settings, scan_path, analyses=analyses),
+                    serialize_doc_pair_review_stage(
+                        codes, categories, suggestions, settings, scan_path, analyses=analyses
+                    ),
                 )
         except Exception as e:
             console.print(f"[yellow]LLM analysis stage failed: {e}[/yellow]")
             suggestions = None
 
         if run_store:
-            _save_all_reports(run_store, result, similarity_pairs, suggestions, settings, scan_path, stages_run)
+            _save_all_reports(
+                run_store, result, similarity_pairs, suggestions, settings, scan_path, stages_run
+            )
 
-        _output_results(result, similarity_pairs, suggestions,
-                        output_format, output_file, console, settings, scan_path, stages_run)
+        _output_results(
+            result,
+            similarity_pairs,
+            suggestions,
+            output_format,
+            output_file,
+            console,
+            settings,
+            scan_path,
+            stages_run,
+        )
         return result
     finally:
         if cache:
@@ -741,8 +868,11 @@ def _output_results(
         render_terminal(result, similarity_pairs, suggestions, console)
     elif output_format == "markdown":
         content = render_markdown(
-            result, similarity_pairs, suggestions,
-            settings=settings, project_root=scan_path,
+            result,
+            similarity_pairs,
+            suggestions,
+            settings=settings,
+            project_root=scan_path,
             stages_run=stages_run,
         )
         if output_file:
@@ -757,8 +887,11 @@ def _output_results(
             stdout_console.print(content)
     elif output_format == "html":
         md_content = render_markdown(
-            result, similarity_pairs, suggestions,
-            settings=settings, project_root=scan_path,
+            result,
+            similarity_pairs,
+            suggestions,
+            settings=settings,
+            project_root=scan_path,
             stages_run=stages_run,
         )
         content = render_html(md_content)
@@ -769,9 +902,14 @@ def _output_results(
             stdout_console = Console(soft_wrap=True)
             stdout_console.print(content)
     elif output_format == "json":
-        content = render_json(result, similarity_pairs, suggestions,
-                              settings=settings, project_root=scan_path,
-                              stages_run=stages_run)
+        content = render_json(
+            result,
+            similarity_pairs,
+            suggestions,
+            settings=settings,
+            project_root=scan_path,
+            stages_run=stages_run,
+        )
         if output_file:
             Path(output_file).write_text(content)
             console.print(f"Report written to [bold]{output_file}[/bold]")

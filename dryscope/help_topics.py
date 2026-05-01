@@ -135,7 +135,9 @@ HELP_TOPICS: tuple[HelpTopic, ...] = (
               dryscope help json
               docs/json-output.md
             """
-        ).strip().format(
+        )
+        .strip()
+        .format(
             output_format_table=OUTPUT_FORMAT_TABLE,
             docs_report_pack_slug=DOCS_REPORT_PACK_SLUG,
         ),

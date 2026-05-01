@@ -34,11 +34,24 @@ Read only as far as the task needs:
 - Prefer `uv run python` over calling `python` or `python3` directly.
 - Prefer `uv run pytest` for tests and `uv run dryscope ...` for local CLI
   checks.
+- Install local development dependencies with `uv sync --extra dev`.
+- Enable the default commit hooks with `uv run pre-commit install`.
+- Run the default quality gate with `uv run pre-commit run --all-files`.
+- Run type analysis explicitly with
+  `uv run pre-commit run ty-check --hook-stage manual --all-files`.
+- Run complexity analysis explicitly with
+  `uv run pre-commit run xenon-complexity --hook-stage manual --all-files`.
 - Run focused tests for the area you changed, for example
   `uv run pytest tests/test_parser.py` or
   `uv run pytest tests/test_docs_pipeline.py`.
 - Run the full suite with `uv run pytest` when changing shared behavior,
   CLI contracts, config, reports, or scoring.
+
+The default pre-commit gate covers file hygiene, Python syntax, private-key
+detection, executable/shebang consistency, lockfile freshness, Ruff
+linting/import sorting, and Ruff formatting. The manual `ty` and Xenon hooks
+surface existing type and complexity debt and should be treated as ratchets
+until the baseline is clean enough to block every commit.
 
 ## Dependency Picture
 
@@ -53,6 +66,7 @@ Read only as far as the task needs:
   `sentence-transformers` local embeddings.
 - LLM review: shared backend over LiteLLM providers or the `claude -p` CLI,
   with `tenacity` retries.
+- Developer quality: `pre-commit`, `ruff`, `ty`, and `xenon`.
 - Persistence: SQLite cache for embeddings/review results and `.dryscope/runs`
   for docs report artifacts.
 

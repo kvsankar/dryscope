@@ -10,25 +10,25 @@ from pathlib import Path
 
 from tree_sitter import Node
 
-from dryscope.code.treesitter import create_parser, EXT_TO_LANG, SUPPORTED_EXTENSIONS
+from dryscope.code.treesitter import EXT_TO_LANG, SUPPORTED_EXTENSIONS, create_parser
 
 # Node types we extract as code units, per language family
 _FUNCTION_TYPES = {
-    "function_definition",       # Python
-    "function",                  # JavaScript function expression / declaration nodes
-    "function_declaration",      # Go / TypeScript
-    "method_declaration",        # Java methods
-    "constructor_declaration",   # Java constructors
+    "function_definition",  # Python
+    "function",  # JavaScript function expression / declaration nodes
+    "function_declaration",  # Go / TypeScript
+    "method_declaration",  # Java methods
+    "constructor_declaration",  # Java constructors
     "generator_function_declaration",  # TypeScript
-    "generator_function",        # JavaScript
-    "method_definition",         # TypeScript class methods
+    "generator_function",  # JavaScript
+    "method_definition",  # TypeScript class methods
 }
 
 _CLASS_TYPES = {
-    "class_definition",          # Python
-    "class",                     # JavaScript class expression / declaration nodes
-    "class_declaration",         # Java / TypeScript
-    "type_declaration",          # Go
+    "class_definition",  # Python
+    "class",  # JavaScript class expression / declaration nodes
+    "class_declaration",  # Java / TypeScript
+    "type_declaration",  # Go
 }
 
 # Arrow / function expressions assigned to variables: const foo = () => {}
@@ -36,14 +36,34 @@ _ARROW_DECLARATOR = "variable_declarator"
 
 # Directories to always skip
 EXCLUDED_DIRS = {
-    ".venv", "venv", ".env", "env",
-    "node_modules", "__pycache__",
-    ".git", ".hg", ".svn",
-    ".tox", ".nox", ".mypy_cache", ".pytest_cache",
-    ".ruff_cache", ".cache", ".uv-cache",
-    ".npm", ".yarn", ".pnpm-store",
-    ".next", ".nuxt", ".svelte-kit", ".turbo",
-    "site-packages", "dist", "build", "coverage", "egg-info",
+    ".venv",
+    "venv",
+    ".env",
+    "env",
+    "node_modules",
+    "__pycache__",
+    ".git",
+    ".hg",
+    ".svn",
+    ".tox",
+    ".nox",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".cache",
+    ".uv-cache",
+    ".npm",
+    ".yarn",
+    ".pnpm-store",
+    ".next",
+    ".nuxt",
+    ".svelte-kit",
+    ".turbo",
+    "site-packages",
+    "dist",
+    "build",
+    "coverage",
+    "egg-info",
 }
 
 # Regex to extract base class names from the first line of a class definition
@@ -122,7 +142,12 @@ def _get_name(node: Node) -> str:
             if child.type in ("identifier", "field_identifier", "property_identifier"):
                 return child.text.decode("utf-8")
     for child in node.children:
-        if child.type in ("identifier", "type_identifier", "property_identifier", "field_identifier"):
+        if child.type in (
+            "identifier",
+            "type_identifier",
+            "property_identifier",
+            "field_identifier",
+        ):
             return child.text.decode("utf-8")
     return "<anonymous>"
 
@@ -159,7 +184,10 @@ def _extract_units(
         # Functions and class methods
         if child.type in _FUNCTION_TYPES:
             name = _get_name(child)
-            if child.type in {"method_definition", "method_declaration", "constructor_declaration"} or parent_is_class:
+            if (
+                child.type in {"method_definition", "method_declaration", "constructor_declaration"}
+                or parent_is_class
+            ):
                 unit_type = "method"
             else:
                 unit_type = "function"
@@ -174,7 +202,10 @@ def _extract_units(
                 lang=lang,
             )
             unit.children = _extract_units(
-                child, file_path, lang, parent_is_class=(child.type in _CLASS_TYPES),
+                child,
+                file_path,
+                lang,
+                parent_is_class=(child.type in _CLASS_TYPES),
             )
             units.append(unit)
             continue
@@ -196,11 +227,15 @@ def _extract_units(
             if _is_js_family(lang) or _is_java_family(lang):
                 for body_child in child.children:
                     if body_child.type == "class_body":
-                        unit.children = _extract_units(body_child, file_path, lang, parent_is_class=True)
+                        unit.children = _extract_units(
+                            body_child, file_path, lang, parent_is_class=True
+                        )
             elif _is_go_family(lang):
                 for body_child in child.children:
                     if body_child.type == "type_spec":
-                        unit.children = _extract_units(body_child, file_path, lang, parent_is_class=True)
+                        unit.children = _extract_units(
+                            body_child, file_path, lang, parent_is_class=True
+                        )
             units.append(unit)
             continue
 

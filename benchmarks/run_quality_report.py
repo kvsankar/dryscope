@@ -11,7 +11,11 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
-from benchmarks.benchmark_paths import default_quality_report_dir, latest_results_dir, prepare_output_dir
+from benchmarks.benchmark_paths import (
+    default_quality_report_dir,
+    latest_results_dir,
+    prepare_output_dir,
+)
 from dryscope.benchmark import score_code_quality, score_docs_section_quality
 
 DEFAULT_CODE_RESULTS = latest_results_dir("code")
@@ -127,10 +131,12 @@ def _quality_summary(
         if not summary_path.exists():
             continue
         summary = _load_json(summary_path)
-        docs_metadata.append({
-            "results_dir": str(docs_dir),
-            "benchmark_metadata": summary.get("benchmark_metadata"),
-        })
+        docs_metadata.append(
+            {
+                "results_dir": str(docs_dir),
+                "benchmark_metadata": summary.get("benchmark_metadata"),
+            }
+        )
         for repo in summary.get("repos", []):
             repo_name = repo["repo"]
             artifact_dir = Path(repo.get("artifact_dir", str(Path("artifacts") / repo_name)))
@@ -207,10 +213,7 @@ def _markdown_table(title: str, rows: list[dict]) -> list[str]:
 
 
 def _render_markdown(report: dict) -> str:
-    has_rows = bool(
-        report["code_review"]["by_repo"]
-        or report["docs_section_match"]["by_repo"]
-    )
+    has_rows = bool(report["code_review"]["by_repo"] or report["docs_section_match"]["by_repo"])
     lines = [
         "# Benchmark Quality Report",
         "",
@@ -221,55 +224,59 @@ def _render_markdown(report: dict) -> str:
         "",
     ]
     if not has_rows:
-        lines.extend([
-            "> Note: this generated report did not find benchmark result rows in the",
-            "> configured input artifact directories, so the tables below show the",
-            "> presenter shape with empty values. Run the public benchmark harnesses",
-            "> first, then regenerate this report to populate real metrics.",
+        lines.extend(
+            [
+                "> Note: this generated report did not find benchmark result rows in the",
+                "> configured input artifact directories, so the tables below show the",
+                "> presenter shape with empty values. Run the public benchmark harnesses",
+                "> first, then regenerate this report to populate real metrics.",
+                "",
+            ]
+        )
+    lines.extend(
+        [
+            "## How To Read This",
             "",
-        ])
-    lines.extend([
-        "## How To Read This",
-        "",
-        "`dryscope` is a narrowing tool, so the report uses a practical 2x2 rather",
-        "than pretending every possible non-duplicate code unit or doc section can",
-        "be enumerated.",
-        "",
-        "Rows are the curated truth. Columns are dryscope's output.",
-        "",
-        "| Curated truth / dryscope output | Surfaced finding (predicted positive) | Not surfaced (predicted negative) |",
-        "| --- | --- | --- |",
-        "| Actionable duplicate or overlap (actual positive) | **TP**: dryscope found a curated actionable item. | **FN**: dryscope missed a curated actionable item. |",
-        "| Non-actionable item (actual negative) | **FP**: dryscope surfaced an item curated as not actionable. | **TN**: dryscope correctly ignored it; not reported because the negative space is too large to enumerate meaningfully. |",
-        "",
-        "Unlabeled surfaced findings are not counted as false positives. The checked-in",
-        "public labels are intentionally sparse, so these numbers describe the",
-        "reviewed slice of benchmark output.",
-        "",
-        "Precision reads down the surfaced column: `TP / (TP + FP)`. Recall reads",
-        "across the actionable row: `TP / (TP + FN)`.",
-        "",
-        "## Metric Notes",
-        "",
-        "| Metric | Direction | How to read it |",
-        "| --- | --- | --- |",
-        "| TP | higher is better | Surfaced findings that match actionable curated labels. |",
-        "| FP | lower is better | Surfaced findings that match curated non-actionable labels. |",
-        "| FN | lower is better | Actionable curated labels that dryscope missed. |",
-        "| Labeled precision | higher is better | `TP / (TP + FP)` over surfaced findings that have curated labels. |",
-        "| Curated recall | higher is better | `TP / (TP + FN)` over curated actionable labels. |",
-        "| F1 | higher is better | Harmonic mean of labeled precision and curated recall. |",
-        "| P@K / R@K | higher is better | Top-of-shortlist precision and recall for `K = 5, 10, 15`. |",
-        "| Labeled surfaced | no direct quality direction | Count of surfaced findings that had curated labels and were eligible for TP/FP scoring. |",
-        "| Gold + / Gold - | no direct quality direction | Curated positive and negative labels available for the benchmark repos. |",
-        "",
-        "`n/a` means the denominator for that metric is zero.",
-        "",
-        "## Aggregate Summary",
-        "",
-        "| Track | TP | FP | FN | Labeled precision | Curated recall | F1 | P@5 | R@5 | Labeled surfaced | Gold + | Gold - |",
-        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
-    ])
+            "`dryscope` is a narrowing tool, so the report uses a practical 2x2 rather",
+            "than pretending every possible non-duplicate code unit or doc section can",
+            "be enumerated.",
+            "",
+            "Rows are the curated truth. Columns are dryscope's output.",
+            "",
+            "| Curated truth / dryscope output | Surfaced finding (predicted positive) | Not surfaced (predicted negative) |",
+            "| --- | --- | --- |",
+            "| Actionable duplicate or overlap (actual positive) | **TP**: dryscope found a curated actionable item. | **FN**: dryscope missed a curated actionable item. |",
+            "| Non-actionable item (actual negative) | **FP**: dryscope surfaced an item curated as not actionable. | **TN**: dryscope correctly ignored it; not reported because the negative space is too large to enumerate meaningfully. |",
+            "",
+            "Unlabeled surfaced findings are not counted as false positives. The checked-in",
+            "public labels are intentionally sparse, so these numbers describe the",
+            "reviewed slice of benchmark output.",
+            "",
+            "Precision reads down the surfaced column: `TP / (TP + FP)`. Recall reads",
+            "across the actionable row: `TP / (TP + FN)`.",
+            "",
+            "## Metric Notes",
+            "",
+            "| Metric | Direction | How to read it |",
+            "| --- | --- | --- |",
+            "| TP | higher is better | Surfaced findings that match actionable curated labels. |",
+            "| FP | lower is better | Surfaced findings that match curated non-actionable labels. |",
+            "| FN | lower is better | Actionable curated labels that dryscope missed. |",
+            "| Labeled precision | higher is better | `TP / (TP + FP)` over surfaced findings that have curated labels. |",
+            "| Curated recall | higher is better | `TP / (TP + FN)` over curated actionable labels. |",
+            "| F1 | higher is better | Harmonic mean of labeled precision and curated recall. |",
+            "| P@K / R@K | higher is better | Top-of-shortlist precision and recall for `K = 5, 10, 15`. |",
+            "| Labeled surfaced | no direct quality direction | Count of surfaced findings that had curated labels and were eligible for TP/FP scoring. |",
+            "| Gold + / Gold - | no direct quality direction | Curated positive and negative labels available for the benchmark repos. |",
+            "",
+            "`n/a` means the denominator for that metric is zero.",
+            "",
+            "## Aggregate Summary",
+            "",
+            "| Track | TP | FP | FN | Labeled precision | Curated recall | F1 | P@5 | R@5 | Labeled surfaced | Gold + | Gold - |",
+            "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        ]
+    )
     for title, key in (("Code Review", "code_review"), ("Section Match", "docs_section_match")):
         agg = report[key]["aggregate"]
         lines.append(
@@ -306,7 +313,9 @@ def main() -> None:
     parser.add_argument("--code-labels", default=str(DEFAULT_CODE_LABELS))
     parser.add_argument("--docs-labels", default=str(DEFAULT_DOCS_LABELS))
     parser.add_argument("--out-dir", default=str(default_quality_report_dir()))
-    parser.add_argument("--overwrite", action="store_true", help="Replace an existing quality report directory")
+    parser.add_argument(
+        "--overwrite", action="store_true", help="Replace an existing quality report directory"
+    )
     parser.add_argument(
         "--reference-md",
         default=None,

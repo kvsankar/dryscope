@@ -4,8 +4,21 @@ import json
 from pathlib import Path
 
 from dryscope.config import Settings
-from dryscope.docs.models import AnalysisResult, Chunk, DocPairAnalysis, Document, OverlapPair, TopicAnalysis
-from dryscope.docs.report import build_recommendations, render_html, render_json, render_markdown, serialize_doc_pair_review_stage
+from dryscope.docs.models import (
+    AnalysisResult,
+    Chunk,
+    DocPairAnalysis,
+    Document,
+    OverlapPair,
+    TopicAnalysis,
+)
+from dryscope.docs.report import (
+    build_recommendations,
+    render_html,
+    render_json,
+    render_markdown,
+    serialize_doc_pair_review_stage,
+)
 
 
 def _make_analysis() -> tuple[AnalysisResult, list[DocPairAnalysis]]:
@@ -101,7 +114,9 @@ def test_render_outputs_include_topic_taxonomy() -> None:
             "facets": {
                 "doc_role": {
                     "description": "Doc roles.",
-                    "values": [{"value": "guide", "documents": ["docs/a.md"], "evidence": ["guide"]}],
+                    "values": [
+                        {"value": "guide", "documents": ["docs/a.md"], "evidence": ["guide"]}
+                    ],
                 }
             },
             "diagnostics": [

@@ -25,12 +25,14 @@ def _pair(doc_a: str, doc_b: str, line_a: int, line_b: int, similarity: float) -
 
 
 def test_rank_doc_paths_by_similarity_evidence_prefers_stronger_and_more_frequent_docs() -> None:
-    groups = _group_pairs_by_doc_pair([
-        _pair("/docs/a.md", "/docs/b.md", 1, 1, 0.99),
-        _pair("/docs/a.md", "/docs/b.md", 10, 10, 0.95),
-        _pair("/docs/a.md", "/docs/c.md", 20, 20, 0.92),
-        _pair("/docs/d.md", "/docs/e.md", 30, 30, 0.91),
-    ])
+    groups = _group_pairs_by_doc_pair(
+        [
+            _pair("/docs/a.md", "/docs/b.md", 1, 1, 0.99),
+            _pair("/docs/a.md", "/docs/b.md", 10, 10, 0.95),
+            _pair("/docs/a.md", "/docs/c.md", 20, 20, 0.92),
+            _pair("/docs/d.md", "/docs/e.md", 30, 30, 0.91),
+        ]
+    )
 
     ranked = _rank_doc_paths_by_similarity_evidence(groups)
 
@@ -49,11 +51,13 @@ def test_filter_doc_chunks_map_keeps_only_allowed_docs() -> None:
 
 
 def test_restrict_doc_pair_groups_by_allowed_docs_and_max_pairs() -> None:
-    groups = _group_pairs_by_doc_pair([
-        _pair("/docs/a.md", "/docs/b.md", 1, 1, 0.99),
-        _pair("/docs/a.md", "/docs/c.md", 10, 10, 0.97),
-        _pair("/docs/b.md", "/docs/c.md", 20, 20, 0.91),
-    ])
+    groups = _group_pairs_by_doc_pair(
+        [
+            _pair("/docs/a.md", "/docs/b.md", 1, 1, 0.99),
+            _pair("/docs/a.md", "/docs/c.md", 10, 10, 0.97),
+            _pair("/docs/b.md", "/docs/c.md", 20, 20, 0.91),
+        ]
+    )
 
     filtered = _restrict_doc_pair_groups(
         groups,
@@ -85,9 +89,11 @@ def test_should_not_skip_intent_extraction_when_similarity_pairs_exist() -> None
         "/docs/b.md": [Chunk("/docs/b.md", ["B"], "one two three", 1, 2)],
         "/docs/c.md": [Chunk("/docs/c.md", ["C"], "one two three", 1, 2)],
     }
-    groups = _group_pairs_by_doc_pair([
-        _pair("/docs/a.md", "/docs/b.md", 1, 1, 0.99),
-    ])
+    groups = _group_pairs_by_doc_pair(
+        [
+            _pair("/docs/a.md", "/docs/b.md", 1, 1, 0.99),
+        ]
+    )
 
     assert _should_skip_intent_extraction(doc_chunks_map, groups, settings) is False
 

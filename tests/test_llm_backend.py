@@ -1,6 +1,5 @@
 """Tests for dryscope.llm_backend."""
 
-import os
 import json
 from types import SimpleNamespace
 

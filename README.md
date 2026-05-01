@@ -183,6 +183,42 @@ because they pull in PyTorch:
 uv pip install ".[local-embeddings]"
 ```
 
+## Development Quality Gates
+
+For repository development, install the dev extra and enable the checked-in
+pre-commit hooks:
+
+```bash
+uv sync --extra dev
+uv run pre-commit install
+uv run pre-commit run --all-files
+```
+
+The default commit hooks are intentionally fast and low-noise:
+
+- standard file checks for Python syntax, JSON/TOML/YAML, merge conflicts,
+  large files, private keys, case conflicts, executable/shebang consistency,
+  broken symlinks, debug statements, trailing whitespace, final newlines, and
+  LF line endings
+- `uv lock --check` when `pyproject.toml` or `uv.lock` changes
+- `ruff check --fix` for lint, import sorting, pyupgrade-style rewrites,
+  bugbear checks, comprehensions, and McCabe complexity rule coverage
+- `ruff format` for Python formatting
+
+Stricter gates are available as manual hooks while the current baseline is
+being tightened:
+
+```bash
+uv run pre-commit run ty-check --hook-stage manual --all-files
+uv run pre-commit run xenon-complexity --hook-stage manual --all-files
+```
+
+`ty-check` runs static type analysis over `dryscope`, `tests`, and
+`benchmarks`. `xenon-complexity` reports cyclomatic-complexity hot spots and is
+configured as a ratchet for functions, modules, and repository average
+complexity. These manual checks are useful before larger refactors even when
+they are not yet suitable as default commit blockers.
+
 ## Quick Start
 
 ```bash

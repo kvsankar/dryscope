@@ -264,7 +264,9 @@ class TestReportsClean:
         self._make_run(tmp_path, "20260402-000000")
         newest = self._make_run(tmp_path, "20260403-000000")
 
-        result = runner.invoke(main, ["reports", "clean", str(tmp_path), "--keep-last", "1", "--force"])
+        result = runner.invoke(
+            main, ["reports", "clean", str(tmp_path), "--keep-last", "1", "--force"]
+        )
 
         assert result.exit_code == 0
         assert "Deleted: 2" in result.output
@@ -277,7 +279,9 @@ class TestReportsClean:
         self._make_run(tmp_path, "20260401-000000")
         self._make_run(tmp_path, "20260402-000000")
 
-        result = runner.invoke(main, ["reports", "clean", str(tmp_path), "--keep-since", "2026-04-01"])
+        result = runner.invoke(
+            main, ["reports", "clean", str(tmp_path), "--keep-since", "2026-04-01"]
+        )
 
         assert result.exit_code == 0
         assert "Would delete: 1" in result.output

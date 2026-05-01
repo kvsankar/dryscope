@@ -13,7 +13,6 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
-from dryscope.benchmark import score_labeled_findings
 from benchmarks.benchmark_paths import (
     benchmark_input_id,
     benchmark_input_stem,
@@ -21,6 +20,7 @@ from benchmarks.benchmark_paths import (
     default_results_dir,
     prepare_output_dir,
 )
+from dryscope.benchmark import score_labeled_findings
 
 DRYSCOPE_BIN = REPO_ROOT / ".venv" / "bin" / "dryscope"
 DEFAULT_MANIFEST = Path(__file__).with_name("public_repos.json")
@@ -79,13 +79,17 @@ def main() -> None:
     parser.add_argument("--labels", default=str(DEFAULT_LABELS))
     parser.add_argument("--repos-dir", default=None)
     parser.add_argument("--out-dir", default=None)
-    parser.add_argument("--group", action="append", default=[], help="Only run selected benchmark groups")
+    parser.add_argument(
+        "--group", action="append", default=[], help="Only run selected benchmark groups"
+    )
     parser.add_argument(
         "--embedding-model",
         default=DEFAULT_EMBEDDING_MODEL,
         help="Embedding model used for benchmark scans",
     )
-    parser.add_argument("--structural-only", action="store_true", help="Run Code Match only; skip Code Review")
+    parser.add_argument(
+        "--structural-only", action="store_true", help="Run Code Match only; skip Code Review"
+    )
     parser.add_argument(
         "--verify-max-findings",
         type=int,
@@ -96,7 +100,9 @@ def main() -> None:
     parser.add_argument("--backend", default="cli", choices=["cli", "litellm"])
     parser.add_argument("--concurrency", type=int, default=8)
     parser.add_argument("--fresh-clone", action="store_true")
-    parser.add_argument("--overwrite", action="store_true", help="Replace an existing benchmark output directory")
+    parser.add_argument(
+        "--overwrite", action="store_true", help="Replace an existing benchmark output directory"
+    )
     args = parser.parse_args()
 
     manifest = json.loads(Path(args.manifest).read_text())
@@ -129,32 +135,47 @@ def main() -> None:
                 text=True,
             )
             if clone.returncode != 0:
-                rows.append({
-                    "repo": repo["name"],
-                    "group": repo["group"],
-                    "clone_error": clone.stderr.strip(),
-                })
+                rows.append(
+                    {
+                        "repo": repo["name"],
+                        "group": repo["group"],
+                        "clone_error": clone.stderr.strip(),
+                    }
+                )
                 continue
 
         metadata = _benchmark_metadata(repo, dest)
         row = {"repo": repo["name"], "group": repo["group"], **metadata}
         input_stem = metadata["benchmark_input_stem"]
         try:
-            structural = _run_json([
-                str(DRYSCOPE_BIN), "scan", str(dest),
-                "--embedding-model", args.embedding_model,
-                "-f", "json",
-            ])
+            structural = _run_json(
+                [
+                    str(DRYSCOPE_BIN),
+                    "scan",
+                    str(dest),
+                    "--embedding-model",
+                    args.embedding_model,
+                    "-f",
+                    "json",
+                ]
+            )
             verified = None
             if not args.structural_only:
                 verified_cmd = [
-                    str(DRYSCOPE_BIN), "scan", str(dest),
-                    "--embedding-model", args.embedding_model,
+                    str(DRYSCOPE_BIN),
+                    "scan",
+                    str(dest),
+                    "--embedding-model",
+                    args.embedding_model,
                     "--verify",
-                    "--backend", args.backend,
-                    "--llm-model", args.llm_model,
-                    "--concurrency", str(args.concurrency),
-                    "-f", "json",
+                    "--backend",
+                    args.backend,
+                    "--llm-model",
+                    args.llm_model,
+                    "--concurrency",
+                    str(args.concurrency),
+                    "-f",
+                    "json",
                 ]
                 if args.verify_max_findings is not None:
                     verified_cmd.extend(["--max-findings", str(args.verify_max_findings)])
@@ -170,11 +191,13 @@ def main() -> None:
         (out_dir / structural_output).write_text(json.dumps(structural, indent=2))
 
         verdicts: dict[str, int] = {}
-        row.update({
-            "structural_findings": len(structural_findings),
-            "embedding_model": args.embedding_model,
-            "structural_output": structural_output,
-        })
+        row.update(
+            {
+                "structural_findings": len(structural_findings),
+                "embedding_model": args.embedding_model,
+                "structural_output": structural_output,
+            }
+        )
         if verified is not None:
             verified["benchmark_metadata"] = metadata
             verified_findings = verified.get("findings", [])
@@ -186,12 +209,14 @@ def main() -> None:
                 verdict = finding.get("verdict", "")
                 verdicts[verdict] = verdicts.get(verdict, 0) + 1
 
-            row.update({
-                "verified_findings": len(verified_findings),
-                "verdicts": verdicts,
-                "label_score": score,
-                "verify_output": verify_output,
-            })
+            row.update(
+                {
+                    "verified_findings": len(verified_findings),
+                    "verdicts": verdicts,
+                    "label_score": score,
+                    "verify_output": verify_output,
+                }
+            )
         rows.append(row)
 
     summary = {

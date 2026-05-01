@@ -1,7 +1,11 @@
 """Tests for rich Docs Map descriptors."""
 
 from dryscope.docs.models import Chunk
-from dryscope.docs.topics import _descriptor_fallback, extract_document_descriptor, descriptor_labels
+from dryscope.docs.topics import (
+    _descriptor_fallback,
+    descriptor_labels,
+    extract_document_descriptor,
+)
 
 
 def test_descriptor_labels_combines_about_and_reader_intents() -> None:

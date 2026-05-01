@@ -94,7 +94,9 @@ def _build_run_overview(
     taxonomy = result.topic_taxonomy or {}
     canonical_topics = taxonomy.get("canonical_topics", []) if isinstance(taxonomy, dict) else []
     coverage_clusters = _topic_document_clusters(result)
-    docs_tracks_ran = bool(result.documents or DOCS_SECTION_MATCH_SLUG in stages or DOCS_MAP_SLUG in stages)
+    docs_tracks_ran = bool(
+        result.documents or DOCS_SECTION_MATCH_SLUG in stages or DOCS_MAP_SLUG in stages
+    )
     docs_map_ran = bool(DOCS_MAP_SLUG in stages or result.document_descriptors or taxonomy)
     section_match_ran = bool(DOCS_SECTION_MATCH_SLUG in stages or similarity_pairs)
 
@@ -222,12 +224,14 @@ def _docs_map_taxonomy_data(result: AnalysisResult) -> dict:
     taxonomy = result.topic_taxonomy or {}
     canonical_topics = []
     for topic in taxonomy.get("canonical_topics", []):
-        canonical_topics.append({
-            "name": topic.get("name"),
-            "aliases": topic.get("aliases", []),
-            "document_count": topic.get("document_count", 0),
-            "mention_count": topic.get("mention_count", 0),
-        })
+        canonical_topics.append(
+            {
+                "name": topic.get("name"),
+                "aliases": topic.get("aliases", []),
+                "document_count": topic.get("document_count", 0),
+                "mention_count": topic.get("mention_count", 0),
+            }
+        )
     return {
         "canonical_topics": canonical_topics,
         "raw_to_canonical": taxonomy.get("raw_to_canonical", {}),
@@ -258,59 +262,68 @@ def _report_structure(
         },
     ]
     if _docs_map(result):
-        sections.append({
-            "id": "docs_map",
-            "title": DOCS_MAP,
-            "slug": DOCS_MAP_SLUG,
-            "data": _docs_map(result),
-        })
+        sections.append(
+            {
+                "id": "docs_map",
+                "title": DOCS_MAP,
+                "slug": DOCS_MAP_SLUG,
+                "data": _docs_map(result),
+            }
+        )
     if _topic_document_clusters(result):
-        sections.append({
-            "id": "docs_map_clusters",
-            "title": "Docs Map Clusters",
-            "slug": DOCS_MAP_SLUG,
-            "data": _topic_document_clusters(result),
-        })
-    sections.append({
-        "id": "docs_section_match",
-        "title": DOCS_SECTION_MATCH,
-        "slug": DOCS_SECTION_MATCH_SLUG,
-        "data": {
-            "matched_section_pairs": len(similarity_pairs),
-            "section_match_recommendations": len(recommendations),
-        },
-        "children": [
+        sections.append(
             {
-                "id": "docs_section_match_recommendations",
-                "title": "Section Match Recommendations",
-                "slug": DOCS_SECTION_MATCH_SLUG,
-                "data": recommendations,
+                "id": "docs_map_clusters",
+                "title": "Docs Map Clusters",
+                "slug": DOCS_MAP_SLUG,
+                "data": _topic_document_clusters(result),
+            }
+        )
+    sections.append(
+        {
+            "id": "docs_section_match",
+            "title": DOCS_SECTION_MATCH,
+            "slug": DOCS_SECTION_MATCH_SLUG,
+            "data": {
+                "matched_section_pairs": len(similarity_pairs),
+                "section_match_recommendations": len(recommendations),
             },
-            {
-                "id": "matched_section_pairs",
-                "title": "Matched Section Pairs",
-                "slug": DOCS_SECTION_MATCH_SLUG,
-                "data": matched_section_pairs,
-            },
-        ],
-    })
-    if result.doc_pair_analyses:
-        sections.append({
-            "id": "docs_pair_review",
-            "title": DOCS_PAIR_REVIEW,
-            "slug": DOCS_PAIR_REVIEW_SLUG,
-            "data": [
-                _doc_pair_analysis_to_dict(analysis)
-                for analysis in result.doc_pair_analyses
+            "children": [
+                {
+                    "id": "docs_section_match_recommendations",
+                    "title": "Section Match Recommendations",
+                    "slug": DOCS_SECTION_MATCH_SLUG,
+                    "data": recommendations,
+                },
+                {
+                    "id": "matched_section_pairs",
+                    "title": "Matched Section Pairs",
+                    "slug": DOCS_SECTION_MATCH_SLUG,
+                    "data": matched_section_pairs,
+                },
             ],
-        })
+        }
+    )
+    if result.doc_pair_analyses:
+        sections.append(
+            {
+                "id": "docs_pair_review",
+                "title": DOCS_PAIR_REVIEW,
+                "slug": DOCS_PAIR_REVIEW_SLUG,
+                "data": [
+                    _doc_pair_analysis_to_dict(analysis) for analysis in result.doc_pair_analyses
+                ],
+            }
+        )
     if taxonomy:
-        sections.append({
-            "id": "docs_map_taxonomy",
-            "title": "Docs Map Taxonomy",
-            "slug": DOCS_MAP_SLUG,
-            "data": _docs_map_taxonomy_data(result),
-        })
+        sections.append(
+            {
+                "id": "docs_map_taxonomy",
+                "title": "Docs Map Taxonomy",
+                "slug": DOCS_MAP_SLUG,
+                "data": _docs_map_taxonomy_data(result),
+            }
+        )
     sections.append({"id": "methodology", "title": "Methodology", "data": {}})
 
     for index, section in enumerate(sections, 1):
@@ -361,7 +374,9 @@ def _html_text_list(items: list[object]) -> str:
     return f"<ul>\n{rows}\n</ul>"
 
 
-def _details_block(summary: str, body: str, class_name: str = "report-item", open_: bool = False) -> str:
+def _details_block(
+    summary: str, body: str, class_name: str = "report-item", open_: bool = False
+) -> str:
     """Return a raw HTML details block that works in markdown and HTML reports."""
     open_attr = " open" if open_ else ""
     return (
@@ -414,7 +429,9 @@ def render_terminal(
             heading_b = " > ".join(pair.chunk_b.heading_path) or "(no heading)"
             loc_a = f"{_short_path(pair.chunk_a.document_path)}: {heading_a}"
             loc_b = f"{_short_path(pair.chunk_b.document_path)}: {heading_b}"
-            sim_str = f"{pair.embedding_similarity:.3f}" if pair.embedding_similarity is not None else "—"
+            sim_str = (
+                f"{pair.embedding_similarity:.3f}" if pair.embedding_similarity is not None else "—"
+            )
             table.add_row(sim_str, loc_a, loc_b)
 
         console.print(table)
@@ -455,7 +472,7 @@ def render_terminal(
         for i, cluster in enumerate(coverage_clusters, 1):
             docs = cluster.get("documents", [])
             console.print(
-                f"  {i}. [bold]\"{cluster.get('topic', '(unnamed topic)')}\"[/bold] "
+                f'  {i}. [bold]"{cluster.get("topic", "(unnamed topic)")}"[/bold] '
                 f"({len(docs)} documents, {cluster.get('mention_count', 0)} mentions)"
             )
             for doc in docs:
@@ -483,7 +500,9 @@ def render_terminal(
         )
         for parent in docs_map.get("topic_tree", [])[:8]:
             children = parent.get("children", [])
-            console.print(f"  • [bold]{parent.get('label', '(unnamed)')}[/bold] ({len(children)} children)")
+            console.print(
+                f"  • [bold]{parent.get('label', '(unnamed)')}[/bold] ({len(children)} children)"
+            )
         console.print()
 
     # Refactoring Suggestions
@@ -493,7 +512,7 @@ def render_terminal(
             code_name = s.get("code", "?")
             docs = s.get("documents", [])
             canonical = s.get("canonical", "?")
-            console.print(f"  {i}. [bold]\"{code_name}\"[/bold] ({len(docs)} documents)")
+            console.print(f'  {i}. [bold]"{code_name}"[/bold] ({len(docs)} documents)')
             console.print(f"     → Canonical: [green]{_short_path(canonical)}[/green]")
             for sug in s.get("suggestions", []):
                 doc = _short_path(sug.get("document", "?"))
@@ -539,9 +558,7 @@ def render_markdown(
     n_pairs = len(similarity_pairs)
     n_recs = len(recommendations)
     pipeline_dots = (
-        "  ".join(f"● {DOCS_STAGE_LABELS.get(s, s)}" for s in stages_run)
-        if stages_run
-        else "—"
+        "  ".join(f"● {DOCS_STAGE_LABELS.get(s, s)}" for s in stages_run) if stages_run else "—"
     )
     docs_map = _docs_map(result)
     n_profiled_docs = len(result.document_descriptors) or n_docs
@@ -554,23 +571,26 @@ def render_markdown(
     metric_cards = [_metric_card(n_docs, "Documents")]
     track_bits: list[str] = []
     if docs_map_ran:
-        metric_cards.extend([
-            _metric_card(n_docs_map_groups, "Docs Map Groups"),
-            _metric_card(n_consolidation_clusters, "Docs Map Clusters"),
-        ])
+        metric_cards.extend(
+            [
+                _metric_card(n_docs_map_groups, "Docs Map Groups"),
+                _metric_card(n_consolidation_clusters, "Docs Map Clusters"),
+            ]
+        )
         track_bits.append(
             f"{DOCS_MAP}: {n_profiled_docs} docs profiled, "
             f"{n_docs_map_groups} groups, {n_docs_map_facets} facets, "
             f"{n_consolidation_clusters} consolidation clusters."
         )
     if section_match_ran:
-        metric_cards.extend([
-            _metric_card(n_pairs, "Matched Section Pairs"),
-            _metric_card(n_recs, "Section Match Recs"),
-        ])
+        metric_cards.extend(
+            [
+                _metric_card(n_pairs, "Matched Section Pairs"),
+                _metric_card(n_recs, "Section Match Recs"),
+            ]
+        )
         track_bits.append(
-            f"{DOCS_SECTION_MATCH}: {n_pairs} matched section pairs, "
-            f"{n_recs} recommendations."
+            f"{DOCS_SECTION_MATCH}: {n_pairs} matched section pairs, {n_recs} recommendations."
         )
     if not docs_map_ran and not section_match_ran:
         metric_cards.append(_metric_card(len(result.chunks), "Sections"))
@@ -588,11 +608,11 @@ def render_markdown(
 
     lines.append(
         '<div class="dashboard">\n'
-        f'{"".join(metric_cards)}'
+        f"{''.join(metric_cards)}"
         f'  <div class="pipeline-bar">Pipeline: {pipeline_dots}</div>\n'
         f'  <div class="track-summary">{track_summary}</div>\n'
         f'  <div class="scan-context">Scanned: <code>{scan_path_str}</code>{git_name}</div>\n'
-        '</div>\n'
+        "</div>\n"
     )
 
     overview = _build_run_overview(
@@ -607,10 +627,7 @@ def render_markdown(
         result,
         similarity_pairs,
     )
-    section_titles = {
-        section["id"]: section["title_numbered"]
-        for section in report_sections
-    }
+    section_titles = {section["id"]: section["title_numbered"] for section in report_sections}
     child_titles = {
         child["id"]: child["title_numbered"]
         for section in report_sections
@@ -636,8 +653,7 @@ def render_markdown(
     lines.append("|--------|-----|----------|---------|")
     for aspect in overview["docs_track_aspects"].values():
         results = ", ".join(
-            f"{key.replace('_', ' ')}: {value}"
-            for key, value in aspect["results"].items()
+            f"{key.replace('_', ' ')}: {value}" for key, value in aspect["results"].items()
         )
         lines.append(
             f"| {aspect['label']} "
@@ -702,14 +718,18 @@ def render_markdown(
                         child_body.append(
                             _details_block(
                                 f"{len(documents)} documents",
-                                _html_list([_display_path(str(doc), project_root) for doc in documents]),
+                                _html_list(
+                                    [_display_path(str(doc), project_root) for doc in documents]
+                                ),
                                 class_name="report-list",
                             )
                         )
                     child_blocks.append(
                         _details_block(
                             f"{child_label} ({doc_count} docs)",
-                            "\n".join(child_body) if child_body else "<p>No additional details.</p>",
+                            "\n".join(child_body)
+                            if child_body
+                            else "<p>No additional details.</p>",
                             class_name="report-item",
                         )
                     )
@@ -756,7 +776,9 @@ def render_markdown(
                     facet_body.append(
                         _details_block(
                             f"{label} ({len(docs)} docs)",
-                            "\n".join(value_body) if value_body else "<p>No additional details.</p>",
+                            "\n".join(value_body)
+                            if value_body
+                            else "<p>No additional details.</p>",
                             class_name="report-item",
                         )
                     )
@@ -863,7 +885,9 @@ def render_markdown(
             heading_b = " > ".join(pair.chunk_b.heading_path) or "(no heading)"
             loc_a = f"`{_short_path(pair.chunk_a.document_path)}`: {heading_a}"
             loc_b = f"`{_short_path(pair.chunk_b.document_path)}`: {heading_b}"
-            sim_str = f"{pair.embedding_similarity:.3f}" if pair.embedding_similarity is not None else "—"
+            sim_str = (
+                f"{pair.embedding_similarity:.3f}" if pair.embedding_similarity is not None else "—"
+            )
             lines.append(f"| {sim_str} | {loc_a} | {loc_b} |")
         lines.append("")
 
@@ -876,7 +900,9 @@ def render_markdown(
             name_a = _short_path(analysis.doc_a_path)
             name_b = _short_path(analysis.doc_b_path)
             lines.append(f"### `{name_a}` / `{name_b}`\n")
-            lines.append(f"- **Relationship**: {analysis.relationship} ({analysis.confidence} confidence)")
+            lines.append(
+                f"- **Relationship**: {analysis.relationship} ({analysis.confidence} confidence)"
+            )
             lines.append(f"- **`{name_a}`**: {analysis.doc_a_purpose}")
             lines.append(f"- **`{name_b}`**: {analysis.doc_b_purpose}\n")
 
@@ -944,7 +970,7 @@ def render_markdown(
             code_name = s.get("code", "?")
             docs = s.get("documents", [])
             canonical = s.get("canonical", "?")
-            lines.append(f"{i}. **\"{code_name}\"** ({len(docs)} documents)")
+            lines.append(f'{i}. **"{code_name}"** ({len(docs)} documents)')
             lines.append(f"   - Canonical: `{_short_path(canonical)}`")
             for sug in s.get("suggestions", []):
                 doc = _short_path(sug.get("document", "?"))
@@ -986,6 +1012,7 @@ def render_markdown(
     )
     if has_settings:
         from dryscope import __version__
+
         meta = _build_metadata(settings, project_root)
         lines.append("### Configuration\n")
         lines.append(f"- **Date**: {meta['timestamp']}")
@@ -1048,8 +1075,7 @@ def render_json(
     if result.categories:
         data["categories"] = {
             cat.name: {
-                code.name: sorted(set(c.document_path for c in code.chunks))
-                for code in cat.codes
+                code.name: sorted({c.document_path for c in code.chunks}) for code in cat.codes
             }
             for cat in result.categories
         }
@@ -1222,7 +1248,7 @@ def _wrap_doc_pairs_in_details(html: str) -> str:
     import re
 
     # Match h3 headers containing " / " (doc-pair pattern, may contain <code> tags)
-    pattern = r'(<h3>(.*?/.*?)</h3>)'
+    pattern = r"(<h3>(.*?/.*?)</h3>)"
     parts = re.split(pattern, html)
 
     if len(parts) <= 1:
@@ -1232,23 +1258,21 @@ def _wrap_doc_pairs_in_details(html: str) -> str:
     rebuilt: list[str] = [parts[0]]
     i = 1
     while i < len(parts):
-        full_h3 = parts[i]       # <h3>...</h3>
-        h3_text = parts[i + 1]   # inner text
+        h3_text = parts[i + 1]  # inner text
         # Content after this h3, up to next section
         after = parts[i + 2] if i + 2 < len(parts) else ""
 
         # Split 'after' at the next h2 or h3 boundary
-        next_heading = re.search(r'(?=<h[23]>)', after)
+        next_heading = re.search(r"(?=<h[23]>)", after)
         if next_heading:
-            section_content = after[:next_heading.start()]
-            remaining = after[next_heading.start():]
+            section_content = after[: next_heading.start()]
+            remaining = after[next_heading.start() :]
         else:
             section_content = after
             remaining = ""
 
         rebuilt.append(
-            f"<details>\n<summary>{h3_text.strip()}</summary>\n"
-            f"{section_content}\n</details>\n"
+            f"<details>\n<summary>{h3_text.strip()}</summary>\n{section_content}\n</details>\n"
         )
         rebuilt.append(remaining)
         i += 3
@@ -1260,7 +1284,7 @@ def _wrap_top_level_sections_in_details(html: str) -> str:
     """Wrap each top-level h2 report section in an open collapsible details block."""
     import re
 
-    pattern = r'(<h2>(.*?)</h2>)'
+    pattern = r"(<h2>(.*?)</h2>)"
     parts = re.split(pattern, html)
     if len(parts) <= 1:
         return html
@@ -1270,18 +1294,18 @@ def _wrap_top_level_sections_in_details(html: str) -> str:
     while i < len(parts):
         section_title = parts[i + 1].strip()
         after = parts[i + 2] if i + 2 < len(parts) else ""
-        next_heading = re.search(r'(?=<h2>)', after)
+        next_heading = re.search(r"(?=<h2>)", after)
         if next_heading:
-            section_content = after[:next_heading.start()]
-            remaining = after[next_heading.start():]
+            section_content = after[: next_heading.start()]
+            remaining = after[next_heading.start() :]
         else:
             section_content = after
             remaining = ""
         rebuilt.append(
             '<details class="report-section" open>\n'
             f'<summary><span class="report-section-title">{section_title}</span></summary>\n'
-            f'{section_content}\n'
-            '</details>\n'
+            f"{section_content}\n"
+            "</details>\n"
         )
         rebuilt.append(remaining)
         i += 3
@@ -1293,7 +1317,7 @@ def _wrap_subsections_in_details(html: str) -> str:
     """Wrap each h3 subsection in an open collapsible details block."""
     import re
 
-    pattern = r'(<h3>(.*?)</h3>)'
+    pattern = r"(<h3>(.*?)</h3>)"
     parts = re.split(pattern, html)
     if len(parts) <= 1:
         return html
@@ -1303,18 +1327,18 @@ def _wrap_subsections_in_details(html: str) -> str:
     while i < len(parts):
         subsection_title = parts[i + 1].strip()
         after = parts[i + 2] if i + 2 < len(parts) else ""
-        next_top_level = re.search(r'(?=<h2>)', after)
+        next_top_level = re.search(r"(?=<h2>)", after)
         if next_top_level:
-            subsection_content = after[:next_top_level.start()]
-            remaining = after[next_top_level.start():]
+            subsection_content = after[: next_top_level.start()]
+            remaining = after[next_top_level.start() :]
         else:
             subsection_content = after
             remaining = ""
         rebuilt.append(
             '<details class="report-subsection" open>\n'
             f'<summary><span class="report-subsection-title">{subsection_title}</span></summary>\n'
-            f'{subsection_content}\n'
-            '</details>\n'
+            f"{subsection_content}\n"
+            "</details>\n"
         )
         rebuilt.append(remaining)
         i += 3
@@ -1333,7 +1357,7 @@ def _inject_recommendation_slider(html: str) -> str:
 
     # Find the section-similarity recommendations heading and the first table after it.
     rec_match = re.search(
-        r'<h[23][^>]*>(?:\d+(?:\.\d+)*\.\s*)?Section Match Recommendations</h[23]>',
+        r"<h[23][^>]*>(?:\d+(?:\.\d+)*\.\s*)?Section Match Recommendations</h[23]>",
         html,
         re.IGNORECASE,
     )
@@ -1341,19 +1365,15 @@ def _inject_recommendation_slider(html: str) -> str:
         return html
 
     # Find the first <table> after the recommendations heading.
-    next_heading = re.search(r'<h[23][^>]*>', html[rec_match.end():], flags=re.IGNORECASE)
-    section_end = (
-        rec_match.end() + next_heading.start()
-        if next_heading
-        else len(html)
-    )
-    table_start = html.find('<table>', rec_match.end())
+    next_heading = re.search(r"<h[23][^>]*>", html[rec_match.end() :], flags=re.IGNORECASE)
+    section_end = rec_match.end() + next_heading.start() if next_heading else len(html)
+    table_start = html.find("<table>", rec_match.end())
     if table_start == -1 or table_start >= section_end:
         return html
-    table_end = html.find('</table>', table_start)
+    table_end = html.find("</table>", table_start)
     if table_end == -1:
         return html
-    table_end += len('</table>')
+    table_end += len("</table>")
 
     table_html = html[table_start:table_end]
 
@@ -1361,32 +1381,32 @@ def _inject_recommendation_slider(html: str) -> str:
     def _add_data_score(match: re.Match) -> str:
         row = match.group(0)
         # Extract score from second td (first td is rank #)
-        tds = re.findall(r'<td>(.*?)</td>', row)
+        tds = re.findall(r"<td>(.*?)</td>", row)
         if len(tds) >= 2:
             try:
                 score = int(tds[1].strip())
-                return row.replace('<tr>', f'<tr data-score="{score}">', 1)
+                return row.replace("<tr>", f'<tr data-score="{score}">', 1)
             except ValueError:
                 pass
         return row
 
     # Only process rows in tbody (skip header row)
-    thead_end = table_html.find('</thead>')
+    thead_end = table_html.find("</thead>")
     if thead_end != -1:
-        thead_part = table_html[:thead_end + len('</thead>')]
-        tbody_part = table_html[thead_end + len('</thead>'):]
+        thead_part = table_html[: thead_end + len("</thead>")]
+        tbody_part = table_html[thead_end + len("</thead>") :]
     else:
         # No explicit thead — skip the first <tr> (header row)
-        first_tr_end = table_html.find('</tr>') + len('</tr>')
+        first_tr_end = table_html.find("</tr>") + len("</tr>")
         thead_part = table_html[:first_tr_end]
         tbody_part = table_html[first_tr_end:]
 
-    tbody_part = re.sub(r'<tr>.*?</tr>', _add_data_score, tbody_part, flags=re.DOTALL)
+    tbody_part = re.sub(r"<tr>.*?</tr>", _add_data_score, tbody_part, flags=re.DOTALL)
 
-    new_table = f'<table id="rec-table">{thead_part[len("<table>"):]}{tbody_part}'
+    new_table = f'<table id="rec-table">{thead_part[len("<table>") :]}{tbody_part}'
 
     # Count rows for slider label
-    row_count = len(re.findall(r'data-score=', tbody_part))
+    row_count = len(re.findall(r"data-score=", tbody_part))
 
     slider_html = (
         '<div class="slider-container">'
@@ -1394,7 +1414,7 @@ def _inject_recommendation_slider(html: str) -> str:
         '<input type="range" id="score-slider" min="0" max="100" value="0">'
         '<span class="slider-value" id="slider-label">0</span>'
         f'<span id="rec-count">{row_count} of {row_count}</span>'
-        '</div>\n'
+        "</div>\n"
     )
 
     return html[:table_start] + slider_html + new_table + html[table_end:]
@@ -1418,7 +1438,9 @@ def _git_commit(root: Path) -> str | None:
     try:
         proc = subprocess.run(
             ["git", "-C", str(root), "rev-parse", "HEAD"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
         if proc.returncode == 0:
             return proc.stdout.strip()
@@ -1430,6 +1452,7 @@ def _git_commit(root: Path) -> str | None:
 def _build_metadata(settings: Settings, project_root: Path) -> dict:
     """Build metadata dict for JSON outputs."""
     from dryscope import __version__
+
     return {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "project_root": str(project_root),
@@ -1450,6 +1473,7 @@ def _build_metadata(settings: Settings, project_root: Path) -> dict:
 
 def _pair_to_rich_dict(pair: OverlapPair, root: Path) -> dict:
     """Convert an OverlapPair to an LLM-friendly dict with relative paths and snippets."""
+
     def _chunk_dict(chunk):
         return {
             "file": _relative_path(chunk.document_path, root),
@@ -1458,6 +1482,7 @@ def _pair_to_rich_dict(pair: OverlapPair, root: Path) -> dict:
             "line_end": chunk.line_end,
             "content_snippet": chunk.content[:300],
         }
+
     return {
         # Keys for deserialization (matching back to in-memory Chunk objects)
         "chunk_a_key": f"{pair.chunk_a.document_path}:{pair.chunk_a.line_start}",
@@ -1514,9 +1539,9 @@ def serialize_doc_pair_review_stage(
         },
         "categories": {
             cat.name: {
-                code.name: sorted(set(
-                    _relative_path(c.document_path, project_root) for c in code.chunks
-                ))
+                code.name: sorted(
+                    {_relative_path(c.document_path, project_root) for c in code.chunks}
+                )
                 for code in cat.codes
             }
             for cat in categories
@@ -1551,8 +1576,14 @@ def serialize_doc_pair_review_stage(
 # ─── Prioritized Recommendations ───────────────────────────────────────
 
 _BOILERPLATE_KEYWORDS = {
-    "table of contents", "toc", "license", "changelog", "change log",
-    "release notes", "contributing", "code of conduct",
+    "table of contents",
+    "toc",
+    "license",
+    "changelog",
+    "change log",
+    "release notes",
+    "contributing",
+    "code of conduct",
 }
 
 
@@ -1636,7 +1667,6 @@ def _merge_related_recommendations(recommendations: list[dict]) -> list[dict]:
         remaining = list(recs)
         while remaining:
             seed = remaining.pop(0)
-            seed_files = {f["file"] for f in seed["affected_files"]}
             cluster = [seed]
 
             changed = True
@@ -1673,7 +1703,9 @@ def _merge_related_recommendations(recommendations: list[dict]) -> list[dict]:
             ]
             action = seed["suggested_action"]
             overlap_type = seed["overlap_type"]
-            group_score = min(100, max(best_score, best_score + min(15, 3 * (len(cluster_files) - 2))))
+            group_score = min(
+                100, max(best_score, best_score + min(15, 3 * (len(cluster_files) - 2)))
+            )
             file_list = ", ".join(f"`{Path(f).name}`" for f in sorted(cluster_files)[:4])
             if len(cluster_files) > 4:
                 file_list += f", and {len(cluster_files) - 4} more"
@@ -1695,14 +1727,16 @@ def _merge_related_recommendations(recommendations: list[dict]) -> list[dict]:
                     f"({file_list}). Consider keeping one canonical explanation and replacing the rest with brief references."
                 )
 
-            merged_output.append({
-                "priority_score": group_score,
-                "affected_files": affected_files,
-                "overlap_type": overlap_type,
-                "embedding_similarity": round(best_similarity, 4),
-                "suggested_action": action,
-                "action_detail": detail,
-            })
+            merged_output.append(
+                {
+                    "priority_score": group_score,
+                    "affected_files": affected_files,
+                    "overlap_type": overlap_type,
+                    "embedding_similarity": round(best_similarity, 4),
+                    "suggested_action": action,
+                    "action_detail": detail,
+                }
+            )
 
     merged_output.sort(key=lambda r: r["priority_score"], reverse=True)
     for i, rec in enumerate(merged_output, 1):
@@ -1738,10 +1772,13 @@ def build_recommendations(
     for (file_a, file_b), pairs in file_pair_groups.items():
         # Use the best (highest) similarity score
         best_pair = max(pairs, key=lambda p: p.embedding_similarity or 0)
-        best_similarity = best_pair.embedding_similarity if best_pair.embedding_similarity is not None else 0
+        best_similarity = (
+            best_pair.embedding_similarity if best_pair.embedding_similarity is not None else 0
+        )
 
-        has_coding = bool(best_pair.shared_codes and
-                          any(c in suggestion_codes for c in best_pair.shared_codes))
+        has_coding = bool(
+            best_pair.shared_codes and any(c in suggestion_codes for c in best_pair.shared_codes)
+        )
 
         # Priority scoring
         score = best_similarity * 60
@@ -1757,14 +1794,18 @@ def build_recommendations(
         sections_a: list[dict] = []
         sections_b: list[dict] = []
         for p in pairs:
-            sections_a.append({
-                "sections": p.chunk_a.heading_path or ["(no heading)"],
-                "line_range": [p.chunk_a.line_start, p.chunk_a.line_end],
-            })
-            sections_b.append({
-                "sections": p.chunk_b.heading_path or ["(no heading)"],
-                "line_range": [p.chunk_b.line_start, p.chunk_b.line_end],
-            })
+            sections_a.append(
+                {
+                    "sections": p.chunk_a.heading_path or ["(no heading)"],
+                    "line_range": [p.chunk_a.line_start, p.chunk_a.line_end],
+                }
+            )
+            sections_b.append(
+                {
+                    "sections": p.chunk_b.heading_path or ["(no heading)"],
+                    "line_range": [p.chunk_b.line_start, p.chunk_b.line_end],
+                }
+            )
 
         action = _suggest_action(overlap_type, best_pair)
 
@@ -1794,20 +1835,21 @@ def build_recommendations(
                 f"Consider replacing the shorter version with a brief reference to the canonical source."
             )
 
-        recommendations.append({
-            "priority_score": score,
-            "affected_files": [
-                {"file": file_a, "sections": sections_a},
-                {"file": file_b, "sections": sections_b},
-            ],
-            "overlap_type": overlap_type,
-            "embedding_similarity": (
-                round(best_similarity, 4)
-                if best_similarity is not None else None
-            ),
-            "suggested_action": action,
-            "action_detail": detail,
-        })
+        recommendations.append(
+            {
+                "priority_score": score,
+                "affected_files": [
+                    {"file": file_a, "sections": sections_a},
+                    {"file": file_b, "sections": sections_b},
+                ],
+                "overlap_type": overlap_type,
+                "embedding_similarity": (
+                    round(best_similarity, 4) if best_similarity is not None else None
+                ),
+                "suggested_action": action,
+                "action_detail": detail,
+            }
+        )
 
     return _merge_related_recommendations(recommendations)
 
@@ -1825,7 +1867,9 @@ def render_final_report(
 ) -> dict:
     """Build the complete report.json for persistent storage."""
     recommendations = build_recommendations(
-        similarity_pairs, suggestions, project_root,
+        similarity_pairs,
+        suggestions,
+        project_root,
     )
     overview = _build_run_overview(
         result,

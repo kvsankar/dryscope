@@ -2,8 +2,6 @@
 
 from pathlib import Path
 
-import pytest
-
 from dryscope.config import (
     DEFAULT_INCLUDE,
     Settings,
@@ -11,7 +9,6 @@ from dryscope.config import (
     load_settings,
     load_toml,
 )
-
 
 # ── Settings defaults ───────────────────────────────────────────────────
 
@@ -115,8 +112,7 @@ class TestLoadToml:
     def test_valid_toml(self, tmp_path):
         toml_file = tmp_path / ".dryscope.toml"
         toml_file.write_text(
-            '[code]\nmin_lines = 10\nthreshold = 0.85\n\n'
-            '[docs]\ninclude = ["*.md"]\n'
+            '[code]\nmin_lines = 10\nthreshold = 0.85\n\n[docs]\ninclude = ["*.md"]\n'
         )
         data = load_toml(toml_file)
         assert data["code"]["min_lines"] == 10
@@ -125,7 +121,7 @@ class TestLoadToml:
 
     def test_toml_applied_to_settings(self, tmp_path):
         toml_file = tmp_path / ".dryscope.toml"
-        toml_file.write_text('[code]\nmin_lines = 12\nthreshold = 0.80\n')
+        toml_file.write_text("[code]\nmin_lines = 12\nthreshold = 0.80\n")
         s = load_settings(tmp_path)
         assert s.code_min_lines == 12
         assert s.code_threshold == 0.80
@@ -142,14 +138,14 @@ class TestFindConfigFile:
 
     def test_finds_config_in_scan_path(self, tmp_path):
         config = tmp_path / ".dryscope.toml"
-        config.write_text('[code]\nmin_lines = 5\n')
+        config.write_text("[code]\nmin_lines = 5\n")
         result = find_config_file(tmp_path)
         assert result is not None
         assert result == config
 
     def test_finds_config_for_file_path(self, tmp_path):
         config = tmp_path / ".dryscope.toml"
-        config.write_text('[code]\nmin_lines = 5\n')
+        config.write_text("[code]\nmin_lines = 5\n")
         some_file = tmp_path / "foo.py"
         some_file.write_text("pass")
         result = find_config_file(some_file)
@@ -165,10 +161,10 @@ class TestSections:
         toml_file = tmp_path / ".dryscope.toml"
         toml_file.write_text(
             '[code]\nmin_lines = 8\nthreshold = 0.88\nembedding_model = "custom-model"\n'
-            'escalate_refactor_min_lines = 25\n'
-            'escalate_refactor_min_actionability = 1.5\n'
-            'escalate_refactor_min_units = 4\n'
-            'keep_same_file_refactors = true\n'
+            "escalate_refactor_min_lines = 25\n"
+            "escalate_refactor_min_actionability = 1.5\n"
+            "escalate_refactor_min_units = 4\n"
+            "keep_same_file_refactors = true\n"
         )
         s = load_settings(tmp_path)
         assert s.code_min_lines == 8
@@ -183,7 +179,7 @@ class TestSections:
         toml_file = tmp_path / ".dryscope.toml"
         toml_file.write_text(
             '[docs]\ninclude = ["*.rst"]\nthreshold_similarity = 0.75\nmin_content_words = 25\n'
-            'intent_max_docs = 42\nllm_max_doc_pairs = 99\nintent_skip_without_similarity_min_docs = 12\n'
+            "intent_max_docs = 42\nllm_max_doc_pairs = 99\nintent_skip_without_similarity_min_docs = 12\n"
         )
         s = load_settings(tmp_path)
         assert s.include == ["*.rst"]
@@ -237,7 +233,7 @@ class TestSections:
         toml_file = tmp_path / ".dryscope.toml"
         toml_file.write_text(
             '[llm]\nbackend = "cli"\ncli_strip_api_key = false\ncli_permission_mode = "bypassPermissions"\n'
-            'cli_dangerously_skip_permissions = true\n'
+            "cli_dangerously_skip_permissions = true\n"
         )
         s = load_settings(tmp_path)
         assert s.backend == "cli"
@@ -247,9 +243,7 @@ class TestSections:
 
     def test_cache_section_from_toml(self, tmp_path):
         toml_file = tmp_path / ".dryscope.toml"
-        toml_file.write_text(
-            '[cache]\nenabled = false\npath = "/tmp/dryscope.db"\n'
-        )
+        toml_file.write_text('[cache]\nenabled = false\npath = "/tmp/dryscope.db"\n')
         s = load_settings(tmp_path)
         assert s.cache_enabled is False
         assert s.cache_path == "/tmp/dryscope.db"

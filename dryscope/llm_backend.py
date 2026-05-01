@@ -56,10 +56,10 @@ def _litellm_completion(prompt: str, model: str, api_key: str | None = None) -> 
     """Call LLM via litellm."""
     import litellm
 
-    kwargs: dict = dict(
-        model=model,
-        messages=[{"role": "user", "content": prompt}],
-    )
+    kwargs: dict = {
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+    }
     if api_key:
         kwargs["api_key"] = api_key
     response = litellm.completion(**kwargs)
@@ -98,16 +98,12 @@ def _cli_completion(
         env=env,
     )
     if result.returncode != 0:
-        raise RuntimeError(
-            f"claude CLI failed (exit {result.returncode}): {result.stderr.strip()}"
-        )
+        raise RuntimeError(f"claude CLI failed (exit {result.returncode}): {result.stderr.strip()}")
 
     try:
         data = json.loads(result.stdout)
     except json.JSONDecodeError as exc:
-        raise RuntimeError(
-            f"claude CLI returned non-JSON output: {result.stdout[:200]!r}"
-        ) from exc
+        raise RuntimeError(f"claude CLI returned non-JSON output: {result.stdout[:200]!r}") from exc
     return data.get("result") or data.get("content", result.stdout)
 
 
@@ -138,13 +134,9 @@ def _ollama_completion(
             payload = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(
-            f"ollama API failed ({exc.code}): {detail[:300]}"
-        ) from exc
+        raise RuntimeError(f"ollama API failed ({exc.code}): {detail[:300]}") from exc
     except urllib.error.URLError as exc:
-        raise RuntimeError(
-            f"ollama API unavailable at {host}: {exc.reason}"
-        ) from exc
+        raise RuntimeError(f"ollama API unavailable at {host}: {exc.reason}") from exc
 
     message = payload.get("message")
     if isinstance(message, dict):
@@ -182,13 +174,11 @@ def _codex_cli_completion(prompt: str, model: str | None = None) -> str:
         )
         if result.returncode != 0:
             stderr = result.stderr.strip() or result.stdout.strip()
-            raise RuntimeError(
-                f"codex exec failed (exit {result.returncode}): {stderr}"
-            )
+            raise RuntimeError(f"codex exec failed (exit {result.returncode}): {stderr}")
 
         content = ""
         if os.path.exists(out_path):
-            with open(out_path, "r", encoding="utf-8") as handle:
+            with open(out_path, encoding="utf-8") as handle:
                 content = handle.read().strip()
         if content:
             return content

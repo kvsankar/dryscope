@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import re
 import hashlib
 import json
+import re
 import sys
 from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -15,10 +15,24 @@ from pathlib import Path
 from dryscope.config import DEFAULT_DOCS_MAP_FACET_DIMENSIONS, DEFAULT_DOCS_MAP_FACET_VALUES
 from dryscope.terminology import DOCS_MAP
 
-
 _TOPIC_STOPWORDS = {
-    "and", "the", "for", "with", "from", "into", "using", "about", "documentation",
-    "docs", "guide", "guides", "reference", "overview", "status", "plan", "plans",
+    "and",
+    "the",
+    "for",
+    "with",
+    "from",
+    "into",
+    "using",
+    "about",
+    "documentation",
+    "docs",
+    "guide",
+    "guides",
+    "reference",
+    "overview",
+    "status",
+    "plan",
+    "plans",
 }
 
 TAXONOMY_LLM_VERSION = "taxonomy_llm_v2"
@@ -46,7 +60,9 @@ def topic_similarity(a: str, b: str) -> float:
     seq_score = SequenceMatcher(None, norm_a, norm_b).ratio()
     tokens_a = set(norm_a.split())
     tokens_b = set(norm_b.split())
-    token_score = len(tokens_a & tokens_b) / len(tokens_a | tokens_b) if tokens_a and tokens_b else 0.0
+    token_score = (
+        len(tokens_a & tokens_b) / len(tokens_a | tokens_b) if tokens_a and tokens_b else 0.0
+    )
     return max(seq_score, token_score)
 
 
@@ -105,7 +121,7 @@ class TopicTaxonomy:
             "canonical_topics": canonical_topics,
             "topic_document_clusters": topic_document_clusters,
             "raw_to_canonical": dict(sorted(self.raw_to_canonical.items())),
-            "doc_topics": {doc: topics for doc, topics in sorted(self.doc_topics.items())},
+            "doc_topics": dict(sorted(self.doc_topics.items())),
             "co_occurrence": self.co_occurrence,
             "method": self.method,
         }
@@ -250,7 +266,7 @@ def _build_taxonomy_from_mapping(
     for topics in canonical_doc_topics.values():
         unique_topics = sorted(set(topics))
         for i, topic_a in enumerate(unique_topics):
-            for topic_b in unique_topics[i + 1:]:
+            for topic_b in unique_topics[i + 1 :]:
                 co_counts[(topic_a, topic_b)] += 1
 
     co_occurrence = [
@@ -343,7 +359,7 @@ def _cluster_groups_with_llm(
     groups: list[dict],
     *,
     model: str,
-    cache: "object | None",
+    cache: object | None,
     backend: str,
     batch_size: int,
     existing_limit: int,
@@ -359,7 +375,7 @@ def _cluster_groups_with_llm(
     group_to_canonical: dict[str, str] = {}
     canonical_counts: Counter[str] = Counter()
     batches = [
-        (batch_start, groups[batch_start:batch_start + batch_size])
+        (batch_start, groups[batch_start : batch_start + batch_size])
         for batch_start in range(0, len(groups), batch_size)
     ]
 
@@ -470,12 +486,11 @@ Respond with ONLY valid JSON:
 
     reconciled = _reconcile_canonical_names(group_to_canonical.values())
     return {
-        raw: reconciled.get(canonical, canonical)
-        for raw, canonical in group_to_canonical.items()
+        raw: reconciled.get(canonical, canonical) for raw, canonical in group_to_canonical.items()
     }
 
 
-def _reconcile_canonical_names(canonical_names: "object") -> dict[str, str]:
+def _reconcile_canonical_names(canonical_names: object) -> dict[str, str]:
     """Deterministically merge near-identical canonical labels across batches."""
     counts = Counter(
         normalize_topic_text(str(name))
@@ -517,7 +532,7 @@ def build_canonical_taxonomy(
     fuzzy_threshold: float = 0.86,
     max_co_occurrence: int = 30,
     llm_model: str | None = None,
-    cache: "object | None" = None,
+    cache: object | None = None,
     backend: str = "litellm",
     llm_batch_size: int = 100,
     llm_existing_limit: int = 200,
@@ -553,9 +568,7 @@ def build_canonical_taxonomy(
 
     groups = _preliminary_groups(raw_to_preliminary, raw_counts, raw_docs)
     llm_groups = [
-        group
-        for group in groups
-        if int(group.get("document_count") or 0) >= llm_min_document_count
+        group for group in groups if int(group.get("document_count") or 0) >= llm_min_document_count
     ]
     group_to_canonical = _cluster_groups_with_llm(
         llm_groups,
@@ -594,10 +607,7 @@ def _docs_map_topic_cluster_payload(
     clusters: list[dict] = []
     singles: list[dict] = []
     for topic in taxonomy.get("canonical_topics", []):
-        documents = [
-            _compact_doc_path(str(doc))
-            for doc in topic.get("documents", [])[:8]
-        ]
+        documents = [_compact_doc_path(str(doc)) for doc in topic.get("documents", [])[:8]]
         record = {
             "topic": topic.get("name"),
             "document_count": topic.get("document_count", 0),
@@ -617,9 +627,7 @@ def _docs_map_topic_cluster_payload(
             str(c.get("topic") or ""),
         )
     )
-    singles.sort(
-        key=lambda c: (-int(c.get("mention_count") or 0), str(c.get("topic") or ""))
-    )
+    singles.sort(key=lambda c: (-int(c.get("mention_count") or 0), str(c.get("topic") or "")))
     return clusters[:max_topic_coverage_clusters], singles[:max_single_doc_topics]
 
 
@@ -681,7 +689,9 @@ def _descriptor_facet_payload(
     summaries: dict[str, dict[str, dict]] = {facet: {} for facet in facet_dimensions}
     for doc, descriptor in document_descriptors.items():
         compact_doc = _compact_doc_path(str(doc))
-        extra_facets = descriptor.get("facets") if isinstance(descriptor.get("facets"), dict) else {}
+        extra_facets = (
+            descriptor.get("facets") if isinstance(descriptor.get("facets"), dict) else {}
+        )
         for facet in facet_dimensions:
             is_multi = known_multi_value.get(facet, True)
             raw_value = descriptor.get(facet)
@@ -771,7 +781,7 @@ def build_docs_map(
     facet_dimensions: list[str] | None = None,
     facet_values: dict[str, list[str]] | None = None,
     llm_model: str | None = None,
-    cache: "object | None" = None,
+    cache: object | None = None,
     backend: str = "litellm",
     max_topic_coverage_clusters: int = 160,
     max_single_doc_topics: int = 40,
@@ -805,9 +815,7 @@ def build_docs_map(
     facet_seed = {
         "facet_dimensions": facet_dimensions,
         "suggested_values": {
-            name: facet_values.get(name, [])
-            for name in facet_dimensions
-            if facet_values.get(name)
+            name: facet_values.get(name, []) for name in facet_dimensions if facet_values.get(name)
         },
     }
     payload = {

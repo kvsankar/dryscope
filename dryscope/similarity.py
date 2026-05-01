@@ -148,7 +148,4 @@ def cluster_duplicates(
         root = uf.find(i)
         clusters.setdefault(root, []).append(i)
 
-    return [
-        members for members in clusters.values()
-        if 2 <= len(members) <= max_cluster_size
-    ]
+    return [members for members in clusters.values() if 2 <= len(members) <= max_cluster_size]

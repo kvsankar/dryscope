@@ -44,6 +44,7 @@ def _load_dotenv() -> None:
             if key and key not in os.environ:
                 os.environ[key] = value
 
+
 logger = logging.getLogger(__name__)
 
 VERDICT_REFACTOR = "refactor"
@@ -117,7 +118,9 @@ def _path_markers(path: str) -> set[str]:
     markers: set[str] = set()
     if parts & _EXAMPLE_MARKERS:
         markers.add("example")
-    if parts & _TEST_MARKERS or any(token in filename for token in (".test.", ".spec.", "test_", "_test")):
+    if parts & _TEST_MARKERS or any(
+        token in filename for token in (".test.", ".spec.", "test_", "_test")
+    ):
         markers.add("test")
     if parts & _BENCH_MARKERS or any(token in filename for token in (".bench.", ".benchmark.")):
         markers.add("benchmark")
@@ -213,10 +216,7 @@ def verify_cluster(
         units_text=units_text,
     )
 
-    prompt = (
-        f"{SYSTEM_PROMPT}\n\n"
-        f"{user_msg}"
-    )
+    prompt = f"{SYSTEM_PROMPT}\n\n{user_msg}"
 
     response_text = llm_completion(
         prompt,

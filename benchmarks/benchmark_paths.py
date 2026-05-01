@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 from datetime import datetime
 from pathlib import Path
-import re
 
 
 def benchmark_root() -> Path:

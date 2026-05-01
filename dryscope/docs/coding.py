@@ -8,12 +8,15 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from dryscope.cache import Cache
-from dryscope.llm_backend import completion
 from dryscope.docs.models import (
-    Category, Chunk, Code, DocPairAnalysis,
-    OverlapPair, TopicAnalysis,
+    Category,
+    Chunk,
+    Code,
+    DocPairAnalysis,
+    OverlapPair,
+    TopicAnalysis,
 )
-
+from dryscope.llm_backend import completion
 
 DOC_PAIR_VERSION = "docpair_v2"
 
@@ -113,7 +116,7 @@ def _prepare_doc_content(
     if remaining > 200 and other_parts:
         other_text = "\n\n".join(other_parts)
         if len(other_text) > remaining:
-            other_text = other_text[:remaining - 20] + "\n[... truncated]"
+            other_text = other_text[: remaining - 20] + "\n[... truncated]"
         return overlap_text + "\n\n---\n(Other sections)\n\n" + other_text
 
     return overlap_text
@@ -137,7 +140,7 @@ def analyze_doc_pair(
     doc_b_chunks: list[Chunk],
     overlap_pairs: list[OverlapPair],
     model: str,
-    cache: "Cache | None",
+    cache: Cache | None,
     backend: str = "litellm",
     intent_evidence: list[dict] | None = None,
     ollama_host: str | None = None,
@@ -308,8 +311,7 @@ def doc_pairs_to_codes_and_categories(
         cat_map.setdefault(code.category, []).append(code)
 
     categories = [
-        Category(name=cat_name, codes=cat_codes)
-        for cat_name, cat_codes in sorted(cat_map.items())
+        Category(name=cat_name, codes=cat_codes) for cat_name, cat_codes in sorted(cat_map.items())
     ]
 
     # Build suggestions from non-"keep" topics
@@ -320,22 +322,29 @@ def doc_pairs_to_codes_and_categories(
                 continue
             canonical = topic.canonical
             other = analysis.doc_b_path if canonical == analysis.doc_a_path else analysis.doc_a_path
-            suggestions.append({
-                "code": topic.name,
-                "documents": sorted([analysis.doc_a_path, analysis.doc_b_path]),
-                "canonical": canonical,
-                "suggestions": [{
-                    "document": other,
-                    "action": topic.action_for_other,
-                    "reason": topic.reason,
-                }],
-            })
+            suggestions.append(
+                {
+                    "code": topic.name,
+                    "documents": sorted([analysis.doc_a_path, analysis.doc_b_path]),
+                    "canonical": canonical,
+                    "suggestions": [
+                        {
+                            "document": other,
+                            "action": topic.action_for_other,
+                            "reason": topic.reason,
+                        }
+                    ],
+                }
+            )
 
     return codes, categories, suggestions
 
 
 def _build_analysis_from_raw(
-    doc_a: str, doc_b: str, raw: dict, pairs: list[OverlapPair],
+    doc_a: str,
+    doc_b: str,
+    raw: dict,
+    pairs: list[OverlapPair],
 ) -> DocPairAnalysis:
     """Build a DocPairAnalysis from a raw LLM response dict."""
     overlap_ids_a = {p.chunk_a.id: p.chunk_a for p in pairs}
@@ -346,8 +355,7 @@ def _build_analysis_from_raw(
         topic_name = t.get("name", "unknown")
         # Extract significant words (3+ chars) from the topic name for matching
         topic_words = {
-            w for w in topic_name.replace("-", " ").replace("_", " ").lower().split()
-            if len(w) >= 3
+            w for w in topic_name.replace("-", " ").replace("_", " ").lower().split() if len(w) >= 3
         }
 
         def _chunk_matches_topic(chunk: Chunk, words: set[str]) -> bool:
@@ -359,14 +367,8 @@ def _build_analysis_from_raw(
             return bool(text_words & words)
 
         if topic_words:
-            matched_a = [
-                c for c in overlap_ids_a.values()
-                if _chunk_matches_topic(c, topic_words)
-            ]
-            matched_b = [
-                c for c in overlap_ids_b.values()
-                if _chunk_matches_topic(c, topic_words)
-            ]
+            matched_a = [c for c in overlap_ids_a.values() if _chunk_matches_topic(c, topic_words)]
+            matched_b = [c for c in overlap_ids_b.values() if _chunk_matches_topic(c, topic_words)]
             # Fall back to all chunks if heuristic is too strict
             if not matched_a and not matched_b:
                 matched_a = list(overlap_ids_a.values())
@@ -375,14 +377,16 @@ def _build_analysis_from_raw(
             matched_a = list(overlap_ids_a.values())
             matched_b = list(overlap_ids_b.values())
 
-        topics.append(TopicAnalysis(
-            name=topic_name,
-            canonical=t.get("canonical", doc_a),
-            action_for_other=t.get("action_for_other", "keep"),
-            reason=t.get("reason", ""),
-            chunks_a=matched_a,
-            chunks_b=matched_b,
-        ))
+        topics.append(
+            TopicAnalysis(
+                name=topic_name,
+                canonical=t.get("canonical", doc_a),
+                action_for_other=t.get("action_for_other", "keep"),
+                reason=t.get("reason", ""),
+                chunks_a=matched_a,
+                chunks_b=matched_b,
+            )
+        )
 
     return DocPairAnalysis(
         doc_a_path=doc_a,
@@ -400,11 +404,11 @@ def run_doc_pair_pipeline(
     doc_pair_groups: dict[tuple[str, str], list[OverlapPair]],
     doc_chunks_map: dict[str, list[Chunk]],
     model: str,
-    cache: "Cache | None",
-    on_progress: "callable | None" = None,
+    cache: Cache | None,
+    on_progress: callable | None = None,
     backend: str = "litellm",
     prior_analyses: dict[str, dict] | None = None,
-    on_pair_analyzed: "callable | None" = None,
+    on_pair_analyzed: callable | None = None,
     concurrency: int = 1,
     intent_evidence: dict[tuple[str, str], list[dict]] | None = None,
     ollama_host: str | None = None,
@@ -458,8 +462,14 @@ def run_doc_pair_pipeline(
         doc_b_chunks = doc_chunks_map.get(doc_b, [])
         pair_intent = _intent_evidence.get((doc_a, doc_b)) or _intent_evidence.get((doc_b, doc_a))
         raw = analyze_doc_pair(
-            doc_a, doc_b, doc_a_chunks, doc_b_chunks,
-            pairs, model, cache, backend,
+            doc_a,
+            doc_b,
+            doc_a_chunks,
+            doc_b_chunks,
+            pairs,
+            model,
+            cache,
+            backend,
             intent_evidence=pair_intent,
             ollama_host=ollama_host,
             cli_strip_api_key=cli_strip_api_key,

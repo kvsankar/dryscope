@@ -2,7 +2,7 @@
 
 import pytest
 
-from dryscope.cache import Cache, CacheStats
+from dryscope.cache import Cache
 
 
 @pytest.fixture

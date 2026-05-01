@@ -13,7 +13,10 @@ from dryscope.docs.topics import embed_topics
 
 
 def test_normalize_topic_text_removes_formatting_noise() -> None:
-    assert normalize_topic_text(" Context-Window & Token Budgets! ") == "context window and token budgets"
+    assert (
+        normalize_topic_text(" Context-Window & Token Budgets! ")
+        == "context window and token budgets"
+    )
 
 
 def test_topic_similarity_combines_string_and_token_overlap() -> None:
@@ -92,20 +95,22 @@ def test_build_canonical_taxonomy_uses_llm_mapping(monkeypatch) -> None:
     from dryscope.docs import coding
 
     def fake_call_llm_cached(*args, **kwargs) -> str:
-        return json.dumps({
-            "mappings": [
-                {
-                    "raw": "context window management",
-                    "canonical": "context engineering",
-                    "is_new": True,
-                },
-                {
-                    "raw": "prompt context budgeting",
-                    "canonical": "context engineering",
-                    "is_new": False,
-                },
-            ]
-        })
+        return json.dumps(
+            {
+                "mappings": [
+                    {
+                        "raw": "context window management",
+                        "canonical": "context engineering",
+                        "is_new": True,
+                    },
+                    {
+                        "raw": "prompt context budgeting",
+                        "canonical": "context engineering",
+                        "is_new": False,
+                    },
+                ]
+            }
+        )
 
     monkeypatch.setattr(coding, "call_llm_cached", fake_call_llm_cached)
 
@@ -123,21 +128,26 @@ def test_build_canonical_taxonomy_uses_llm_mapping(monkeypatch) -> None:
     assert taxonomy.method == "llm"
     assert taxonomy.raw_to_canonical["context window management"] == "context engineering"
     assert taxonomy.raw_to_canonical["prompt context budgeting"] == "context engineering"
-    assert taxonomy.canonical_topics["context engineering"].documents == {"/docs/a.md", "/docs/b.md"}
+    assert taxonomy.canonical_topics["context engineering"].documents == {
+        "/docs/a.md",
+        "/docs/b.md",
+    }
 
 
 def test_build_canonical_taxonomy_parallel_llm_batches(monkeypatch) -> None:
     from dryscope.docs import coding
 
     def fake_call_llm_cached(*args, **kwargs) -> str:
-        return json.dumps({
-            "mappings": [
-                {"raw": "alpha one", "canonical": "alpha topic", "is_new": True},
-                {"raw": "alpha two", "canonical": "alpha topic", "is_new": False},
-                {"raw": "beta one", "canonical": "beta topic", "is_new": True},
-                {"raw": "beta two", "canonical": "beta topic", "is_new": False},
-            ]
-        })
+        return json.dumps(
+            {
+                "mappings": [
+                    {"raw": "alpha one", "canonical": "alpha topic", "is_new": True},
+                    {"raw": "alpha two", "canonical": "alpha topic", "is_new": False},
+                    {"raw": "beta one", "canonical": "beta topic", "is_new": True},
+                    {"raw": "beta two", "canonical": "beta topic", "is_new": False},
+                ]
+            }
+        )
 
     monkeypatch.setattr(coding, "call_llm_cached", fake_call_llm_cached)
 

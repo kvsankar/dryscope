@@ -9,12 +9,17 @@ from enum import Enum
 
 from dryscope.code.parser import CodeUnit
 from dryscope.similarity import DuplicatePair
-from dryscope.terminology import CODE_MATCH, CODE_MATCH_SLUG, CODE_REPORT_PACK, CODE_REPORT_PACK_SLUG
+from dryscope.terminology import (
+    CODE_MATCH,
+    CODE_MATCH_SLUG,
+    CODE_REPORT_PACK,
+    CODE_REPORT_PACK_SLUG,
+)
 
 
 class Tier(str, Enum):
-    EXACT = "exact"      # normalized text match
-    NEAR = "near"        # similarity >= 0.95
+    EXACT = "exact"  # normalized text match
+    NEAR = "near"  # similarity >= 0.95
     STRUCTURAL = "structural"  # similarity < 0.95
 
 
@@ -93,7 +98,9 @@ def _compute_actionability(cluster: Cluster) -> float:
     cross_file_bonus = 1.5 if cluster.is_cross_file else 1.0
 
     # Production code bonus: penalize if all units are in test files
-    test_count = sum(1 for u in cluster.units if "/test" in u.file_path or "test_" in u.file_path.split("/")[-1])
+    test_count = sum(
+        1 for u in cluster.units if "/test" in u.file_path or "test_" in u.file_path.split("/")[-1]
+    )
     prod_ratio = 1.0 - (test_count / len(cluster.units)) * 0.3
 
     # Precision: smaller clusters are more precise
@@ -120,11 +127,11 @@ def build_clusters(
 
         max_sim = 0.0
         for i, a in enumerate(indices):
-            for b in indices[i + 1:]:
+            for b in indices[i + 1 :]:
                 key = (min(a, b), max(a, b))
                 max_sim = max(max_sim, pair_sims.get(key, 0.0))
 
-        unique_files = sorted(set(u.file_path for u in cluster_units))
+        unique_files = sorted({u.file_path for u in cluster_units})
         total_lines = sum(u.line_count for u in cluster_units)
 
         tier = Tier.STRUCTURAL

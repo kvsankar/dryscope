@@ -11,7 +11,6 @@ from dryscope.similarity import (
     find_duplicates,
 )
 
-
 # ── UnionFind ───────────────────────────────────────────────────────────
 
 
@@ -68,22 +67,26 @@ class TestFindDuplicates:
         return arr / norms
 
     def test_identical_vectors_are_duplicates(self):
-        vecs = self._make_embeddings([
-            [1.0, 0.0, 0.0],
-            [1.0, 0.0, 0.0],
-            [0.0, 1.0, 0.0],
-        ])
+        vecs = self._make_embeddings(
+            [
+                [1.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+            ]
+        )
         pairs = find_duplicates(vecs, threshold=0.90)
         assert len(pairs) >= 1
         assert pairs[0].idx_a == 0
         assert pairs[0].idx_b == 1
 
     def test_orthogonal_vectors_not_duplicates(self):
-        vecs = self._make_embeddings([
-            [1.0, 0.0, 0.0],
-            [0.0, 1.0, 0.0],
-            [0.0, 0.0, 1.0],
-        ])
+        vecs = self._make_embeddings(
+            [
+                [1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+                [0.0, 0.0, 1.0],
+            ]
+        )
         pairs = find_duplicates(vecs, threshold=0.90)
         assert len(pairs) == 0
 
@@ -93,10 +96,12 @@ class TestFindDuplicates:
         assert pairs == []
 
     def test_threshold_affects_result(self):
-        vecs = self._make_embeddings([
-            [1.0, 0.1, 0.0],
-            [1.0, 0.2, 0.0],
-        ])
+        vecs = self._make_embeddings(
+            [
+                [1.0, 0.1, 0.0],
+                [1.0, 0.2, 0.0],
+            ]
+        )
         # With low threshold should find pair
         pairs_low = find_duplicates(vecs, threshold=0.5)
         assert len(pairs_low) >= 1
@@ -105,19 +110,23 @@ class TestFindDuplicates:
         assert len(pairs_high) == 0
 
     def test_size_ratio_filter(self):
-        vecs = self._make_embeddings([
-            [1.0, 0.0, 0.0],
-            [1.0, 0.0, 0.0],
-        ])
+        vecs = self._make_embeddings(
+            [
+                [1.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+            ]
+        )
         # Line counts with ratio > 3 should be filtered
         pairs = find_duplicates(vecs, threshold=0.90, line_counts=[10, 40], max_size_ratio=3.0)
         assert len(pairs) == 0
 
     def test_size_ratio_within_range(self):
-        vecs = self._make_embeddings([
-            [1.0, 0.0, 0.0],
-            [1.0, 0.0, 0.0],
-        ])
+        vecs = self._make_embeddings(
+            [
+                [1.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+            ]
+        )
         pairs = find_duplicates(vecs, threshold=0.90, line_counts=[10, 20], max_size_ratio=3.0)
         assert len(pairs) == 1
 
@@ -194,11 +203,13 @@ class TestFindDuplicatesHybrid:
 
     def test_find_duplicates_with_normalized_texts(self):
         # Two identical embedding vectors but different tokens should still match
-        vecs = self._make_embeddings([
-            [1.0, 0.0, 0.0],
-            [1.0, 0.0, 0.0],
-            [0.0, 1.0, 0.0],
-        ])
+        vecs = self._make_embeddings(
+            [
+                [1.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+            ]
+        )
         texts = ["VAR_0 = VAR_1 + VAR_2", "VAR_0 = VAR_1 + VAR_2", "something else entirely"]
         pairs = find_duplicates(vecs, threshold=0.90, normalized_texts=texts, token_weight=0.3)
         assert len(pairs) >= 1
@@ -207,10 +218,12 @@ class TestFindDuplicatesHybrid:
 
     def test_find_duplicates_token_weight_zero(self):
         # With token_weight=0, result should be pure embedding similarity
-        vecs = self._make_embeddings([
-            [1.0, 0.0, 0.0],
-            [1.0, 0.0, 0.0],
-        ])
+        vecs = self._make_embeddings(
+            [
+                [1.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+            ]
+        )
         texts = ["completely different", "not at all the same"]
         pairs = find_duplicates(vecs, threshold=0.90, normalized_texts=texts, token_weight=0.0)
         assert len(pairs) == 1

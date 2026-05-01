@@ -29,7 +29,13 @@ class Profile:
 def _read_deps(path: Path) -> str:
     """Read combined dependency text from common dependency files."""
     texts: list[str] = []
-    for name in ("requirements.txt", "requirements/*.txt", "Pipfile", "pyproject.toml", "setup.cfg"):
+    for name in (
+        "requirements.txt",
+        "requirements/*.txt",
+        "Pipfile",
+        "pyproject.toml",
+        "setup.cfg",
+    ):
         for f in path.glob(name):
             try:
                 texts.append(f.read_text(errors="ignore").lower())
@@ -80,7 +86,10 @@ def detect_profiles(path: str | Path) -> list[Profile]:
     # Walk up to find the project root (where dependency files live)
     project_root = path
     for candidate in [path, *path.parents]:
-        if any((candidate / f).exists() for f in ("pyproject.toml", "setup.py", "setup.cfg", "Pipfile", "manage.py")):
+        if any(
+            (candidate / f).exists()
+            for f in ("pyproject.toml", "setup.py", "setup.cfg", "Pipfile", "manage.py")
+        ):
             project_root = candidate
             break
 

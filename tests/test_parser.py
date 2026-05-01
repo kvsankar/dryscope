@@ -2,8 +2,6 @@
 
 from pathlib import Path
 
-import pytest
-
 from dryscope.code.parser import (
     CodeUnit,
     _is_excluded,
@@ -130,19 +128,44 @@ class TestIsExcluded:
 class TestFlattenUnits:
     def test_flat_list_unchanged(self):
         units = [
-            CodeUnit(name="a", unit_type="function", source="def a(): pass",
-                     file_path="f.py", start_line=1, end_line=1),
-            CodeUnit(name="b", unit_type="function", source="def b(): pass",
-                     file_path="f.py", start_line=2, end_line=2),
+            CodeUnit(
+                name="a",
+                unit_type="function",
+                source="def a(): pass",
+                file_path="f.py",
+                start_line=1,
+                end_line=1,
+            ),
+            CodeUnit(
+                name="b",
+                unit_type="function",
+                source="def b(): pass",
+                file_path="f.py",
+                start_line=2,
+                end_line=2,
+            ),
         ]
         flat = flatten_units(units)
         assert len(flat) == 2
 
     def test_nested_children_flattened(self):
-        child = CodeUnit(name="method", unit_type="method", source="def method(): pass",
-                         file_path="f.py", start_line=3, end_line=3)
-        parent = CodeUnit(name="MyClass", unit_type="class", source="class MyClass:\n  def method(): pass",
-                          file_path="f.py", start_line=1, end_line=3, children=[child])
+        child = CodeUnit(
+            name="method",
+            unit_type="method",
+            source="def method(): pass",
+            file_path="f.py",
+            start_line=3,
+            end_line=3,
+        )
+        parent = CodeUnit(
+            name="MyClass",
+            unit_type="class",
+            source="class MyClass:\n  def method(): pass",
+            file_path="f.py",
+            start_line=1,
+            end_line=3,
+            children=[child],
+        )
         flat = flatten_units([parent])
         assert len(flat) == 2
         assert flat[0].name == "MyClass"
@@ -154,32 +177,62 @@ class TestFlattenUnits:
 
 class TestBaseClasses:
     def test_function_has_no_base_classes(self):
-        unit = CodeUnit(name="foo", unit_type="function", source="def foo(): pass",
-                        file_path="f.py", start_line=1, end_line=1)
+        unit = CodeUnit(
+            name="foo",
+            unit_type="function",
+            source="def foo(): pass",
+            file_path="f.py",
+            start_line=1,
+            end_line=1,
+        )
         assert unit.base_classes == []
 
     def test_class_with_base(self):
-        unit = CodeUnit(name="MyModel", unit_type="class",
-                        source="class MyModel(BaseModel):\n    pass",
-                        file_path="f.py", start_line=1, end_line=2, lang="python")
+        unit = CodeUnit(
+            name="MyModel",
+            unit_type="class",
+            source="class MyModel(BaseModel):\n    pass",
+            file_path="f.py",
+            start_line=1,
+            end_line=2,
+            lang="python",
+        )
         assert unit.base_classes == ["BaseModel"]
 
     def test_class_with_multiple_bases(self):
-        unit = CodeUnit(name="MyView", unit_type="class",
-                        source="class MyView(View, Mixin):\n    pass",
-                        file_path="f.py", start_line=1, end_line=2, lang="python")
+        unit = CodeUnit(
+            name="MyView",
+            unit_type="class",
+            source="class MyView(View, Mixin):\n    pass",
+            file_path="f.py",
+            start_line=1,
+            end_line=2,
+            lang="python",
+        )
         assert unit.base_classes == ["View", "Mixin"]
 
     def test_class_no_bases(self):
-        unit = CodeUnit(name="Plain", unit_type="class",
-                        source="class Plain:\n    pass",
-                        file_path="f.py", start_line=1, end_line=2, lang="python")
+        unit = CodeUnit(
+            name="Plain",
+            unit_type="class",
+            source="class Plain:\n    pass",
+            file_path="f.py",
+            start_line=1,
+            end_line=2,
+            lang="python",
+        )
         assert unit.base_classes == []
 
     def test_class_dotted_base(self):
-        unit = CodeUnit(name="Foo", unit_type="class",
-                        source="class Foo(models.Model):\n    pass",
-                        file_path="f.py", start_line=1, end_line=2, lang="python")
+        unit = CodeUnit(
+            name="Foo",
+            unit_type="class",
+            source="class Foo(models.Model):\n    pass",
+            file_path="f.py",
+            start_line=1,
+            end_line=2,
+            lang="python",
+        )
         assert unit.base_classes == ["Model"]
 
 
@@ -289,11 +342,7 @@ class TestParseJava:
     def test_parse_java_method_name_not_return_type(self, tmp_path):
         sample = tmp_path / "Sample.java"
         sample.write_text(
-            "public class Sample {\n"
-            "  public String render() {\n"
-            '    return \"ok\";\n'
-            "  }\n"
-            "}\n"
+            'public class Sample {\n  public String render() {\n    return "ok";\n  }\n}\n'
         )
         units = flatten_units(parse_file(sample))
         names = [u.name for u in units]

@@ -38,13 +38,11 @@ class DummyEmbedder:
 
 
 def test_run_code_scan_passes_backend_to_verifier(monkeypatch):
+    import dryscope.code.embedder as embedder
     import dryscope.code.normalizer as normalizer
     import dryscope.code.parser as parser
-    import dryscope.code.reporter as reporter
-    import dryscope.code.verifier as verifier
-    import dryscope.similarity as similarity
-    import dryscope.code.embedder as embedder
     import dryscope.code.profiles as profiles
+    import dryscope.code.verifier as verifier
 
     monkeypatch.setattr(parser, "parse_directory", lambda *args, **kwargs: _make_units())
     monkeypatch.setattr(normalizer, "normalize", lambda source, lang="python": source)
@@ -54,10 +52,17 @@ def test_run_code_scan_passes_backend_to_verifier(monkeypatch):
 
     captured: dict = {}
 
-    def fake_verify(clusters, model, max_workers=1, backend="litellm", api_key=None,
-                    ollama_host=None,
-                    cli_strip_api_key=True, cli_permission_mode=None,
-                    cli_dangerously_skip_permissions=False):
+    def fake_verify(
+        clusters,
+        model,
+        max_workers=1,
+        backend="litellm",
+        api_key=None,
+        ollama_host=None,
+        cli_strip_api_key=True,
+        cli_permission_mode=None,
+        cli_dangerously_skip_permissions=False,
+    ):
         captured["max_workers"] = max_workers
         captured["backend"] = backend
         captured["ollama_host"] = ollama_host
@@ -95,13 +100,13 @@ def test_run_code_scan_passes_backend_to_verifier(monkeypatch):
 
 
 def test_run_code_scan_applies_escalation_policy(monkeypatch):
+    import dryscope.code.embedder as embedder
     import dryscope.code.normalizer as normalizer
     import dryscope.code.parser as parser
+    import dryscope.code.profiles as profiles
     import dryscope.code.reporter as reporter
     import dryscope.code.verifier as verifier
     import dryscope.similarity as similarity
-    import dryscope.code.embedder as embedder
-    import dryscope.code.profiles as profiles
 
     monkeypatch.setattr(parser, "parse_directory", lambda *args, **kwargs: _make_units())
     monkeypatch.setattr(normalizer, "normalize", lambda source, lang="python": source)
@@ -137,10 +142,17 @@ def test_run_code_scan_applies_escalation_policy(monkeypatch):
 
     monkeypatch.setattr(reporter, "build_clusters", fake_build_clusters)
 
-    def fake_verify(clusters, model, max_workers=1, backend="litellm", api_key=None,
-                    ollama_host=None,
-                    cli_strip_api_key=True, cli_permission_mode=None,
-                    cli_dangerously_skip_permissions=False):
+    def fake_verify(
+        clusters,
+        model,
+        max_workers=1,
+        backend="litellm",
+        api_key=None,
+        ollama_host=None,
+        cli_strip_api_key=True,
+        cli_permission_mode=None,
+        cli_dangerously_skip_permissions=False,
+    ):
         return [
             (clusters[0], "refactor", "low-priority same-file helper"),
             (clusters[1], "review", "needs inspection"),
@@ -256,9 +268,9 @@ def test_verify_cluster_includes_context_in_prompt(monkeypatch):
 def test_system_prompt_includes_general_low_value_duplication_rules():
     from dryscope.code.verifier import SYSTEM_PROMPT
 
-    assert 'same-file helper pairs' in SYSTEM_PROMPT
-    assert 'compatibility layers, adapter variants' in SYSTEM_PROMPT
-    assert 'different validation rules, escaping rules, or domain semantics' in SYSTEM_PROMPT
+    assert "same-file helper pairs" in SYSTEM_PROMPT
+    assert "compatibility layers, adapter variants" in SYSTEM_PROMPT
+    assert "different validation rules, escaping rules, or domain semantics" in SYSTEM_PROMPT
 
 
 def test_system_prompt_preserves_cross_product_generated_duplicates():

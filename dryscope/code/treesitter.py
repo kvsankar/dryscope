@@ -16,24 +16,31 @@ def _get_language(lang: str) -> Language:
     if lang not in _languages:
         if lang == "python":
             import tree_sitter_python as tspython
+
             _languages[lang] = Language(tspython.language())
         elif lang == "java":
             import tree_sitter_java as tsjava
+
             _languages[lang] = Language(tsjava.language())
         elif lang == "go":
             import tree_sitter_go as tsgo
+
             _languages[lang] = Language(tsgo.language())
         elif lang == "javascript":
             import tree_sitter_javascript as tsjavascript
+
             _languages[lang] = Language(tsjavascript.language())
         elif lang == "jsx":
             import tree_sitter_javascript as tsjavascript
+
             _languages[lang] = Language(tsjavascript.language())
         elif lang == "typescript":
             import tree_sitter_typescript as tstype
+
             _languages[lang] = Language(tstype.language_typescript())
         elif lang == "tsx":
             import tree_sitter_typescript as tstype
+
             _languages[lang] = Language(tstype.language_tsx())
         else:
             raise ValueError(f"Unsupported language: {lang}")

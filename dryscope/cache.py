@@ -137,7 +137,7 @@ class Cache:
         """Flush pending writes to disk."""
         self.conn.commit()
 
-    def __enter__(self) -> "Cache":
+    def __enter__(self) -> Cache:
         return self
 
     def __exit__(self, *args: object) -> None:

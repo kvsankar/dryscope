@@ -22,6 +22,7 @@ def filter_values(values, cutoff):
 def totally_different():
     """This function does something completely different."""
     import math
+
     angles = [0, 30, 45, 60, 90]
     for angle in angles:
         radians = math.radians(angle)

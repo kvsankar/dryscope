@@ -11,14 +11,20 @@ from dryscope.unified_report import format_unified_json, format_unified_terminal
 def _make_cluster(cluster_id=0, tier=Tier.EXACT, similarity=0.98) -> Cluster:
     """Helper to create a Cluster with minimal data."""
     unit_a = CodeUnit(
-        name="func_a", unit_type="function",
+        name="func_a",
+        unit_type="function",
         source="def func_a():\n    return 1",
-        file_path="a.py", start_line=1, end_line=2,
+        file_path="a.py",
+        start_line=1,
+        end_line=2,
     )
     unit_b = CodeUnit(
-        name="func_b", unit_type="function",
+        name="func_b",
+        unit_type="function",
         source="def func_b():\n    return 1",
-        file_path="b.py", start_line=1, end_line=2,
+        file_path="b.py",
+        start_line=1,
+        end_line=2,
     )
     return Cluster(
         cluster_id=cluster_id,

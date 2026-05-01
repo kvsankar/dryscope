@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import threading
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import numpy as np
 
-from collections import Counter
-
-from dryscope.code.embedder import Embedder, is_api_embedding_model
 from dryscope.cache import Cache
+from dryscope.code.embedder import Embedder, is_api_embedding_model
 from dryscope.docs.models import Chunk, OverlapPair
 from dryscope.similarity import cosine_similarity_matrix
 
@@ -29,6 +28,7 @@ def _token_jaccard(text_a: str, text_b: str) -> float:
     intersection = sum((counter_a & counter_b).values())
     union = sum((counter_a | counter_b).values())
     return intersection / union if union > 0 else 0.0
+
 
 # ─── Sentence-transformers lazy singleton ─────────────────────────────
 
@@ -111,8 +111,7 @@ def refine_with_embeddings(
 
         with ThreadPoolExecutor(max_workers=concurrency) as executor:
             futures = {
-                executor.submit(_embed_one, chunk_id, chunk): chunk_id
-                for chunk_id, chunk in items
+                executor.submit(_embed_one, chunk_id, chunk): chunk_id for chunk_id, chunk in items
             }
             for future in as_completed(futures):
                 chunk_id, vector = future.result()
@@ -176,10 +175,7 @@ def embed_chunks(
                 return chunk.id, get_embedding(chunk.content, model_name, cache)
 
             with ThreadPoolExecutor(max_workers=concurrency) as executor:
-                futures = {
-                    executor.submit(_embed_one, chunk): chunk
-                    for chunk in chunks
-                }
+                futures = {executor.submit(_embed_one, chunk): chunk for chunk in chunks}
                 for future in as_completed(futures):
                     chunk_id, vector = future.result()
                     embeddings[chunk_id] = vector
@@ -197,7 +193,7 @@ def embed_chunks(
         # Check cache first for each chunk
         uncached_chunks: list[Chunk] = []
 
-        for i, chunk in enumerate(chunks):
+        for chunk in chunks:
             if cache is not None:
                 cached = cache.get_embedding(chunk.content, model_name)
                 if cached is not None:
@@ -300,11 +296,13 @@ def find_similar_pairs(
                 combined = embed_sim
 
             if combined >= threshold:
-                pairs.append(OverlapPair(
-                    chunk_a=filtered[i],
-                    chunk_b=filtered[j],
-                    embedding_similarity=combined,
-                ))
+                pairs.append(
+                    OverlapPair(
+                        chunk_a=filtered[i],
+                        chunk_b=filtered[j],
+                        embedding_similarity=combined,
+                    )
+                )
 
     # Sort by similarity descending
     pairs.sort(key=lambda p: -(p.embedding_similarity or 0))
