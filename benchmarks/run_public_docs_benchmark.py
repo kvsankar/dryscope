@@ -19,7 +19,7 @@ from benchmarks.run_public_benchmark import _benchmark_metadata, _git_commit, _g
 DRYSCOPE_BIN = REPO_ROOT / ".venv" / "bin" / "dryscope"
 DEFAULT_MANIFEST = Path(__file__).with_name("public_docs_repos.json")
 DEFAULT_EMBEDDING_MODEL = "all-MiniLM-L6-v2"
-DEFAULT_STAGE = "docs-report-pack"
+DEFAULT_STAGE = "docs-section-match"
 
 
 def _run_json(args: list[str]) -> dict:

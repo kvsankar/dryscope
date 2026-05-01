@@ -5,7 +5,7 @@
       "track": "docs-section-match",
       "label": "useful_section_match",
       "sections": [
-        { "path": "index.md", "line_start": 491 },
+        { "path": "index.md", "line_start": 520 },
         { "path": "tutorial/first-steps.md", "line_start": 416 }
       ],
       "note": "Exact repeated deployment section between overview and tutorial."
@@ -15,7 +15,7 @@
       "track": "docs-section-match",
       "label": "useful_section_match",
       "sections": [
-        { "path": "index.md", "line_start": 271 },
+        { "path": "index.md", "line_start": 300 },
         { "path": "tutorial/first-steps.md", "line_start": 69 }
       ],
       "note": "Exact repeated interactive API docs section."

@@ -124,14 +124,18 @@ The full public quality run has three benchmark legs plus the report presenter:
 
 ```bash
 uv run python benchmarks/run_public_benchmark.py --fresh-clone --verify-max-findings 15
-uv run python benchmarks/run_public_docs_benchmark.py --fresh-clone --group public-docs-default
-uv run python benchmarks/run_public_docs_benchmark.py --fresh-clone --group public-docs-stress
+uv run python benchmarks/run_public_docs_benchmark.py --fresh-clone --group public-docs-default --stage docs-section-match --llm-max-doc-pairs 0
+uv run python benchmarks/run_public_docs_benchmark.py --fresh-clone --group public-docs-stress --stage docs-section-match --llm-max-doc-pairs 0
 uv run python benchmarks/run_quality_report.py --reference-md benchmarks/quality_report.md
 ```
 
 Use `--fresh-clone` when intentionally updating the benchmark input commits.
 The generated summaries record both the `dryscope` commit and each benchmark
 input repository commit.
+The quality report scores Code Review and Section Match labels. Full docs
+report-pack runs are useful for manual Docs Map and Doc Pair Review inspection,
+but they are intentionally opt-in because `--stage docs-report-pack` can run
+hundreds of LLM pair-review calls on large docs sets.
 
 For a bounded Code Review pass over the AI-generated group:
 
@@ -158,6 +162,12 @@ Run the default docs benchmark set:
 ```bash
 uv run python benchmarks/run_public_docs_benchmark.py --group public-docs-default
 ```
+
+The docs benchmark defaults to `--stage docs-section-match`, which is the
+label-scored docs track used by `run_quality_report.py`. To generate the full
+Docs Map + Section Match + Doc Pair Review report pack for manual inspection,
+run with `--stage docs-report-pack` and choose an intentional
+`--llm-max-doc-pairs` cap.
 
 Outputs are written to
 `~/.dryscope/benchmarks/results/docs-default/<run-id>` by default.
