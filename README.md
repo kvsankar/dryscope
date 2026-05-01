@@ -172,8 +172,18 @@ consolidation targets worth spending attention on."
 
 ## Installation
 
+From PyPI, run the CLI without a permanent install:
+
 ```bash
-uv pip install .
+uvx dryscope --help
+uvx dryscope scan .
+```
+
+For a persistent command on your `PATH`:
+
+```bash
+uv tool install dryscope
+dryscope --help
 ```
 
 The default install supports API embedding models through LiteLLM. Set the
@@ -182,7 +192,14 @@ provider API key for your embedding model, such as `OPENAI_API_KEY` for
 because they pull in PyTorch:
 
 ```bash
-uv pip install ".[local-embeddings]"
+uv tool install "dryscope[local-embeddings]"
+```
+
+For repository development from a source checkout:
+
+```bash
+uv sync --extra dev
+uv run dryscope --help
 ```
 
 ## Development Quality Gates

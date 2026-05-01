@@ -44,8 +44,8 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/sankar/dryscope"
-Repository = "https://github.com/sankar/dryscope"
+Homepage = "https://github.com/kvsankar/dryscope"
+Repository = "https://github.com/kvsankar/dryscope"
 
 [project.scripts]
 dryscope = "dryscope.cli:main"
