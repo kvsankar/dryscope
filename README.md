@@ -554,9 +554,18 @@ For docs:
 - a few grouped Section Match recommendations on docs-heavy repos
 - one family recommendation for many near-identical sibling docs, rather than many pairwise duplicates
 
+## Documentation
+
+- [Architecture](docs/architecture.md) — how the code, docs, reporting, cache, and CLI pieces fit together
+- [Analysis](docs/analysis.md) — positioning, alternatives, benchmark notes, and product-readiness context
+- [Benchmark pack](benchmarks/README.md) — public benchmark harness, artifact locations, and refresh commands
+- [Benchmark quality report](benchmarks/quality_report.md) — readable TP/FP/FN summary generated from public labels
+- [Agent guidance](AGENTS.md) and [Claude guidance](CLAUDE.md) — repository-specific instructions for coding agents
+- [Packaged dryscope skill](dryscope/skill/SKILL.md) — skill instructions installed for agent workflows
+
 ## Benchmarking
 
-`dryscope` includes a checked-in public benchmark pack under [benchmarks/README.md](/home/sankar/sankar/projects/dryscope/benchmarks/README.md).
+`dryscope` includes a checked-in public benchmark pack under [benchmarks/README.md](benchmarks/README.md).
 
 It only references public repositories and reviewed public labels. Private repo evaluation should remain local and out of the checked-in benchmark files.
 
