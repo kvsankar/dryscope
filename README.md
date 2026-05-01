@@ -1,5 +1,12 @@
 # dryscope
 
+[![CI](https://github.com/kvsankar/dryscope/actions/workflows/ci.yml/badge.svg)](https://github.com/kvsankar/dryscope/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/dryscope.svg)](https://pypi.org/project/dryscope/)
+[![Python](https://img.shields.io/pypi/pyversions/dryscope.svg)](https://pypi.org/project/dryscope/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+[![Ruff](https://img.shields.io/badge/lint-ruff-46a2f1.svg)](https://docs.astral.sh/ruff/)
+[![uv](https://img.shields.io/badge/packaging-uv-6f42c1.svg)](https://docs.astral.sh/uv/)
+
 `dryscope` helps you find the parts of a large repository that are actually
 worth reading before you ask an AI agent, stronger model, or human reviewer to
 clean it up.
