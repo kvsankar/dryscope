@@ -1,0 +1,45 @@
+name: Publish to TestPyPI
+
+on:
+  workflow_dispatch:
+
+jobs:
+  publish:
+    name: Build, check, and publish
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          enable-cache: true
+          python-version: "3.11"
+
+      - name: Install project
+        run: uv sync --locked --extra dev
+
+      - name: Run tests
+        run: uv run pytest
+
+      - name: Build package
+        run: uv build --no-sources
+
+      - name: Check package metadata
+        run: uvx twine check dist/*
+
+      - name: Smoke test built wheel
+        run: uvx --from dist/*.whl dryscope --version
+
+      - name: Publish package distributions to TestPyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          skip-existing: true
