@@ -1,10 +1,13 @@
 # dryscope
 
-Preflight large repositories before AI-assisted refactors and documentation consolidation.
+`dryscope` helps you find the parts of a large repository that are actually
+worth reading before you ask an AI agent, stronger model, or human reviewer to
+clean it up.
 
-`dryscope` finds duplicate-code candidates and overlapping documentation so an
-agent, stronger model, or human reviewer can start from a smaller, better-ranked
-set of files. It is built for repo narrowing, not for replacing judgment.
+It scans code and docs for repeated implementation shapes, copy-pasted helpers,
+overlapping document sections, and scattered documentation topics. The output is
+a ranked shortlist of files and sections that deserve attention first, not a
+claim that every match should be refactored.
 
 `dryscope` is a narrowing tool:
 - for code, **Code Match** (`code-match`) surfaces structural duplicate candidates and **Code Review** (`code-review`) filters them down to a shortlist
@@ -13,21 +16,133 @@ set of files. It is built for repo narrowing, not for replacing judgment.
   - **Section Match** (`docs-section-match`): compares heading-based sections and ranks concrete section-level consolidation/link recommendations
   - **Doc Pair Review** (`docs-pair-review`): uses an LLM to review selected related document pairs
 
-The core bet is simple: before spending expensive model context on a large repo,
-first identify the repeated implementation shapes, duplicated docs, and scattered
-documentation intents that are most likely to deserve follow-up.
+## Motivation
+
+Large-repo cleanup usually starts with a vague but painful question: "where is
+the duplication, and what should I look at first?" That is hard to answer by
+searching for keywords or asking an agent to inspect the whole repository.
+
+Developers run into a few common problems:
+
+- an agent burns context reading unrelated files before it finds the repeated pattern
+- a refactor starts from one obvious copy-paste case and misses nearby structural clones
+- duplicate-code tools report a wall of boilerplate, generated code, and harmless conventions
+- agent-driven development creates requirements, design, research, planning, and status docs spread across the repository
+- documentation may overlap in intent even when it does not repeat the same text
+- reviewers know something is repeated, but not which files form the smallest useful work batch
+
+### Code Match Motivation
+
+Coding agents are only as good as the context they can see. If an agent does
+not notice an existing helper, service method, parser, validation path, or UI
+branch, it may solve the same local problem again somewhere else. Fast
+agent-generated or vibe-coded projects are especially prone to this: the code
+works, but similar logic accumulates across commands, endpoints, components,
+tests, and migration scripts.
+
+That redundancy is a code health problem, not just an aesthetic one. DRY is
+about keeping one reason to change in one place. When the same behavior exists
+in several functions or classes, a bug fix may land in only one copy, edge-case
+handling can drift, and future agents may copy the wrong version because there
+is no obvious canonical implementation.
+
+Code Match is built to find those candidates before a cleanup pass starts. It
+uses tree-sitter to parse supported languages into code units such as functions,
+classes, methods, Java constructors, and JavaScript/TypeScript function-valued
+declarations. It normalizes each unit by removing comments/docstrings and
+replacing identifiers and literals with placeholders, then embeds the normalized
+code and ranks similar units with hybrid semantic and token similarity. The
+result is a shortlist of exact, near-identical, and structural duplicate
+candidates that a human developer, coding agent, or optional Code Review pass
+can inspect before refactoring.
+
+### Docs Map Motivation
+
+This is especially common with spec-driven work using coding agents. A repo can
+accumulate many documents that all address similar requirements, designs, or
+research questions from different angles. When those documents are handed back
+to an agent as context, the model gets a large, unfocused pile of partially
+overlapping intent instead of a clear source of truth.
+
+Docs Map is built for that problem. It profiles documents, normalizes
+aboutness and reader-intent labels, builds a topic/facet view of the corpus,
+and suggests document groups that a human developer or agent can consolidate.
+The goal is to make documentation context smaller, sharper, and easier to trust
+before it becomes input to more agent work.
+
+`dryscope` makes that first pass cheaper. It parses code into comparable units,
+chunks docs by section, ranks similar items, and can run an LLM-backed review
+pass to separate likely `refactor`, `review`, and `noise` findings. The result
+is a concrete starting point: a smaller set of files, sections, and reasons that
+you can hand to an agent or reviewer before spending expensive attention on the
+full repository.
+
+### Docs Map Taxonomy Example
+
+Suppose a repo has agent-written docs like:
+
+| Document | Raw signals |
+| --- | --- |
+| `docs/search-requirements.md` | product requirements, search filters, ranking expectations |
+| `docs/search-design.md` | search architecture, indexing pipeline, query API |
+| `research/vector-search.md` | embeddings, retrieval quality, ranking experiments |
+| `plans/search-rollout.md` | rollout checklist, implementation status, open risks |
+
+Docs Map turns those local descriptions into a corpus-level taxonomy:
+
+| Taxonomy area | Example output |
+| --- | --- |
+| Canonical aboutness labels | `search experience`, `indexing pipeline`, `ranking quality`, `vector retrieval` |
+| Reader intents | `define requirements`, `explain architecture`, `compare approaches`, `track rollout` |
+| Facets | `doc_role: requirements/design/research/plan`, `lifecycle: current/draft`, `audience: maintainer/agent` |
+| Topic tree | `Search` -> `Query behavior`, `Indexing`, `Ranking`, `Rollout` |
+| Consolidation cluster | group the requirements, design, research, and rollout docs around `search experience` when they should share one source of truth or cross-reference each other |
+
+That taxonomy is what lets dryscope report "these docs overlap in purpose" even
+when the same paragraphs were not copied between files.
+
+### Section Match Example
+
+Docs Map works at the document and corpus level. Section Match works at the
+section level.
+
+Two documents can be different in purpose but still repeat the same supporting
+material. For example, a requirements spec and a corresponding design doc should
+not be merged just because they belong to the same feature. But both might
+contain a `Configuration` section that explains the same environment variables,
+`.rc` files, feature flags, or deployment settings.
+
+| Document | Document-level purpose | Repeated section-level content |
+| --- | --- | --- |
+| `docs/search-requirements.md` | define user-visible behavior and constraints | `Configuration`: required environment variables and defaults |
+| `docs/search-design.md` | explain architecture, components, and data flow | `Configuration`: same environment variables, rc file, and feature flags |
+
+Section Match is built to find that microscopic redundancy. It points to
+specific repeated sections where one shared reference, one canonical
+configuration page, or a cross-link would reduce drift. It does not imply the
+whole documents have the same purpose.
+
+### How The Tracks Fit Together
+
+| Track | Motivation |
+| --- | --- |
+| Code Match | Find repeated implementation shapes before a refactor starts, especially in agent-generated code where similar logic may be recreated in different files. |
+| Code Review | Filter Code Match output so framework boilerplate, coincidental structure, and low-payoff matches do not consume expensive human or model attention. |
+| Docs Map | Find document-level intent overlap across requirements, designs, research, plans, and status docs so a repo can recover clearer sources of truth. |
+| Section Match | Find repeated section-level material inside otherwise distinct documents, such as duplicated configuration or deployment explanations. |
+| Doc Pair Review | Add deeper judgment for selected related document pairs when the relationship is not obvious from taxonomy or section similarity alone. |
+| Docs Report Pack | Package the docs findings as Markdown, HTML, and JSON so humans can review them and agents can consume the same narrowed context. |
 
 ## Features
 
 - **Code Match** — Python, Go, Java, JavaScript, JSX, TypeScript, and TSX duplicate-code candidates via tree-sitter + embeddings
 - **Code Review** — optional LLM/policy pass that classifies Code Match findings as `refactor`, `review`, or `noise`
 - **Docs Map** — LLM document descriptors, canonical label taxonomy, topic tree, facets, diagnostics, and consolidation clusters
-- **Section Match** — Markdown, MDX, RST, AsciiDoc, and plaintext via heading chunks and embedding similarity
+- **Section Match** — Markdown, MDX, RST, AsciiDoc, and plaintext section-level redundancy via heading chunks and embedding similarity
 - **Doc Pair Review** — optional LLM analysis of selected related document pairs
 - **Docs Report Pack** — HTML/Markdown/JSON docs reports with numbered collapsible sections and the same structure across formats
 - **Saved report cleanup** — prune old `.dryscope/runs` outputs by count or date, dry-run first by default
 - **Hybrid similarity** — 70% embedding cosine + 30% token Jaccard with size-ratio filtering
-- **Code Review** — optional LLM/policy pass classifies findings as `refactor`, `review`, or `noise`
 - **Deterministic escalation policy** — keeps `review` findings plus higher-value `refactor` findings for expensive follow-up
 - **Project profiles** — auto-detects Django and pytest-factories, applies smart exclusions
 - **Agent skills** — install as both a Claude Code and Codex skill
@@ -36,7 +151,7 @@ documentation intents that are most likely to deserve follow-up.
 ## Positioning
 
 `dryscope` is best used as:
-- an AI preflight scanner before repository-wide refactors
+- a first-pass scanner before repository-wide refactors
 - a repo narrowing tool before handing work to an agent or stronger model
 - a Code Match candidate generator for structural refactor opportunities
 - a Docs Map and Section Match aid for answering "how should these docs be organized?"
@@ -74,22 +189,22 @@ uv pip install ".[local-embeddings]"
 # Code Match (default)
 dryscope scan /path/to/project
 
-# Section Match
+# Section Match (docs default)
 dryscope scan /path/to/docs --docs
 
-# Local embeddings, after installing .[local-embeddings]
+# Code Match with local embeddings, after installing .[local-embeddings]
 dryscope scan /path/to/project --embedding-model all-MiniLM-L6-v2
 
-# Full docs run: Docs Map + Section Match + Doc Pair Review
+# Docs Report Pack: Docs Map + Section Match + Doc Pair Review
 dryscope scan /path/to/docs --docs --stage docs-report-pack --backend cli -f html
 
-# Both code and docs
+# Code Match + Section Match
 dryscope scan /path/to/project --code --docs
 
-# JSON output for agents
+# Code Match JSON output for agents
 dryscope scan /path/to/project -f json
 
-# Filter by language
+# Code Match filtered by language
 dryscope scan /path/to/project --lang python
 
 # Code Review
@@ -98,7 +213,7 @@ dryscope scan /path/to/project --verify
 # Bounded Code Review for large duplicate-rich repos
 dryscope scan /path/to/project --verify --max-findings 15
 
-# Stricter threshold
+# Stricter Code Match threshold and token filter
 dryscope scan /path/to/project -t 0.95 --min-tokens 15
 ```
 
