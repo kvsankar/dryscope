@@ -5,9 +5,12 @@ from __future__ import annotations
 import json
 import subprocess
 from collections import defaultdict
+from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from html import escape
 from pathlib import Path
+from typing import cast
 
 from rich.console import Console
 from rich.panel import Panel
@@ -28,6 +31,16 @@ from dryscope.terminology import (
     DOCS_SECTION_MATCH_SLUG,
     DOCS_STAGE_LABELS,
 )
+
+
+@dataclass
+class MarkdownContext:
+    has_settings: bool
+    recommendations: list[dict]
+    docs_map: dict
+    overview: dict
+    section_titles: dict[str, str]
+    child_titles: dict[str, str]
 
 
 def _short_path(path: str | None) -> str:
@@ -358,7 +371,7 @@ def _html_code(value: object) -> str:
     return f"<code>{escape(str(value or ''))}</code>"
 
 
-def _html_list(items: list[object]) -> str:
+def _html_list(items: Sequence[object]) -> str:
     """Return a full escaped HTML list for collapsible markdown sections."""
     if not items:
         return "<p>None.</p>"
@@ -366,7 +379,7 @@ def _html_list(items: list[object]) -> str:
     return f"<ul>\n{rows}\n</ul>"
 
 
-def _html_text_list(items: list[object]) -> str:
+def _html_text_list(items: Sequence[object]) -> str:
     """Return a full escaped HTML list for non-code text values."""
     if not items:
         return "<p>None.</p>"
@@ -394,6 +407,129 @@ def _markdown_table_cell(value: object) -> str:
     return " ".join(text.split())
 
 
+def _render_terminal_section_match(console: Console, similarity_pairs: list[OverlapPair]) -> None:
+    console.print(f"[bold]{DOCS_SECTION_MATCH}[/bold]", style="cyan")
+    console.print(f"Found [bold]{len(similarity_pairs)}[/bold] matched section pairs")
+    console.print()
+
+    if not similarity_pairs:
+        return
+    table = Table(title="Top Section Match Results", show_lines=True)
+    table.add_column("Similarity", style="yellow", width=10)
+    table.add_column("Section A", style="green")
+    table.add_column("Section B", style="green")
+
+    for pair in similarity_pairs[:10]:
+        heading_a = " > ".join(pair.chunk_a.heading_path) or "(no heading)"
+        heading_b = " > ".join(pair.chunk_b.heading_path) or "(no heading)"
+        loc_a = f"{_short_path(pair.chunk_a.document_path)}: {heading_a}"
+        loc_b = f"{_short_path(pair.chunk_b.document_path)}: {heading_b}"
+        sim_str = (
+            f"{pair.embedding_similarity:.3f}" if pair.embedding_similarity is not None else "-"
+        )
+        table.add_row(sim_str, loc_a, loc_b)
+
+    console.print(table)
+    console.print()
+
+
+def _render_terminal_doc_pair_review(console: Console, result: AnalysisResult) -> None:
+    if not result.doc_pair_analyses:
+        return
+    console.print(f"[bold]{DOCS_PAIR_REVIEW}[/bold]", style="cyan")
+    console.print(f"Analyzed [bold]{len(result.doc_pair_analyses)}[/bold] document pairs")
+    console.print()
+
+    for analysis in result.doc_pair_analyses:
+        rel = analysis.relationship
+        conf = analysis.confidence
+        console.print(
+            f"  [bold]{_short_path(analysis.doc_a_path)}[/bold] "
+            f"{'<->' if rel == 'complementary' else '->'} "
+            f"[bold]{_short_path(analysis.doc_b_path)}[/bold] "
+            f"([dim]{rel}[/dim], {conf} confidence)"
+        )
+        console.print(f"    {_short_path(analysis.doc_a_path)}: {analysis.doc_a_purpose}")
+        console.print(f"    {_short_path(analysis.doc_b_path)}: {analysis.doc_b_purpose}")
+        for topic in analysis.topics:
+            canonical = _short_path(topic.canonical)
+            console.print(
+                f"    Topic: [bold]{topic.name}[/bold] -> "
+                f"canonical: [green]{canonical}[/green], action: {topic.action_for_other}"
+            )
+        console.print()
+
+
+def _render_terminal_topic_clusters(console: Console, result: AnalysisResult) -> None:
+    coverage_clusters = _topic_document_clusters(result)
+    if not coverage_clusters:
+        return
+    console.print("[bold]Topic Coverage Clusters:[/bold]", style="cyan")
+    console.print(
+        f"Found [bold]{len(coverage_clusters)}[/bold] canonical topics covered by 2+ documents"
+    )
+    for i, cluster in enumerate(coverage_clusters, 1):
+        docs = cluster.get("documents", [])
+        console.print(
+            f'  {i}. [bold]"{cluster.get("topic", "(unnamed topic)")}"[/bold] '
+            f"({len(docs)} documents, {cluster.get('mention_count', 0)} mentions)"
+        )
+        for doc in docs:
+            console.print(f"     - {_short_path(doc)}")
+    console.print()
+
+
+def _render_terminal_taxonomy(console: Console, result: AnalysisResult) -> None:
+    if not result.topic_taxonomy:
+        return
+    canonical_topics = result.topic_taxonomy.get("canonical_topics", [])
+    if not canonical_topics:
+        return
+    console.print("[bold]Canonical Topics:[/bold]", style="cyan")
+    for topic in canonical_topics[:10]:
+        console.print(
+            f"  - [bold]{topic['name']}[/bold] "
+            f"({topic['document_count']} docs, {topic['mention_count']} mentions)"
+        )
+    console.print()
+
+
+def _render_terminal_docs_map(console: Console, result: AnalysisResult) -> None:
+    docs_map = _docs_map(result)
+    if not docs_map:
+        return
+    console.print(f"[bold]{DOCS_MAP}:[/bold]", style="cyan")
+    console.print(
+        f"  Topic groups: [bold]{len(docs_map.get('topic_tree', []))}[/bold], "
+        f"facets: [bold]{len(docs_map.get('facets', {}))}[/bold], "
+        f"diagnostics: [bold]{len(docs_map.get('diagnostics', []))}[/bold]"
+    )
+    for parent in docs_map.get("topic_tree", [])[:8]:
+        children = parent.get("children", [])
+        console.print(
+            f"  - [bold]{parent.get('label', '(unnamed)')}[/bold] ({len(children)} children)"
+        )
+    console.print()
+
+
+def _render_terminal_suggestions(console: Console, suggestions: list[dict] | None) -> None:
+    if not suggestions:
+        return
+    console.print("[bold]Refactoring Suggestions:[/bold]")
+    for i, s in enumerate(suggestions, 1):
+        code_name = s.get("code", "?")
+        docs = s.get("documents", [])
+        canonical = s.get("canonical", "?")
+        console.print(f'  {i}. [bold]"{code_name}"[/bold] ({len(docs)} documents)')
+        console.print(f"     -> Canonical: [green]{_short_path(canonical)}[/green]")
+        for sug in s.get("suggestions", []):
+            doc = _short_path(sug.get("document", "?"))
+            action = sug.get("action", "?")
+            reason = sug.get("reason", "")
+            console.print(f"     -> {doc}: {action} - {reason}")
+    console.print()
+
+
 def render_terminal(
     result: AnalysisResult,
     similarity_pairs: list[OverlapPair],
@@ -413,159 +549,66 @@ def render_terminal(
     )
     console.print()
 
-    # Section Match
-    console.print(f"[bold]{DOCS_SECTION_MATCH}[/bold]", style="cyan")
-    console.print(f"Found [bold]{len(similarity_pairs)}[/bold] matched section pairs")
-    console.print()
-
-    if similarity_pairs:
-        table = Table(title="Top Section Match Results", show_lines=True)
-        table.add_column("Similarity", style="yellow", width=10)
-        table.add_column("Section A", style="green")
-        table.add_column("Section B", style="green")
-
-        for pair in similarity_pairs[:10]:
-            heading_a = " > ".join(pair.chunk_a.heading_path) or "(no heading)"
-            heading_b = " > ".join(pair.chunk_b.heading_path) or "(no heading)"
-            loc_a = f"{_short_path(pair.chunk_a.document_path)}: {heading_a}"
-            loc_b = f"{_short_path(pair.chunk_b.document_path)}: {heading_b}"
-            sim_str = (
-                f"{pair.embedding_similarity:.3f}" if pair.embedding_similarity is not None else "—"
-            )
-            table.add_row(sim_str, loc_a, loc_b)
-
-        console.print(table)
-        console.print()
-
-    # Doc Pair Review
-    if result.doc_pair_analyses:
-        console.print(f"[bold]{DOCS_PAIR_REVIEW}[/bold]", style="cyan")
-        console.print(f"Analyzed [bold]{len(result.doc_pair_analyses)}[/bold] document pairs")
-        console.print()
-
-        for analysis in result.doc_pair_analyses:
-            rel = analysis.relationship
-            conf = analysis.confidence
-            console.print(
-                f"  [bold]{_short_path(analysis.doc_a_path)}[/bold] "
-                f"{'↔' if rel == 'complementary' else '→'} "
-                f"[bold]{_short_path(analysis.doc_b_path)}[/bold] "
-                f"([dim]{rel}[/dim], {conf} confidence)"
-            )
-            console.print(f"    {_short_path(analysis.doc_a_path)}: {analysis.doc_a_purpose}")
-            console.print(f"    {_short_path(analysis.doc_b_path)}: {analysis.doc_b_purpose}")
-            for topic in analysis.topics:
-                action = topic.action_for_other
-                canonical = _short_path(topic.canonical)
-                console.print(
-                    f"    Topic: [bold]{topic.name}[/bold] → "
-                    f"canonical: [green]{canonical}[/green], action: {action}"
-                )
-            console.print()
-
-    coverage_clusters = _topic_document_clusters(result)
-    if coverage_clusters:
-        console.print("[bold]Topic Coverage Clusters:[/bold]", style="cyan")
-        console.print(
-            f"Found [bold]{len(coverage_clusters)}[/bold] canonical topics covered by 2+ documents"
-        )
-        for i, cluster in enumerate(coverage_clusters, 1):
-            docs = cluster.get("documents", [])
-            console.print(
-                f'  {i}. [bold]"{cluster.get("topic", "(unnamed topic)")}"[/bold] '
-                f"({len(docs)} documents, {cluster.get('mention_count', 0)} mentions)"
-            )
-            for doc in docs:
-                console.print(f"     • {_short_path(doc)}")
-        console.print()
-
-    if result.topic_taxonomy:
-        canonical_topics = result.topic_taxonomy.get("canonical_topics", [])
-        if canonical_topics:
-            console.print("[bold]Canonical Topics:[/bold]", style="cyan")
-            for topic in canonical_topics[:10]:
-                console.print(
-                    f"  • [bold]{topic['name']}[/bold] "
-                    f"({topic['document_count']} docs, {topic['mention_count']} mentions)"
-                )
-            console.print()
-
-    docs_map = _docs_map(result)
-    if docs_map:
-        console.print(f"[bold]{DOCS_MAP}:[/bold]", style="cyan")
-        console.print(
-            f"  Topic groups: [bold]{len(docs_map.get('topic_tree', []))}[/bold], "
-            f"facets: [bold]{len(docs_map.get('facets', {}))}[/bold], "
-            f"diagnostics: [bold]{len(docs_map.get('diagnostics', []))}[/bold]"
-        )
-        for parent in docs_map.get("topic_tree", [])[:8]:
-            children = parent.get("children", [])
-            console.print(
-                f"  • [bold]{parent.get('label', '(unnamed)')}[/bold] ({len(children)} children)"
-            )
-        console.print()
-
-    # Refactoring Suggestions
-    if suggestions:
-        console.print("[bold]Refactoring Suggestions:[/bold]")
-        for i, s in enumerate(suggestions, 1):
-            code_name = s.get("code", "?")
-            docs = s.get("documents", [])
-            canonical = s.get("canonical", "?")
-            console.print(f'  {i}. [bold]"{code_name}"[/bold] ({len(docs)} documents)')
-            console.print(f"     → Canonical: [green]{_short_path(canonical)}[/green]")
-            for sug in s.get("suggestions", []):
-                doc = _short_path(sug.get("document", "?"))
-                action = sug.get("action", "?")
-                reason = sug.get("reason", "")
-                console.print(f"     → {doc}: {action} — {reason}")
-        console.print()
+    _render_terminal_section_match(console, similarity_pairs)
+    _render_terminal_doc_pair_review(console, result)
+    _render_terminal_topic_clusters(console, result)
+    _render_terminal_taxonomy(console, result)
+    _render_terminal_docs_map(console, result)
+    _render_terminal_suggestions(console, suggestions)
 
 
-def render_markdown(
+def _build_markdown_context(
     result: AnalysisResult,
     similarity_pairs: list[OverlapPair],
     suggestions: list[dict] | None,
-    settings: Settings | None = None,
-    project_root: Path | None = None,
-    stages_run: list[str] | None = None,
-) -> str:
-    """Render analysis results as markdown.
-
-    When settings and project_root are provided, includes dashboard,
-    recommendations, and methodology sections.
-
-    Args:
-        stages_run: List of track slugs that actually executed,
-            e.g. ["docs-section-match", "docs-map", "docs-pair-review"].
-    """
-    lines: list[str] = []
-    lines.append("# dryscope Report\n")
-
+    settings: Settings | None,
+    project_root: Path | None,
+    stages_run: list[str],
+) -> MarkdownContext:
     has_settings = settings is not None and project_root is not None
-
-    # Use provided stages or fall back to empty
-    if stages_run is None:
-        stages_run = []
-
-    # Build recommendations early (needed for dashboard count)
-    recommendations: list[dict] = []
-    if has_settings and similarity_pairs:
-        recommendations = build_recommendations(similarity_pairs, suggestions, project_root)
-
-    # ── Dashboard ──────────────────────────────────────────────────────
-    n_docs = len(result.documents)
-    n_pairs = len(similarity_pairs)
-    n_recs = len(recommendations)
-    pipeline_dots = (
-        "  ".join(f"● {DOCS_STAGE_LABELS.get(s, s)}" for s in stages_run) if stages_run else "—"
+    recommendations = (
+        build_recommendations(similarity_pairs, suggestions, project_root)
+        if has_settings and similarity_pairs
+        else []
     )
     docs_map = _docs_map(result)
+    overview = _build_run_overview(result, similarity_pairs, recommendations, stages_run=stages_run)
+    report_sections = _report_structure(overview, recommendations, result, similarity_pairs)
+    section_titles = {section["id"]: section["title_numbered"] for section in report_sections}
+    child_titles = {
+        child["id"]: child["title_numbered"]
+        for section in report_sections
+        for child in section.get("children", [])
+    }
+    return MarkdownContext(
+        has_settings=has_settings,
+        recommendations=recommendations,
+        docs_map=docs_map,
+        overview=overview,
+        section_titles=section_titles,
+        child_titles=child_titles,
+    )
+
+
+def _append_markdown_dashboard(
+    lines: list[str],
+    result: AnalysisResult,
+    similarity_pairs: list[OverlapPair],
+    context: MarkdownContext,
+    project_root: Path | None,
+    stages_run: list[str],
+) -> None:
+    n_docs = len(result.documents)
+    n_pairs = len(similarity_pairs)
+    n_recs = len(context.recommendations)
+    pipeline_dots = (
+        "  ".join(f"* {DOCS_STAGE_LABELS.get(s, s)}" for s in stages_run) if stages_run else "-"
+    )
     n_profiled_docs = len(result.document_descriptors) or n_docs
-    n_docs_map_groups = len(docs_map.get("topic_tree", []))
-    n_docs_map_facets = len(docs_map.get("facets", {}))
+    n_docs_map_groups = len(context.docs_map.get("topic_tree", []))
+    n_docs_map_facets = len(context.docs_map.get("facets", {}))
     n_consolidation_clusters = len(_topic_document_clusters(result))
-    docs_map_ran = bool(docs_map or result.document_descriptors or result.topic_taxonomy)
+    docs_map_ran = bool(context.docs_map or result.document_descriptors or result.topic_taxonomy)
     section_match_ran = bool(DOCS_SECTION_MATCH_SLUG in set(stages_run) or similarity_pairs)
 
     metric_cards = [_metric_card(n_docs, "Documents")]
@@ -594,52 +637,34 @@ def render_markdown(
         )
     if not docs_map_ran and not section_match_ran:
         metric_cards.append(_metric_card(len(result.chunks), "Sections"))
-    track_summary = " ".join(track_bits) if track_bits else "No docs analysis tracks ran."
 
-    # Scan context
     scan_path_str = str(project_root) if project_root else "unknown"
     git_name = ""
     if project_root:
         commit = _git_commit(project_root)
-        if commit:
-            git_name = f" ({project_root.name}, {commit[:8]})"
-        else:
-            git_name = f" ({project_root.name})"
+        git_name = f" ({project_root.name}, {commit[:8]})" if commit else f" ({project_root.name})"
 
     lines.append(
         '<div class="dashboard">\n'
         f"{''.join(metric_cards)}"
         f'  <div class="pipeline-bar">Pipeline: {pipeline_dots}</div>\n'
-        f'  <div class="track-summary">{track_summary}</div>\n'
+        f'  <div class="track-summary">{" ".join(track_bits) if track_bits else "No docs analysis tracks ran."}</div>\n'
         f'  <div class="scan-context">Scanned: <code>{scan_path_str}</code>{git_name}</div>\n'
         "</div>\n"
     )
 
-    overview = _build_run_overview(
-        result,
-        similarity_pairs,
-        recommendations,
-        stages_run=stages_run,
-    )
-    report_sections = _report_structure(
-        overview,
-        recommendations,
-        result,
-        similarity_pairs,
-    )
-    section_titles = {section["id"]: section["title_numbered"] for section in report_sections}
-    child_titles = {
-        child["id"]: child["title_numbered"]
-        for section in report_sections
-        for child in section.get("children", [])
-    }
 
-    # ── Run Overview ───────────────────────────────────────────────────
-    lines.append(f"## {section_titles['run_overview']}\n")
+def _append_markdown_run_overview(
+    lines: list[str],
+    result: AnalysisResult,
+    context: MarkdownContext,
+    project_root: Path | None,
+) -> None:
+    lines.append(f"## {context.section_titles['run_overview']}\n")
     lines.append("### Capabilities Exercised\n")
     lines.append("| Capability | Ran | What It Does | Result |")
     lines.append("|------------|-----|--------------|--------|")
-    for capability in overview["capabilities"].values():
+    for capability in context.overview["capabilities"].values():
         lines.append(
             f"| {capability['label']} "
             f"| {_ran_text(capability['ran'])} "
@@ -651,7 +676,7 @@ def render_markdown(
     lines.append("### Docs Track Summary\n")
     lines.append("| Aspect | Ran | Pipeline | Results |")
     lines.append("|--------|-----|----------|---------|")
-    for aspect in overview["docs_track_aspects"].values():
+    for aspect in context.overview["docs_track_aspects"].values():
         results = ", ".join(
             f"{key.replace('_', ' ')}: {value}" for key, value in aspect["results"].items()
         )
@@ -678,354 +703,468 @@ def render_markdown(
         )
         lines.append("")
 
-    # ── Docs Map ───────────────────────────────────────────────────────
-    if docs_map:
-        lines.append(f"## {section_titles['docs_map']}\n")
+
+def _append_markdown_docs_map(
+    lines: list[str],
+    context: MarkdownContext,
+    project_root: Path | None,
+) -> None:
+    docs_map = context.docs_map
+    if not docs_map:
+        return
+    lines.append(f"## {context.section_titles['docs_map']}\n")
+    lines.append(
+        f"Method: `{docs_map.get('method', 'unknown')}`. "
+        f"Top-level topic groups: {len(docs_map.get('topic_tree', []))}. "
+        f"Facet dimensions: {len(docs_map.get('facets', {}))}. "
+        f"Diagnostics: {len(docs_map.get('diagnostics', []))}.\n"
+    )
+    _append_markdown_topic_tree(lines, docs_map, project_root)
+    _append_markdown_facets(lines, docs_map, project_root)
+    _append_markdown_diagnostics(lines, docs_map)
+
+
+def _append_markdown_topic_tree(
+    lines: list[str], docs_map: dict, project_root: Path | None
+) -> None:
+    topic_tree = docs_map.get("topic_tree", [])
+    if not topic_tree:
+        return
+    lines.append("### Discovered Topic Tree\n")
+    for parent in topic_tree:
+        child_blocks = _markdown_topic_child_blocks(parent, project_root)
         lines.append(
-            f"Method: `{docs_map.get('method', 'unknown')}`. "
-            f"Top-level topic groups: {len(docs_map.get('topic_tree', []))}. "
-            f"Facet dimensions: {len(docs_map.get('facets', {}))}. "
-            f"Diagnostics: {len(docs_map.get('diagnostics', []))}.\n"
+            _details_block(
+                f"{parent.get('label') or '(unnamed group)'} ({len(parent.get('children', []))} topics)",
+                "\n".join(child_blocks) if child_blocks else "<p>No child topics.</p>",
+                class_name="report-item",
+                open_=True,
+            )
         )
+    lines.append("")
 
-        topic_tree = docs_map.get("topic_tree", [])
-        if topic_tree:
-            lines.append("### Discovered Topic Tree\n")
-            for parent in topic_tree:
-                label = parent.get("label") or "(unnamed group)"
-                description = parent.get("description") or ""
-                child_blocks: list[str] = []
-                if description:
-                    child_blocks.append(f"<p>{escape(str(description))}</p>")
-                for child in parent.get("children", []):
-                    child_label = child.get("label") or "(unnamed topic)"
-                    doc_count = child.get("document_count", 0)
-                    child_body: list[str] = []
-                    child_desc = child.get("description")
-                    if child_desc:
-                        child_body.append(f"<p>{escape(str(child_desc))}</p>")
-                    topics = child.get("topics", [])
-                    if topics:
-                        child_body.append(
-                            _details_block(
-                                f"{len(topics)} canonical labels",
-                                _html_list([str(topic) for topic in topics]),
-                                class_name="report-list",
-                            )
-                        )
-                    documents = child.get("documents", [])
-                    if documents:
-                        child_body.append(
-                            _details_block(
-                                f"{len(documents)} documents",
-                                _html_list(
-                                    [_display_path(str(doc), project_root) for doc in documents]
-                                ),
-                                class_name="report-list",
-                            )
-                        )
-                    child_blocks.append(
-                        _details_block(
-                            f"{child_label} ({doc_count} docs)",
-                            "\n".join(child_body)
-                            if child_body
-                            else "<p>No additional details.</p>",
-                            class_name="report-item",
-                        )
-                    )
-                lines.append(
-                    _details_block(
-                        f"{label} ({len(parent.get('children', []))} topics)",
-                        "\n".join(child_blocks) if child_blocks else "<p>No child topics.</p>",
-                        class_name="report-item",
-                        open_=True,
-                    )
+
+def _markdown_topic_child_blocks(parent: dict, project_root: Path | None) -> list[str]:
+    blocks: list[str] = []
+    description = parent.get("description") or ""
+    if description:
+        blocks.append(f"<p>{escape(str(description))}</p>")
+    for child in parent.get("children", []):
+        child_body: list[str] = []
+        child_desc = child.get("description")
+        if child_desc:
+            child_body.append(f"<p>{escape(str(child_desc))}</p>")
+        topics = child.get("topics", [])
+        if topics:
+            child_body.append(
+                _details_block(
+                    f"{len(topics)} canonical labels",
+                    _html_list([str(topic) for topic in topics]),
+                    class_name="report-list",
                 )
-            lines.append("")
-
-        facets = docs_map.get("facets", {})
-        if facets:
-            lines.append("### Facets\n")
-            for facet_name, facet in sorted(facets.items()):
-                facet_body: list[str] = []
-                description = facet.get("description") if isinstance(facet, dict) else ""
-                if description:
-                    facet_body.append(f"<p>{escape(str(description))}</p>")
-                values = facet.get("values", []) if isinstance(facet, dict) else []
-                for value in values:
-                    label = value.get("value", "(unspecified)")
-                    docs = value.get("documents", [])
-                    evidence = value.get("evidence", [])
-                    value_body: list[str] = []
-                    if docs:
-                        value_body.append(
-                            _details_block(
-                                f"{len(docs)} documents",
-                                _html_list([_display_path(str(doc), project_root) for doc in docs]),
-                                class_name="report-list",
-                            )
-                        )
-                    if evidence:
-                        value_body.append(
-                            _details_block(
-                                f"{len(evidence)} evidence items",
-                                _html_text_list(evidence),
-                                class_name="report-list",
-                            )
-                        )
-                    facet_body.append(
-                        _details_block(
-                            f"{label} ({len(docs)} docs)",
-                            "\n".join(value_body)
-                            if value_body
-                            else "<p>No additional details.</p>",
-                            class_name="report-item",
-                        )
-                    )
-                lines.append(
-                    _details_block(
-                        f"{facet_name} ({len(values)} values)",
-                        "\n".join(facet_body) if facet_body else "<p>No facet values.</p>",
-                        class_name="report-item",
-                        open_=True,
-                    )
+            )
+        documents = child.get("documents", [])
+        if documents:
+            child_body.append(
+                _details_block(
+                    f"{len(documents)} documents",
+                    _html_list([_display_path(str(doc), project_root) for doc in documents]),
+                    class_name="report-list",
                 )
-            lines.append("")
+            )
+        blocks.append(
+            _details_block(
+                f"{child.get('label') or '(unnamed topic)'} ({child.get('document_count', 0)} docs)",
+                "\n".join(child_body) if child_body else "<p>No additional details.</p>",
+                class_name="report-item",
+            )
+        )
+    return blocks
 
-        diagnostics = docs_map.get("diagnostics", [])
-        if diagnostics:
-            lines.append("### Docs Map Diagnostics\n")
-            lines.append("| Severity | Kind | Issue | Recommendation |")
-            lines.append("|----------|------|-------|----------------|")
-            for item in diagnostics:
-                lines.append(
-                    f"| {_markdown_table_cell(item.get('severity', ''))} "
-                    f"| `{_markdown_table_cell(item.get('kind', ''))}` "
-                    f"| {_markdown_table_cell(item.get('message', ''))} "
-                    f"| {_markdown_table_cell(item.get('recommendation', ''))} |"
-                )
-            lines.append("")
 
-    # ── Docs Map Clusters ──────────────────────────────────────────────
-    coverage_clusters = _topic_document_clusters(result)
-    if coverage_clusters:
-        lines.append(f"## {section_titles['docs_map_clusters']}\n")
+def _append_markdown_facets(lines: list[str], docs_map: dict, project_root: Path | None) -> None:
+    facets = docs_map.get("facets", {})
+    if not facets:
+        return
+    lines.append("### Facets\n")
+    for facet_name, facet in sorted(facets.items()):
+        facet_body = _markdown_facet_body(facet, project_root)
+        values = facet.get("values", []) if isinstance(facet, dict) else []
         lines.append(
-            f"Found {len(coverage_clusters)} canonical labels covered by 2+ documents. "
-            "These are candidates to inspect for consolidation, splitting, or stronger cross-links.\n"
+            _details_block(
+                f"{facet_name} ({len(values)} values)",
+                "\n".join(facet_body) if facet_body else "<p>No facet values.</p>",
+                class_name="report-item",
+                open_=True,
+            )
         )
-        for i, cluster in enumerate(coverage_clusters, 1):
-            topic = cluster.get("topic") or "(unnamed topic)"
-            docs = cluster.get("documents", [])
-            mention_count = cluster.get("mention_count", 0)
-            cluster_body = [
+    lines.append("")
+
+
+def _markdown_facet_body(facet: object, project_root: Path | None) -> list[str]:
+    if not isinstance(facet, dict):
+        return []
+    facet_data = cast(dict[str, object], facet)
+    facet_body: list[str] = []
+    description = facet_data.get("description")
+    if description:
+        facet_body.append(f"<p>{escape(str(description))}</p>")
+    raw_values = facet_data.get("values", [])
+    values = raw_values if isinstance(raw_values, list) else []
+    for value in values:
+        if not isinstance(value, dict):
+            continue
+        value_data = cast(dict[str, object], value)
+        raw_docs = value_data.get("documents")
+        raw_evidence = value_data.get("evidence")
+        docs = raw_docs if isinstance(raw_docs, list) else []
+        evidence = raw_evidence if isinstance(raw_evidence, list) else []
+        value_body: list[str] = []
+        if docs:
+            value_body.append(
                 _details_block(
                     f"{len(docs)} documents",
                     _html_list([_display_path(str(doc), project_root) for doc in docs]),
                     class_name="report-list",
                 )
-            ]
-            aliases = cluster.get("aliases", [])
-            if aliases:
-                cluster_body.append(
-                    _details_block(
-                        f"{len(aliases)} aliases",
-                        _html_list([str(alias) for alias in aliases]),
-                        class_name="report-list",
-                    )
-                )
-            lines.append(
+            )
+        if evidence:
+            value_body.append(
                 _details_block(
-                    f"{i}. {topic} ({len(docs)} docs, {mention_count} mentions)",
-                    "\n".join(cluster_body),
-                    class_name="report-item",
+                    f"{len(evidence)} evidence items",
+                    _html_text_list(evidence),
+                    class_name="report-list",
                 )
             )
-        lines.append("")
+        facet_body.append(
+            _details_block(
+                f"{value_data.get('value', '(unspecified)')} ({len(docs)} docs)",
+                "\n".join(value_body) if value_body else "<p>No additional details.</p>",
+                class_name="report-item",
+            )
+        )
+    return facet_body
 
-    # ── Section Match ─────────────────────────────────────────────────
-    lines.append(f"## {section_titles['docs_section_match']}\n")
+
+def _append_markdown_diagnostics(lines: list[str], docs_map: dict) -> None:
+    diagnostics = docs_map.get("diagnostics", [])
+    if not diagnostics:
+        return
+    lines.append("### Docs Map Diagnostics\n")
+    lines.append("| Severity | Kind | Issue | Recommendation |")
+    lines.append("|----------|------|-------|----------------|")
+    for item in diagnostics:
+        lines.append(
+            f"| {_markdown_table_cell(item.get('severity', ''))} "
+            f"| `{_markdown_table_cell(item.get('kind', ''))}` "
+            f"| {_markdown_table_cell(item.get('message', ''))} "
+            f"| {_markdown_table_cell(item.get('recommendation', ''))} |"
+        )
+    lines.append("")
+
+
+def _append_markdown_docs_map_clusters(
+    lines: list[str],
+    result: AnalysisResult,
+    context: MarkdownContext,
+    project_root: Path | None,
+) -> None:
+    coverage_clusters = _topic_document_clusters(result)
+    if not coverage_clusters:
+        return
+    lines.append(f"## {context.section_titles['docs_map_clusters']}\n")
+    lines.append(
+        f"Found {len(coverage_clusters)} canonical labels covered by 2+ documents. "
+        "These are candidates to inspect for consolidation, splitting, or stronger cross-links.\n"
+    )
+    for i, cluster in enumerate(coverage_clusters, 1):
+        docs = cluster.get("documents", [])
+        cluster_body = [
+            _details_block(
+                f"{len(docs)} documents",
+                _html_list([_display_path(str(doc), project_root) for doc in docs]),
+                class_name="report-list",
+            )
+        ]
+        aliases = cluster.get("aliases", [])
+        if aliases:
+            cluster_body.append(
+                _details_block(
+                    f"{len(aliases)} aliases",
+                    _html_list([str(alias) for alias in aliases]),
+                    class_name="report-list",
+                )
+            )
+        lines.append(
+            _details_block(
+                f"{i}. {cluster.get('topic') or '(unnamed topic)'} "
+                f"({len(docs)} docs, {cluster.get('mention_count', 0)} mentions)",
+                "\n".join(cluster_body),
+                class_name="report-item",
+            )
+        )
+    lines.append("")
+
+
+def _append_markdown_section_match(
+    lines: list[str],
+    similarity_pairs: list[OverlapPair],
+    context: MarkdownContext,
+) -> None:
+    lines.append(f"## {context.section_titles['docs_section_match']}\n")
     lines.append(
         "Section Match is the docs section-level pass: split documents into sections, "
         "embed them, and report matched cross-document section pairs.\n"
     )
     lines.append(f"Found {len(similarity_pairs)} matched section pairs.\n")
+    _append_markdown_recommendations(lines, context)
+    _append_markdown_matched_pairs(lines, similarity_pairs, context)
 
-    if recommendations:
-        lines.append(f"### {child_titles['docs_section_match_recommendations']}\n")
+
+def _append_markdown_recommendations(lines: list[str], context: MarkdownContext) -> None:
+    if not context.recommendations:
+        return
+    lines.append(f"### {context.child_titles['docs_section_match_recommendations']}\n")
+    lines.append(
+        "These recommendations are derived from the matched section pairs in this track. "
+        "Docs Map consolidation candidates are listed separately under Docs Map Clusters.\n"
+    )
+    for rec in context.recommendations:
+        rec_body: list[str] = [
+            f"<p><strong>Action:</strong> {escape(str(rec['suggested_action']))}</p>",
+            f"<p><strong>Score:</strong> {escape(str(rec['priority_score']))}</p>",
+            f"<p>{escape(str(rec['action_detail']))}</p>",
+            _html_list([str(f["file"]) for f in rec["affected_files"]]),
+        ]
         lines.append(
-            "These recommendations are derived from the matched section pairs in this track. "
-            "Docs Map consolidation candidates are listed separately under "
-            "Docs Map Clusters.\n"
+            _details_block(
+                f"{rec['priority_rank']}. {rec['suggested_action'].title()} "
+                f"({rec['priority_score']} pts, {len(rec['affected_files'])} files)",
+                "\n".join(rec_body),
+                class_name="report-item",
+            )
         )
-        for rec in recommendations:
-            rec_body: list[str] = [
-                f"<p><strong>Action:</strong> {escape(str(rec['suggested_action']))}</p>",
-                f"<p><strong>Score:</strong> {escape(str(rec['priority_score']))}</p>",
-                f"<p>{escape(str(rec['action_detail']))}</p>",
-            ]
-            file_items = [str(f["file"]) for f in rec["affected_files"]]
-            rec_body.append(_html_list(file_items))
-            lines.append(
-                _details_block(
-                    f"{rec['priority_rank']}. {rec['suggested_action'].title()} "
-                    f"({rec['priority_score']} pts, {len(rec['affected_files'])} files)",
-                    "\n".join(rec_body),
-                    class_name="report-item",
-                )
-            )
-        lines.append("")
+    lines.append("")
 
-    if similarity_pairs:
-        lines.append(f"### {child_titles['matched_section_pairs']}\n")
-        lines.append("| Similarity | Section A | Section B |")
-        lines.append("|------------|-----------|-----------|")
-        for pair in similarity_pairs:
-            heading_a = " > ".join(pair.chunk_a.heading_path) or "(no heading)"
-            heading_b = " > ".join(pair.chunk_b.heading_path) or "(no heading)"
-            loc_a = f"`{_short_path(pair.chunk_a.document_path)}`: {heading_a}"
-            loc_b = f"`{_short_path(pair.chunk_b.document_path)}`: {heading_b}"
-            sim_str = (
-                f"{pair.embedding_similarity:.3f}" if pair.embedding_similarity is not None else "—"
-            )
-            lines.append(f"| {sim_str} | {loc_a} | {loc_b} |")
-        lines.append("")
 
-    # ── Doc Pair Review ────────────────────────────────────────────────
-    if result.doc_pair_analyses:
-        lines.append(f"## {section_titles['docs_pair_review']}\n")
-        lines.append(f"Analyzed {len(result.doc_pair_analyses)} document pairs\n")
+def _append_markdown_matched_pairs(
+    lines: list[str],
+    similarity_pairs: list[OverlapPair],
+    context: MarkdownContext,
+) -> None:
+    if not similarity_pairs:
+        return
+    lines.append(f"### {context.child_titles['matched_section_pairs']}\n")
+    lines.append("| Similarity | Section A | Section B |")
+    lines.append("|------------|-----------|-----------|")
+    for pair in similarity_pairs:
+        heading_a = " > ".join(pair.chunk_a.heading_path) or "(no heading)"
+        heading_b = " > ".join(pair.chunk_b.heading_path) or "(no heading)"
+        loc_a = f"`{_short_path(pair.chunk_a.document_path)}`: {heading_a}"
+        loc_b = f"`{_short_path(pair.chunk_b.document_path)}`: {heading_b}"
+        sim_str = (
+            f"{pair.embedding_similarity:.3f}" if pair.embedding_similarity is not None else "-"
+        )
+        lines.append(f"| {sim_str} | {loc_a} | {loc_b} |")
+    lines.append("")
 
-        for analysis in result.doc_pair_analyses:
-            name_a = _short_path(analysis.doc_a_path)
-            name_b = _short_path(analysis.doc_b_path)
-            lines.append(f"### `{name_a}` / `{name_b}`\n")
-            lines.append(
-                f"- **Relationship**: {analysis.relationship} ({analysis.confidence} confidence)"
-            )
-            lines.append(f"- **`{name_a}`**: {analysis.doc_a_purpose}")
-            lines.append(f"- **`{name_b}`**: {analysis.doc_b_purpose}\n")
 
-            if analysis.topics:
-                lines.append("| Topic | Canonical | Action | Reason |")
-                lines.append("|-------|-----------|--------|--------|")
-                for topic in analysis.topics:
-                    lines.append(
-                        f"| `{topic.name}` | `{_short_path(topic.canonical)}` "
-                        f"| {topic.action_for_other} | {topic.reason} |"
-                    )
-                lines.append("")
+def _append_markdown_doc_pair_review(
+    lines: list[str],
+    result: AnalysisResult,
+    context: MarkdownContext,
+) -> None:
+    if not result.doc_pair_analyses:
+        return
+    lines.append(f"## {context.section_titles['docs_pair_review']}\n")
+    lines.append(f"Analyzed {len(result.doc_pair_analyses)} document pairs\n")
 
-    if result.topic_taxonomy:
-        canonical_topics = result.topic_taxonomy.get("canonical_topics", [])
-        if canonical_topics:
-            lines.append(f"## {section_titles['docs_map_taxonomy']}\n")
-            lines.append(
-                "Canonical labels are the normalized vocabulary produced from document "
-                "descriptors. Document coverage for multi-document labels is listed above "
-                "under Docs Map Clusters; this section gives the full "
-                "vocabulary and alias map once.\n"
-            )
-            for topic in canonical_topics:
-                name = topic.get("name", "(unnamed label)")
-                aliases = topic.get("aliases", [])
-                topic_body = [
-                    f"<p><strong>Documents:</strong> {escape(str(topic.get('document_count', 0)))}</p>",
-                    f"<p><strong>Mentions:</strong> {escape(str(topic.get('mention_count', 0)))}</p>",
-                    _details_block(
-                        f"{len(aliases)} aliases",
-                        _html_list([str(alias) for alias in aliases]),
-                        class_name="report-list",
-                    ),
-                ]
+    for analysis in result.doc_pair_analyses:
+        name_a = _short_path(analysis.doc_a_path)
+        name_b = _short_path(analysis.doc_b_path)
+        lines.append(f"### `{name_a}` / `{name_b}`\n")
+        lines.append(
+            f"- **Relationship**: {analysis.relationship} ({analysis.confidence} confidence)"
+        )
+        lines.append(f"- **`{name_a}`**: {analysis.doc_a_purpose}")
+        lines.append(f"- **`{name_b}`**: {analysis.doc_b_purpose}\n")
+        if analysis.topics:
+            lines.append("| Topic | Canonical | Action | Reason |")
+            lines.append("|-------|-----------|--------|--------|")
+            for topic in analysis.topics:
                 lines.append(
-                    _details_block(
-                        f"{name} ({topic.get('document_count', 0)} docs, "
-                        f"{topic.get('mention_count', 0)} mentions)",
-                        "\n".join(topic_body),
-                        class_name="report-item",
-                    )
-                )
-            co_occurrence = result.topic_taxonomy.get("co_occurrence", [])
-            if co_occurrence:
-                lines.append("")
-                co_items = []
-                for item in co_occurrence:
-                    topics = item.get("topics", [])
-                    if len(topics) == 2:
-                        co_items.append(f"{topics[0]} + {topics[1]} ({item.get('count')} docs)")
-                lines.append(
-                    _details_block(
-                        f"{len(co_items)} co-occurring label pairs",
-                        _html_text_list(co_items),
-                        class_name="report-list",
-                    )
+                    f"| `{topic.name}` | `{_short_path(topic.canonical)}` "
+                    f"| {topic.action_for_other} | {topic.reason} |"
                 )
             lines.append("")
 
-    # ── Refactoring Suggestions ────────────────────────────────────────
-    if suggestions:
-        lines.append("## Refactoring Suggestions\n")
-        for i, s in enumerate(suggestions, 1):
-            code_name = s.get("code", "?")
-            docs = s.get("documents", [])
-            canonical = s.get("canonical", "?")
-            lines.append(f'{i}. **"{code_name}"** ({len(docs)} documents)')
-            lines.append(f"   - Canonical: `{_short_path(canonical)}`")
-            for sug in s.get("suggestions", []):
-                doc = _short_path(sug.get("document", "?"))
-                action = sug.get("action", "?")
-                reason = sug.get("reason", "")
-                lines.append(f"   - `{doc}`: {action} — {reason}")
-            lines.append("")
 
-    # ── Methodology ────────────────────────────────────────────────────
-    lines.append(f"## {section_titles['methodology']}\n")
+def _append_markdown_taxonomy(
+    lines: list[str],
+    result: AnalysisResult,
+    context: MarkdownContext,
+) -> None:
+    if not result.topic_taxonomy:
+        return
+    canonical_topics = result.topic_taxonomy.get("canonical_topics", [])
+    if not canonical_topics:
+        return
+    lines.append(f"## {context.section_titles['docs_map_taxonomy']}\n")
+    lines.append(
+        "Canonical labels are the normalized vocabulary produced from document descriptors. "
+        "Document coverage for multi-document labels is listed above under Docs Map Clusters; "
+        "this section gives the full vocabulary and alias map once.\n"
+    )
+    for topic in canonical_topics:
+        aliases = topic.get("aliases", [])
+        topic_body = [
+            f"<p><strong>Documents:</strong> {escape(str(topic.get('document_count', 0)))}</p>",
+            f"<p><strong>Mentions:</strong> {escape(str(topic.get('mention_count', 0)))}</p>",
+            _details_block(
+                f"{len(aliases)} aliases",
+                _html_list([str(alias) for alias in aliases]),
+                class_name="report-list",
+            ),
+        ]
+        lines.append(
+            _details_block(
+                f"{topic.get('name', '(unnamed label)')} ({topic.get('document_count', 0)} docs, "
+                f"{topic.get('mention_count', 0)} mentions)",
+                "\n".join(topic_body),
+                class_name="report-item",
+            )
+        )
+    _append_markdown_co_occurrence(lines, result.topic_taxonomy)
+    lines.append("")
+
+
+def _append_markdown_co_occurrence(lines: list[str], taxonomy: dict) -> None:
+    co_occurrence = taxonomy.get("co_occurrence", [])
+    if not co_occurrence:
+        return
+    co_items = []
+    for item in co_occurrence:
+        topics = item.get("topics", [])
+        if len(topics) == 2:
+            co_items.append(f"{topics[0]} + {topics[1]} ({item.get('count')} docs)")
+    lines.append("")
+    lines.append(
+        _details_block(
+            f"{len(co_items)} co-occurring label pairs",
+            _html_text_list(co_items),
+            class_name="report-list",
+        )
+    )
+
+
+def _append_markdown_suggestions(lines: list[str], suggestions: list[dict] | None) -> None:
+    if not suggestions:
+        return
+    lines.append("## Refactoring Suggestions\n")
+    for i, s in enumerate(suggestions, 1):
+        lines.append(f'{i}. **"{s.get("code", "?")}"** ({len(s.get("documents", []))} documents)')
+        lines.append(f"   - Canonical: `{_short_path(s.get('canonical', '?'))}`")
+        for sug in s.get("suggestions", []):
+            doc = _short_path(sug.get("document", "?"))
+            action = sug.get("action", "?")
+            reason = sug.get("reason", "")
+            lines.append(f"   - `{doc}`: {action} - {reason}")
+        lines.append("")
+
+
+def _append_markdown_methodology(
+    lines: list[str],
+    context: MarkdownContext,
+    settings: Settings | None,
+    project_root: Path | None,
+) -> None:
+    lines.append(f"## {context.section_titles['methodology']}\n")
     lines.append("### Tracks\n")
     lines.append(
         "dryscope reports use stable track names and slugs. This report is for docs tracks:\n\n"
-        f"1. **{DOCS_MAP}** (`{DOCS_MAP_SLUG}`) — Extracts document descriptors, canonicalizes aboutness and "
+        f"1. **{DOCS_MAP}** (`{DOCS_MAP_SLUG}`) - Extracts document descriptors, canonicalizes aboutness and "
         "reader-intent labels, discovers an IA topic tree and facets, and lists multi-document "
         "consolidation clusters.\n"
-        f"2. **{DOCS_SECTION_MATCH}** (`{DOCS_SECTION_MATCH_SLUG}`) — Splits documents into sections, generates API or local embeddings, "
+        f"2. **{DOCS_SECTION_MATCH}** (`{DOCS_SECTION_MATCH_SLUG}`) - Splits documents into sections, generates API or local embeddings, "
         "finds cross-document section pairs above the similarity threshold, and produces section match "
         "recommendations.\n"
-        f"3. **{DOCS_PAIR_REVIEW}** (`{DOCS_PAIR_REVIEW_SLUG}`) — Sends selected document pairs to an LLM for "
-        "relationship classification, topic-level canonical/action assignments, and "
-        "consolidation suggestions.\n"
+        f"3. **{DOCS_PAIR_REVIEW}** (`{DOCS_PAIR_REVIEW_SLUG}`) - Sends selected document pairs to an LLM for "
+        "relationship classification, topic-level canonical/action assignments, and consolidation suggestions.\n"
     )
     lines.append("### Scoring\n")
     lines.append(
-        "Each recommendation is scored 0–100 based on:\n\n"
-        "- **Embedding similarity** (0–60 base): `similarity × 60`\n"
+        "Each recommendation is scored 0-100 based on:\n\n"
+        "- **Embedding similarity** (0-60 base): `similarity * 60`\n"
         "- **LLM confirmation** (+15): overlap confirmed by coding stage\n"
         "- **Multiple sections** (+5 each): additional overlapping section pairs\n"
-        "- **Boilerplate penalty** (−15): structural/boilerplate overlap\n\n"
-        "Raw score is normalized: `score × 100 / 80`.\n"
+        "- **Boilerplate penalty** (-15): structural/boilerplate overlap\n\n"
+        "Raw score is normalized: `score * 100 / 80`.\n"
     )
     lines.append("### Actions\n")
     lines.append(
-        "- **consolidate** — Near-identical content; merge into one location\n"
-        "- **link** — Boilerplate/structural duplication; use shared include or cross-reference\n"
-        "- **brief_reference** — Partial overlap; replace shorter version with a link to canonical\n"
-        "- **keep** — Overlap is intentional or serves different audiences\n"
+        "- **consolidate** - Near-identical content; merge into one location\n"
+        "- **link** - Boilerplate/structural duplication; use shared include or cross-reference\n"
+        "- **brief_reference** - Partial overlap; replace shorter version with a link to canonical\n"
+        "- **keep** - Overlap is intentional or serves different audiences\n"
     )
-    if has_settings:
-        from dryscope import __version__
+    if context.has_settings and settings is not None and project_root is not None:
+        _append_markdown_config(lines, settings, project_root)
 
-        meta = _build_metadata(settings, project_root)
-        lines.append("### Configuration\n")
-        lines.append(f"- **Date**: {meta['timestamp']}")
-        lines.append(f"- **dryscope version**: {__version__}")
-        if meta.get("git_commit"):
-            lines.append(f"- **Git commit**: `{meta['git_commit'][:12]}`")
-        lines.append(f"- **Similarity threshold**: {settings.threshold_similarity}")
-        if settings.threshold_intent > 0:
-            lines.append(f"- **Intent threshold**: {settings.threshold_intent}")
-        lines.append(f"- **Embedding model**: {settings.docs_embedding_model}")
-        lines.append(f"- **LLM model**: {settings.model}")
-        lines.append("")
 
+def _append_markdown_config(lines: list[str], settings: Settings, project_root: Path) -> None:
+    from dryscope import __version__
+
+    meta = _build_metadata(settings, project_root)
+    lines.append("### Configuration\n")
+    lines.append(f"- **Date**: {meta['timestamp']}")
+    lines.append(f"- **dryscope version**: {__version__}")
+    if meta.get("git_commit"):
+        lines.append(f"- **Git commit**: `{meta['git_commit'][:12]}`")
+    lines.append(f"- **Similarity threshold**: {settings.threshold_similarity}")
+    if settings.threshold_intent > 0:
+        lines.append(f"- **Intent threshold**: {settings.threshold_intent}")
+    lines.append(f"- **Embedding model**: {settings.docs_embedding_model}")
+    lines.append(f"- **LLM model**: {settings.model}")
+    lines.append("")
+
+
+def render_markdown(
+    result: AnalysisResult,
+    similarity_pairs: list[OverlapPair],
+    suggestions: list[dict] | None,
+    settings: Settings | None = None,
+    project_root: Path | None = None,
+    stages_run: list[str] | None = None,
+) -> str:
+    """Render analysis results as markdown.
+
+    When settings and project_root are provided, includes dashboard,
+    recommendations, and methodology sections.
+
+    Args:
+        stages_run: List of track slugs that actually executed,
+            e.g. ["docs-section-match", "docs-map", "docs-pair-review"].
+    """
+    stages_run = stages_run or []
+    lines = ["# dryscope Report\n"]
+    context = _build_markdown_context(
+        result,
+        similarity_pairs,
+        suggestions,
+        settings,
+        project_root,
+        stages_run,
+    )
+
+    _append_markdown_dashboard(lines, result, similarity_pairs, context, project_root, stages_run)
+    _append_markdown_run_overview(lines, result, context, project_root)
+    _append_markdown_docs_map(lines, context, project_root)
+    _append_markdown_docs_map_clusters(lines, result, context, project_root)
+    _append_markdown_section_match(lines, similarity_pairs, context)
+    _append_markdown_doc_pair_review(lines, result, context)
+    _append_markdown_taxonomy(lines, result, context)
+    _append_markdown_suggestions(lines, suggestions)
+    _append_markdown_methodology(lines, context, settings, project_root)
     return "\n".join(lines)
 
 
@@ -1200,6 +1339,8 @@ def render_html(markdown_content: str) -> str:
     import mistune
 
     html_body = mistune.html(markdown_content)
+    if not isinstance(html_body, str):
+        html_body = str(html_body)
 
     # Post-process: wrap Doc Pair Review h3 sections in <details>/<summary>
     # Each "### file_a / file_b" block becomes collapsible
@@ -1664,84 +1805,104 @@ def _merge_related_recommendations(recommendations: list[dict]) -> list[dict]:
 
     merged_output: list[dict] = []
     for recs in buckets.values():
-        remaining = list(recs)
-        while remaining:
-            seed = remaining.pop(0)
-            cluster = [seed]
-
-            changed = True
-            while changed:
-                changed = False
-                next_remaining: list[dict] = []
-                current_files = {f["file"] for rec in cluster for f in rec["affected_files"]}
-                for rec in remaining:
-                    rec_files = {f["file"] for f in rec["affected_files"]}
-                    if current_files & rec_files:
-                        cluster.append(rec)
-                        changed = True
-                    else:
-                        next_remaining.append(rec)
-                remaining = next_remaining
-
-            cluster_files = {f["file"] for rec in cluster for f in rec["affected_files"]}
-            if len(cluster) < 2 or len(cluster_files) < 3:
+        for cluster in _connected_recommendation_clusters(recs):
+            merged = _merge_recommendation_cluster(cluster)
+            if merged is None:
                 merged_output.extend(cluster)
-                continue
-
-            sections_by_file: dict[str, list[dict]] = defaultdict(list)
-            best_similarity = 0.0
-            best_score = 0
-            for rec in cluster:
-                best_similarity = max(best_similarity, rec.get("embedding_similarity") or 0.0)
-                best_score = max(best_score, rec.get("priority_score") or 0)
-                for file_entry in rec["affected_files"]:
-                    sections_by_file[file_entry["file"]].extend(file_entry.get("sections", []))
-
-            affected_files = [
-                {"file": file, "sections": _merge_sections(sections)}
-                for file, sections in sorted(sections_by_file.items())
-            ]
-            action = seed["suggested_action"]
-            overlap_type = seed["overlap_type"]
-            group_score = min(
-                100, max(best_score, best_score + min(15, 3 * (len(cluster_files) - 2)))
-            )
-            file_list = ", ".join(f"`{Path(f).name}`" for f in sorted(cluster_files)[:4])
-            if len(cluster_files) > 4:
-                file_list += f", and {len(cluster_files) - 4} more"
-            if action == "consolidate":
-                detail = (
-                    f"A family of {len(cluster_files)} documents shares highly similar content "
-                    f"across {len(cluster)} pairwise overlaps ({file_list}). "
-                    "Consider extracting a shared canonical reference and replacing repeated copies with links."
-                )
-            elif action == "link":
-                detail = (
-                    f"A family of {len(cluster_files)} documents repeats the same structural or reference material "
-                    f"across {len(cluster)} pairwise overlaps ({file_list}). "
-                    "Consider one shared include/reference instead of repeating the content pairwise."
-                )
             else:
-                detail = (
-                    f"A family of {len(cluster_files)} documents overlaps across {len(cluster)} pairwise matches "
-                    f"({file_list}). Consider keeping one canonical explanation and replacing the rest with brief references."
-                )
-
-            merged_output.append(
-                {
-                    "priority_score": group_score,
-                    "affected_files": affected_files,
-                    "overlap_type": overlap_type,
-                    "embedding_similarity": round(best_similarity, 4),
-                    "suggested_action": action,
-                    "action_detail": detail,
-                }
-            )
+                merged_output.append(merged)
 
     merged_output.sort(key=lambda r: r["priority_score"], reverse=True)
     for i, rec in enumerate(merged_output, 1):
         rec["priority_rank"] = i
     return merged_output
+
+
+def _connected_recommendation_clusters(recs: list[dict]) -> list[list[dict]]:
+    """Group recommendations that share affected files."""
+    clusters: list[list[dict]] = []
+    remaining = list(recs)
+    while remaining:
+        seed = remaining.pop(0)
+        cluster = [seed]
+        changed = True
+        while changed:
+            changed = _pull_connected_recommendations(cluster, remaining)
+        clusters.append(cluster)
+    return clusters
+
+
+def _pull_connected_recommendations(cluster: list[dict], remaining: list[dict]) -> bool:
+    """Move recs sharing any current file into cluster."""
+    current_files = {f["file"] for rec in cluster for f in rec["affected_files"]}
+    changed = False
+    next_remaining: list[dict] = []
+    for rec in remaining:
+        rec_files = {f["file"] for f in rec["affected_files"]}
+        if current_files & rec_files:
+            cluster.append(rec)
+            changed = True
+        else:
+            next_remaining.append(rec)
+    remaining[:] = next_remaining
+    return changed
+
+
+def _merge_recommendation_cluster(cluster: list[dict]) -> dict | None:
+    cluster_files = {f["file"] for rec in cluster for f in rec["affected_files"]}
+    if len(cluster) < 2 or len(cluster_files) < 3:
+        return None
+    sections_by_file, best_similarity, best_score = _cluster_recommendation_stats(cluster)
+    seed = cluster[0]
+    action = seed["suggested_action"]
+    group_score = min(100, max(best_score, best_score + min(15, 3 * (len(cluster_files) - 2))))
+    return {
+        "priority_score": group_score,
+        "affected_files": [
+            {"file": file, "sections": _merge_sections(sections)}
+            for file, sections in sorted(sections_by_file.items())
+        ],
+        "overlap_type": seed["overlap_type"],
+        "embedding_similarity": round(best_similarity, 4),
+        "suggested_action": action,
+        "action_detail": _recommendation_family_detail(action, cluster_files, len(cluster)),
+    }
+
+
+def _cluster_recommendation_stats(
+    cluster: list[dict],
+) -> tuple[dict[str, list[dict]], float, int]:
+    sections_by_file: dict[str, list[dict]] = defaultdict(list)
+    best_similarity = 0.0
+    best_score = 0
+    for rec in cluster:
+        best_similarity = max(best_similarity, rec.get("embedding_similarity") or 0.0)
+        best_score = max(best_score, rec.get("priority_score") or 0)
+        for file_entry in rec["affected_files"]:
+            sections_by_file[file_entry["file"]].extend(file_entry.get("sections", []))
+    return sections_by_file, best_similarity, best_score
+
+
+def _recommendation_family_detail(action: str, cluster_files: set[str], cluster_size: int) -> str:
+    file_list = ", ".join(f"`{Path(f).name}`" for f in sorted(cluster_files)[:4])
+    if len(cluster_files) > 4:
+        file_list += f", and {len(cluster_files) - 4} more"
+    if action == "consolidate":
+        return (
+            f"A family of {len(cluster_files)} documents shares highly similar content "
+            f"across {cluster_size} pairwise overlaps ({file_list}). "
+            "Consider extracting a shared canonical reference and replacing repeated copies with links."
+        )
+    if action == "link":
+        return (
+            f"A family of {len(cluster_files)} documents repeats the same structural or reference material "
+            f"across {cluster_size} pairwise overlaps ({file_list}). "
+            "Consider one shared include/reference instead of repeating the content pairwise."
+        )
+    return (
+        f"A family of {len(cluster_files)} documents overlaps across {cluster_size} pairwise matches "
+        f"({file_list}). Consider keeping one canonical explanation and replacing the rest with brief references."
+    )
 
 
 def build_recommendations(
@@ -1753,105 +1914,109 @@ def build_recommendations(
 
     Groups overlapping pairs by file-pair, scores and ranks them.
     """
-    # Codes that appear in suggestions
-    suggestion_codes: set[str] = set()
-    if suggestions:
-        for s in suggestions:
-            suggestion_codes.add(s.get("code", ""))
-
-    # Group pairs by file-pair
-    file_pair_groups: dict[tuple[str, str], list[OverlapPair]] = defaultdict(list)
-    for pair in similarity_pairs:
-        fa = _relative_path(pair.chunk_a.document_path, project_root)
-        fb = _relative_path(pair.chunk_b.document_path, project_root)
-        key = (min(fa, fb), max(fa, fb))
-        file_pair_groups[key].append(pair)
+    suggestion_codes = {s.get("code", "") for s in suggestions or []}
+    file_pair_groups = _group_similarity_pairs_by_file(similarity_pairs, project_root)
 
     recommendations: list[dict] = []
-
     for (file_a, file_b), pairs in file_pair_groups.items():
-        # Use the best (highest) similarity score
-        best_pair = max(pairs, key=lambda p: p.embedding_similarity or 0)
-        best_similarity = (
-            best_pair.embedding_similarity if best_pair.embedding_similarity is not None else 0
-        )
-
-        has_coding = bool(
-            best_pair.shared_codes and any(c in suggestion_codes for c in best_pair.shared_codes)
-        )
-
-        # Priority scoring
-        score = best_similarity * 60
-        if has_coding:
-            score += 15
-        if len(pairs) > 1:
-            score += 5 * (len(pairs) - 1)
-        overlap_type = _classify_overlap(best_pair)
-        if overlap_type == "structural_boilerplate":
-            score -= 15
-
-        # Collect affected sections
-        sections_a: list[dict] = []
-        sections_b: list[dict] = []
-        for p in pairs:
-            sections_a.append(
-                {
-                    "sections": p.chunk_a.heading_path or ["(no heading)"],
-                    "line_range": [p.chunk_a.line_start, p.chunk_a.line_end],
-                }
-            )
-            sections_b.append(
-                {
-                    "sections": p.chunk_b.heading_path or ["(no heading)"],
-                    "line_range": [p.chunk_b.line_start, p.chunk_b.line_end],
-                }
-            )
-
-        action = _suggest_action(overlap_type, best_pair)
-
-        # Normalize score to 0-100
-        score = min(100, max(0, round(score * 100 / _MAX_RAW_SCORE)))
-
-        # Build human-readable detail
-        if action == "consolidate":
-            detail = (
-                f"These sections in `{file_a}` and `{file_b}` contain "
-                f"{'near-identical' if best_similarity > 0.95 else 'highly similar'} content. "
-                f"Consider consolidating into one location and linking from the other."
-            )
-        elif action == "link":
-            detail = (
-                f"Boilerplate/structural content duplicated between `{file_a}` and `{file_b}`. "
-                f"Consider using a shared include or cross-reference link."
-            )
-        elif action == "remove":
-            detail = (
-                f"Redundant content in `{file_a}` and `{file_b}` that could be removed "
-                f"from one document."
-            )
-        else:
-            detail = (
-                f"Partial overlap between `{file_a}` and `{file_b}`. "
-                f"Consider replacing the shorter version with a brief reference to the canonical source."
-            )
-
         recommendations.append(
-            {
-                "priority_score": score,
-                "affected_files": [
-                    {"file": file_a, "sections": sections_a},
-                    {"file": file_b, "sections": sections_b},
-                ],
-                "overlap_type": overlap_type,
-                "embedding_similarity": (
-                    round(best_similarity, 4) if best_similarity is not None else None
-                ),
-                "suggested_action": action,
-                "action_detail": detail,
-            }
+            _build_file_pair_recommendation(file_a, file_b, pairs, suggestion_codes)
         )
 
     return _merge_related_recommendations(recommendations)
+
+
+def _group_similarity_pairs_by_file(
+    similarity_pairs: list[OverlapPair],
+    project_root: Path,
+) -> dict[tuple[str, str], list[OverlapPair]]:
+    file_pair_groups: dict[tuple[str, str], list[OverlapPair]] = defaultdict(list)
+    for pair in similarity_pairs:
+        fa = _relative_path(pair.chunk_a.document_path, project_root) or ""
+        fb = _relative_path(pair.chunk_b.document_path, project_root) or ""
+        file_pair_groups[(min(fa, fb), max(fa, fb))].append(pair)
+    return file_pair_groups
+
+
+def _build_file_pair_recommendation(
+    file_a: str,
+    file_b: str,
+    pairs: list[OverlapPair],
+    suggestion_codes: set[str],
+) -> dict:
+    best_pair = max(pairs, key=lambda p: p.embedding_similarity or 0)
+    best_similarity = best_pair.embedding_similarity or 0
+    overlap_type = _classify_overlap(best_pair)
+    action = _suggest_action(overlap_type, best_pair)
+    score = _recommendation_score(best_pair, pairs, suggestion_codes, overlap_type)
+    sections_a, sections_b = _recommendation_sections(pairs)
+    return {
+        "priority_score": score,
+        "affected_files": [
+            {"file": file_a, "sections": sections_a},
+            {"file": file_b, "sections": sections_b},
+        ],
+        "overlap_type": overlap_type,
+        "embedding_similarity": round(best_similarity, 4),
+        "suggested_action": action,
+        "action_detail": _recommendation_detail(action, file_a, file_b, best_similarity),
+    }
+
+
+def _recommendation_score(
+    best_pair: OverlapPair,
+    pairs: list[OverlapPair],
+    suggestion_codes: set[str],
+    overlap_type: str,
+) -> int:
+    best_similarity = best_pair.embedding_similarity or 0
+    score = best_similarity * 60
+    if best_pair.shared_codes and any(c in suggestion_codes for c in best_pair.shared_codes):
+        score += 15
+    if len(pairs) > 1:
+        score += 5 * (len(pairs) - 1)
+    if overlap_type == "structural_boilerplate":
+        score -= 15
+    return min(100, max(0, round(score * 100 / _MAX_RAW_SCORE)))
+
+
+def _recommendation_sections(pairs: list[OverlapPair]) -> tuple[list[dict], list[dict]]:
+    sections_a: list[dict] = []
+    sections_b: list[dict] = []
+    for pair in pairs:
+        sections_a.append(
+            {
+                "sections": pair.chunk_a.heading_path or ["(no heading)"],
+                "line_range": [pair.chunk_a.line_start, pair.chunk_a.line_end],
+            }
+        )
+        sections_b.append(
+            {
+                "sections": pair.chunk_b.heading_path or ["(no heading)"],
+                "line_range": [pair.chunk_b.line_start, pair.chunk_b.line_end],
+            }
+        )
+    return sections_a, sections_b
+
+
+def _recommendation_detail(action: str, file_a: str, file_b: str, similarity: float) -> str:
+    if action == "consolidate":
+        adjective = "near-identical" if similarity > 0.95 else "highly similar"
+        return (
+            f"These sections in `{file_a}` and `{file_b}` contain {adjective} content. "
+            "Consider consolidating into one location and linking from the other."
+        )
+    if action == "link":
+        return (
+            f"Boilerplate/structural content duplicated between `{file_a}` and `{file_b}`. "
+            "Consider using a shared include or cross-reference link."
+        )
+    if action == "remove":
+        return f"Redundant content in `{file_a}` and `{file_b}` that could be removed from one document."
+    return (
+        f"Partial overlap between `{file_a}` and `{file_b}`. "
+        "Consider replacing the shorter version with a brief reference to the canonical source."
+    )
 
 
 # ─── Final Report ───────────────────────────────────────────────────────

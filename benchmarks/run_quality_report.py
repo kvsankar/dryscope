@@ -61,14 +61,8 @@ def _aggregate(rows: list[dict]) -> dict:
         if precision is not None and recall is not None and precision + recall
         else None
     )
-    aggregate = {
-        **counts,
-        "labeled_precision": precision,
-        "curated_recall": recall,
-        "f1": f1,
-    }
-    aggregate["precision_at_k"] = {}
-    aggregate["recall_at_k"] = {}
+    precision_at_k: dict[str, float | None] = {}
+    recall_at_k: dict[str, float | None] = {}
     for k in (5, 10, 15):
         tp_at_k = sum(
             1
@@ -82,12 +76,19 @@ def _aggregate(rows: list[dict]) -> dict:
             for item in row.get("false_positive_items", [])
             if item.get("rank", 0) <= k
         )
-        aggregate["precision_at_k"][str(k)] = (
-            tp_at_k / (tp_at_k + fp_at_k) if tp_at_k + fp_at_k else None
-        )
-        aggregate["recall_at_k"][str(k)] = (
+        precision_at_k[str(k)] = tp_at_k / (tp_at_k + fp_at_k) if tp_at_k + fp_at_k else None
+        recall_at_k[str(k)] = (
             tp_at_k / counts["gold_positive_count"] if counts["gold_positive_count"] else None
         )
+
+    aggregate: dict[str, object] = {
+        **counts,
+        "labeled_precision": precision,
+        "curated_recall": recall,
+        "f1": f1,
+        "precision_at_k": precision_at_k,
+        "recall_at_k": recall_at_k,
+    }
     return aggregate
 
 

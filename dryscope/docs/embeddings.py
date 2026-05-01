@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 from collections import Counter
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import numpy as np
@@ -83,7 +84,7 @@ def refine_with_embeddings(
     model: str,
     threshold: float = 0.85,
     cache: Cache | None = None,
-    on_progress: callable | None = None,
+    on_progress: Callable[..., None] | None = None,
     concurrency: int = 1,
 ) -> list[OverlapPair]:
     """Refine candidate pairs using embedding similarity.
@@ -152,7 +153,7 @@ def embed_chunks(
     chunks: list[Chunk],
     model_name: str,
     cache: Cache | None = None,
-    on_progress: callable | None = None,
+    on_progress: Callable[..., None] | None = None,
     concurrency: int = 1,
 ) -> dict[str, list[float]]:
     """Embed all chunks. sentence-transformers for local models, litellm for API models.
@@ -240,21 +241,7 @@ def find_similar_pairs(
 
     Returns OverlapPair objects with embedding_similarity set to the combined score.
     """
-    _boilerplate = boilerplate_headings or set()
-
-    def _is_boilerplate_chunk(chunk: Chunk) -> bool:
-        if not _boilerplate or not chunk.heading_path:
-            return False
-        return chunk.heading_path[-1].lower().strip() in _boilerplate
-
-    # Filter: must have embedding and meet minimum word count
-    filtered: list[Chunk] = []
-    for chunk in chunks:
-        if chunk.id not in embeddings:
-            continue
-        if min_content_words > 0 and len(chunk.content.split()) < min_content_words:
-            continue
-        filtered.append(chunk)
+    filtered = _filter_embedded_chunks(chunks, embeddings, min_content_words)
 
     if len(filtered) < 2:
         return []
@@ -273,15 +260,9 @@ def find_similar_pairs(
     pairs: list[OverlapPair] = []
     for i in range(len(filtered)):
         for j in range(i + 1, len(filtered)):
-            same_doc = filtered[i].document_path == filtered[j].document_path
-            # Skip same-document pairs unless intra-doc mode
-            if same_doc and not include_intra:
-                continue
-            # Skip same chunk instance (same position in same doc)
-            if same_doc and filtered[i].line_start == filtered[j].line_start:
-                continue
-            # Skip boilerplate-boilerplate pairs
-            if _is_boilerplate_chunk(filtered[i]) and _is_boilerplate_chunk(filtered[j]):
+            chunk_a = filtered[i]
+            chunk_b = filtered[j]
+            if not _should_compare_chunks(chunk_a, chunk_b, include_intra, boilerplate_headings):
                 continue
 
             embed_sim = float(sim_matrix[i, j])
@@ -290,7 +271,7 @@ def find_similar_pairs(
                 continue
 
             if token_weight > 0:
-                tok_sim = _token_jaccard(filtered[i].content, filtered[j].content)
+                tok_sim = _token_jaccard(chunk_a.content, chunk_b.content)
                 combined = (1 - token_weight) * embed_sim + token_weight * tok_sim
             else:
                 combined = embed_sim
@@ -298,8 +279,8 @@ def find_similar_pairs(
             if combined >= threshold:
                 pairs.append(
                     OverlapPair(
-                        chunk_a=filtered[i],
-                        chunk_b=filtered[j],
+                        chunk_a=chunk_a,
+                        chunk_b=chunk_b,
                         embedding_similarity=combined,
                     )
                 )
@@ -307,3 +288,42 @@ def find_similar_pairs(
     # Sort by similarity descending
     pairs.sort(key=lambda p: -(p.embedding_similarity or 0))
     return pairs
+
+
+def _filter_embedded_chunks(
+    chunks: list[Chunk],
+    embeddings: dict[str, list[float]],
+    min_content_words: int,
+) -> list[Chunk]:
+    """Keep chunks with embeddings and enough words for section matching."""
+    filtered: list[Chunk] = []
+    for chunk in chunks:
+        if chunk.id not in embeddings:
+            continue
+        if min_content_words > 0 and len(chunk.content.split()) < min_content_words:
+            continue
+        filtered.append(chunk)
+    return filtered
+
+
+def _is_boilerplate_chunk(chunk: Chunk, boilerplate_headings: set[str] | None) -> bool:
+    if not boilerplate_headings or not chunk.heading_path:
+        return False
+    return chunk.heading_path[-1].lower().strip() in boilerplate_headings
+
+
+def _should_compare_chunks(
+    chunk_a: Chunk,
+    chunk_b: Chunk,
+    include_intra: bool,
+    boilerplate_headings: set[str] | None,
+) -> bool:
+    same_doc = chunk_a.document_path == chunk_b.document_path
+    if same_doc and not include_intra:
+        return False
+    if same_doc and chunk_a.line_start == chunk_b.line_start:
+        return False
+    return not (
+        _is_boilerplate_chunk(chunk_a, boilerplate_headings)
+        and _is_boilerplate_chunk(chunk_b, boilerplate_headings)
+    )

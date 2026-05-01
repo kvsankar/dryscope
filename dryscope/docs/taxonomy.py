@@ -7,11 +7,13 @@ import json
 import re
 import sys
 from collections import Counter, defaultdict
+from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 from pathlib import Path
 
+from dryscope.cache import Cache
 from dryscope.config import DEFAULT_DOCS_MAP_FACET_DIMENSIONS, DEFAULT_DOCS_MAP_FACET_VALUES
 from dryscope.terminology import DOCS_MAP
 
@@ -93,30 +95,34 @@ class TopicTaxonomy:
 
     def to_dict(self) -> dict:
         """Serialize the taxonomy for reports and run-store stages."""
-        canonical_topics = [
-            {
-                "name": topic.name,
-                "aliases": sorted(topic.aliases),
-                "documents": sorted(topic.documents),
-                "document_count": len(topic.documents),
-                "mention_count": topic.mention_count,
-            }
-            for topic in sorted(
-                self.canonical_topics.values(),
-                key=lambda t: (-len(t.documents), -t.mention_count, t.name),
+        canonical_topics: list[dict[str, object]] = []
+        for topic in sorted(
+            self.canonical_topics.values(),
+            key=lambda t: (-len(t.documents), -t.mention_count, t.name),
+        ):
+            canonical_topics.append(
+                {
+                    "name": topic.name,
+                    "aliases": sorted(topic.aliases),
+                    "documents": sorted(topic.documents),
+                    "document_count": len(topic.documents),
+                    "mention_count": topic.mention_count,
+                }
             )
-        ]
-        topic_document_clusters = [
-            {
-                "topic": topic["name"],
-                "documents": topic["documents"],
-                "document_count": topic["document_count"],
-                "mention_count": topic["mention_count"],
-                "aliases": topic["aliases"],
-            }
-            for topic in canonical_topics
-            if topic["document_count"] >= 2
-        ]
+        topic_document_clusters: list[dict[str, object]] = []
+        for topic in canonical_topics:
+            document_count = topic["document_count"]
+            if not isinstance(document_count, int) or document_count < 2:
+                continue
+            topic_document_clusters.append(
+                {
+                    "topic": topic["name"],
+                    "documents": topic["documents"],
+                    "document_count": document_count,
+                    "mention_count": topic["mention_count"],
+                    "aliases": topic["aliases"],
+                }
+            )
         return {
             "canonical_topics": canonical_topics,
             "topic_document_clusters": topic_document_clusters,
@@ -359,7 +365,7 @@ def _cluster_groups_with_llm(
     groups: list[dict],
     *,
     model: str,
-    cache: object | None,
+    cache: Cache | None,
     backend: str,
     batch_size: int,
     existing_limit: int,
@@ -490,7 +496,7 @@ Respond with ONLY valid JSON:
     }
 
 
-def _reconcile_canonical_names(canonical_names: object) -> dict[str, str]:
+def _reconcile_canonical_names(canonical_names: Iterable[object]) -> dict[str, str]:
     """Deterministically merge near-identical canonical labels across batches."""
     counts = Counter(
         normalize_topic_text(str(name))
@@ -532,7 +538,7 @@ def build_canonical_taxonomy(
     fuzzy_threshold: float = 0.86,
     max_co_occurrence: int = 30,
     llm_model: str | None = None,
-    cache: object | None = None,
+    cache: Cache | None = None,
     backend: str = "litellm",
     llm_batch_size: int = 100,
     llm_existing_limit: int = 200,
@@ -689,9 +695,8 @@ def _descriptor_facet_payload(
     summaries: dict[str, dict[str, dict]] = {facet: {} for facet in facet_dimensions}
     for doc, descriptor in document_descriptors.items():
         compact_doc = _compact_doc_path(str(doc))
-        extra_facets = (
-            descriptor.get("facets") if isinstance(descriptor.get("facets"), dict) else {}
-        )
+        raw_extra_facets = descriptor.get("facets")
+        extra_facets = raw_extra_facets if isinstance(raw_extra_facets, dict) else {}
         for facet in facet_dimensions:
             is_multi = known_multi_value.get(facet, True)
             raw_value = descriptor.get(facet)
@@ -781,7 +786,7 @@ def build_docs_map(
     facet_dimensions: list[str] | None = None,
     facet_values: dict[str, list[str]] | None = None,
     llm_model: str | None = None,
-    cache: object | None = None,
+    cache: Cache | None = None,
     backend: str = "litellm",
     max_topic_coverage_clusters: int = 160,
     max_single_doc_topics: int = 40,

@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import threading
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import numpy as np
@@ -116,7 +117,8 @@ def _normalize_descriptor(raw: dict, doc_path: str, chunks: list[Chunk]) -> dict
     if not isinstance(raw, dict):
         return fallback
 
-    evidence = raw.get("evidence") if isinstance(raw.get("evidence"), dict) else {}
+    raw_evidence = raw.get("evidence")
+    evidence = raw_evidence if isinstance(raw_evidence, dict) else {}
     descriptor = {
         "document": doc_path,
         "title": str(raw.get("title") or fallback["title"]).strip(),
@@ -429,7 +431,7 @@ def run_topic_extraction(
     cache: Cache | None,
     backend: str = "litellm",
     concurrency: int = 1,
-    on_progress: callable | None = None,
+    on_progress: Callable[..., None] | None = None,
     prior_topics: dict[str, list[str]] | None = None,
     ollama_host: str | None = None,
     cli_strip_api_key: bool = True,
@@ -505,7 +507,7 @@ def run_document_descriptor_extraction(
     cache: Cache | None,
     backend: str = "litellm",
     concurrency: int = 1,
-    on_progress: callable | None = None,
+    on_progress: Callable[..., None] | None = None,
     prior_descriptors: dict[str, dict] | None = None,
     ollama_host: str | None = None,
     cli_strip_api_key: bool = True,

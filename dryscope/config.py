@@ -204,6 +204,168 @@ def _pattern_list(value: str | Sequence[str]) -> list[str]:
     return [item.strip() for item in raw_items if item.strip()]
 
 
+def _dict_section(data: dict, key: str) -> dict:
+    """Return a TOML section if present and object-shaped."""
+    section = data.get(key, {})
+    return section if isinstance(section, dict) else {}
+
+
+def _apply_scalar_options(settings: Settings, cfg: dict, mapping: dict[str, str]) -> None:
+    """Apply direct TOML key -> Settings attribute assignments."""
+    for key, attr in mapping.items():
+        if key in cfg:
+            setattr(settings, attr, cfg[key])
+
+
+def _apply_code_config(settings: Settings, code_cfg: dict) -> None:
+    _apply_scalar_options(
+        settings,
+        code_cfg,
+        {
+            "min_lines": "code_min_lines",
+            "min_tokens": "code_min_tokens",
+            "max_cluster_size": "code_max_cluster_size",
+            "threshold": "code_threshold",
+            "embedding_model": "code_embedding_model",
+            "escalate_refactor_min_lines": "code_escalate_refactor_min_lines",
+            "escalate_refactor_min_actionability": "code_escalate_refactor_min_actionability",
+            "escalate_refactor_min_units": "code_escalate_refactor_min_units",
+            "keep_same_file_refactors": "code_keep_same_file_refactors",
+        },
+    )
+
+
+def _apply_docs_map_config(settings: Settings, docs_map_cfg: dict) -> None:
+    if "facet_dimensions" in docs_map_cfg:
+        settings.docs_map_facet_dimensions = [
+            str(item).strip() for item in docs_map_cfg["facet_dimensions"] if str(item).strip()
+        ]
+    if "facet_values" not in docs_map_cfg:
+        return
+    merged_facet_values = {
+        key: list(values) for key, values in settings.docs_map_facet_values.items()
+    }
+    merged_facet_values.update(
+        {
+            str(key).strip(): [str(item).strip() for item in values if str(item).strip()]
+            for key, values in docs_map_cfg["facet_values"].items()
+            if str(key).strip() and isinstance(values, list)
+        }
+    )
+    settings.docs_map_facet_values = merged_facet_values
+
+
+def _apply_docs_config(settings: Settings, docs_cfg: dict) -> None:
+    _apply_scalar_options(
+        settings,
+        docs_cfg,
+        {
+            "include": "include",
+            "exclude": "exclude",
+            "threshold_similarity": "threshold_similarity",
+            "threshold_intent": "threshold_intent",
+            "min_content_words": "min_content_words",
+            "include_intra": "include_intra",
+            "token_weight": "token_weight",
+            "embedding_model": "docs_embedding_model",
+            "intent_max_docs": "docs_intent_max_docs",
+            "llm_max_doc_pairs": "docs_llm_max_doc_pairs",
+            "intent_skip_without_similarity_min_docs": "docs_intent_skip_without_similarity_min_docs",
+        },
+    )
+    _apply_docs_map_config(settings, _dict_section(docs_cfg, "map"))
+
+
+def _apply_llm_config(settings: Settings, llm_cfg: dict) -> None:
+    _apply_scalar_options(
+        settings,
+        llm_cfg,
+        {
+            "model": "model",
+            "backend": "backend",
+            "max_cost": "max_cost",
+            "concurrency": "concurrency",
+            "ollama_host": "ollama_host",
+            "cli_strip_api_key": "cli_strip_api_key",
+            "cli_permission_mode": "cli_permission_mode",
+            "cli_dangerously_skip_permissions": "cli_dangerously_skip_permissions",
+        },
+    )
+
+
+def _apply_cache_config(settings: Settings, cache_cfg: dict) -> None:
+    _apply_scalar_options(settings, cache_cfg, {"enabled": "cache_enabled", "path": "cache_path"})
+
+
+def _apply_file_config(settings: Settings, config_path: Path) -> None:
+    data = load_toml(config_path)
+    _apply_code_config(settings, _dict_section(data, "code"))
+    _apply_docs_config(settings, _dict_section(data, "docs"))
+    _apply_llm_config(settings, _dict_section(data, "llm"))
+    _apply_cache_config(settings, _dict_section(data, "cache"))
+
+
+def _apply_cli_overrides(
+    settings: Settings,
+    *,
+    code_threshold: float | None,
+    code_min_lines: int | None,
+    code_min_tokens: int | None,
+    code_max_cluster_size: int | None,
+    code_embedding_model: str | None,
+    model: str | None,
+    docs_embedding_model: str | None,
+    backend: str | None,
+    threshold: float | None,
+    threshold_intent: float | None,
+    include: str | Sequence[str] | None,
+    exclude: str | Sequence[str] | None,
+    max_cost: float | None,
+    min_words: int | None,
+    llm_max_doc_pairs: int | None,
+    concurrency: int | None,
+    intra: bool | None,
+    token_weight: float | None,
+) -> None:
+    """Apply CLI overrides to settings."""
+    if code_threshold is not None:
+        settings.code_threshold = code_threshold
+    if code_min_lines is not None:
+        settings.code_min_lines = code_min_lines
+    if code_min_tokens is not None:
+        settings.code_min_tokens = code_min_tokens
+    if code_max_cluster_size is not None:
+        settings.code_max_cluster_size = code_max_cluster_size
+    if code_embedding_model is not None:
+        settings.code_embedding_model = code_embedding_model
+    if model is not None:
+        settings.model = model
+    if docs_embedding_model is not None:
+        settings.docs_embedding_model = docs_embedding_model
+    if threshold is not None:
+        settings.threshold_similarity = threshold
+    if threshold_intent is not None:
+        settings.threshold_intent = threshold_intent
+    if include is not None:
+        settings.include = _pattern_list(include)
+    if exclude is not None:
+        settings.exclude = [*settings.exclude, *_pattern_list(exclude)]
+    if backend is not None:
+        settings.backend = backend
+    if max_cost is not None:
+        settings.max_cost = max_cost
+    if min_words is not None:
+        settings.min_content_words = min_words
+    if llm_max_doc_pairs is not None:
+        settings.docs_llm_max_doc_pairs = llm_max_doc_pairs
+    if concurrency is not None:
+        settings.concurrency = concurrency
+    if intra is not None:
+        settings.include_intra = intra
+    if token_weight is not None:
+        settings.token_weight = token_weight
+
+
 def load_settings(
     scan_path: Path | None = None,
     *,
@@ -234,139 +396,29 @@ def load_settings(
     # Layer 2: TOML file
     config_path = find_config_file(scan_path)
     if config_path is not None:
-        data = load_toml(config_path)
-        code_cfg = data.get("code", {})
-        docs_cfg = data.get("docs", {})
-        docs_map_cfg = docs_cfg.get("map", {}) if isinstance(docs_cfg, dict) else {}
-        llm_cfg = data.get("llm", {})
-        cache_cfg = data.get("cache", {})
+        _apply_file_config(settings, config_path)
 
-        # Code section
-        if "min_lines" in code_cfg:
-            settings.code_min_lines = code_cfg["min_lines"]
-        if "min_tokens" in code_cfg:
-            settings.code_min_tokens = code_cfg["min_tokens"]
-        if "max_cluster_size" in code_cfg:
-            settings.code_max_cluster_size = code_cfg["max_cluster_size"]
-        if "threshold" in code_cfg:
-            settings.code_threshold = code_cfg["threshold"]
-        if "embedding_model" in code_cfg:
-            settings.code_embedding_model = code_cfg["embedding_model"]
-        if "escalate_refactor_min_lines" in code_cfg:
-            settings.code_escalate_refactor_min_lines = code_cfg["escalate_refactor_min_lines"]
-        if "escalate_refactor_min_actionability" in code_cfg:
-            settings.code_escalate_refactor_min_actionability = code_cfg[
-                "escalate_refactor_min_actionability"
-            ]
-        if "escalate_refactor_min_units" in code_cfg:
-            settings.code_escalate_refactor_min_units = code_cfg["escalate_refactor_min_units"]
-        if "keep_same_file_refactors" in code_cfg:
-            settings.code_keep_same_file_refactors = code_cfg["keep_same_file_refactors"]
-
-        # Docs section
-        if "include" in docs_cfg:
-            settings.include = docs_cfg["include"]
-        if "exclude" in docs_cfg:
-            settings.exclude = docs_cfg["exclude"]
-        if "threshold_similarity" in docs_cfg:
-            settings.threshold_similarity = docs_cfg["threshold_similarity"]
-        if "threshold_intent" in docs_cfg:
-            settings.threshold_intent = docs_cfg["threshold_intent"]
-        if "min_content_words" in docs_cfg:
-            settings.min_content_words = docs_cfg["min_content_words"]
-        if "include_intra" in docs_cfg:
-            settings.include_intra = docs_cfg["include_intra"]
-        if "token_weight" in docs_cfg:
-            settings.token_weight = docs_cfg["token_weight"]
-        if "embedding_model" in docs_cfg:
-            settings.docs_embedding_model = docs_cfg["embedding_model"]
-        if "intent_max_docs" in docs_cfg:
-            settings.docs_intent_max_docs = docs_cfg["intent_max_docs"]
-        if "llm_max_doc_pairs" in docs_cfg:
-            settings.docs_llm_max_doc_pairs = docs_cfg["llm_max_doc_pairs"]
-        if "intent_skip_without_similarity_min_docs" in docs_cfg:
-            settings.docs_intent_skip_without_similarity_min_docs = docs_cfg[
-                "intent_skip_without_similarity_min_docs"
-            ]
-        if "facet_dimensions" in docs_map_cfg:
-            settings.docs_map_facet_dimensions = [
-                str(item).strip() for item in docs_map_cfg["facet_dimensions"] if str(item).strip()
-            ]
-        if "facet_values" in docs_map_cfg:
-            merged_facet_values = {
-                key: list(values) for key, values in settings.docs_map_facet_values.items()
-            }
-            merged_facet_values.update(
-                {
-                    str(key).strip(): [str(item).strip() for item in values if str(item).strip()]
-                    for key, values in docs_map_cfg["facet_values"].items()
-                    if str(key).strip() and isinstance(values, list)
-                }
-            )
-            settings.docs_map_facet_values = merged_facet_values
-
-        # LLM section
-        if "model" in llm_cfg:
-            settings.model = llm_cfg["model"]
-        if "backend" in llm_cfg:
-            settings.backend = llm_cfg["backend"]
-        if "max_cost" in llm_cfg:
-            settings.max_cost = llm_cfg["max_cost"]
-        if "concurrency" in llm_cfg:
-            settings.concurrency = llm_cfg["concurrency"]
-        if "ollama_host" in llm_cfg:
-            settings.ollama_host = llm_cfg["ollama_host"]
-        if "cli_strip_api_key" in llm_cfg:
-            settings.cli_strip_api_key = llm_cfg["cli_strip_api_key"]
-        if "cli_permission_mode" in llm_cfg:
-            settings.cli_permission_mode = llm_cfg["cli_permission_mode"]
-        if "cli_dangerously_skip_permissions" in llm_cfg:
-            settings.cli_dangerously_skip_permissions = llm_cfg["cli_dangerously_skip_permissions"]
-
-        # Cache section
-        if "enabled" in cache_cfg:
-            settings.cache_enabled = cache_cfg["enabled"]
-        if "path" in cache_cfg:
-            settings.cache_path = cache_cfg["path"]
-
-    # Layer 3: CLI flags — code
-    if code_threshold is not None:
-        settings.code_threshold = code_threshold
-    if code_min_lines is not None:
-        settings.code_min_lines = code_min_lines
-    if code_min_tokens is not None:
-        settings.code_min_tokens = code_min_tokens
-    if code_max_cluster_size is not None:
-        settings.code_max_cluster_size = code_max_cluster_size
-    if code_embedding_model is not None:
-        settings.code_embedding_model = code_embedding_model
-
-    # Layer 3: CLI flags — docs
-    if model is not None:
-        settings.model = model
-    if docs_embedding_model is not None:
-        settings.docs_embedding_model = docs_embedding_model
-    if threshold is not None:
-        settings.threshold_similarity = threshold
-    if threshold_intent is not None:
-        settings.threshold_intent = threshold_intent
-    if include is not None:
-        settings.include = _pattern_list(include)
-    if exclude is not None:
-        settings.exclude = [*settings.exclude, *_pattern_list(exclude)]
-    if backend is not None:
-        settings.backend = backend
-    if max_cost is not None:
-        settings.max_cost = max_cost
-    if min_words is not None:
-        settings.min_content_words = min_words
-    if llm_max_doc_pairs is not None:
-        settings.docs_llm_max_doc_pairs = llm_max_doc_pairs
-    if concurrency is not None:
-        settings.concurrency = concurrency
-    if intra is not None:
-        settings.include_intra = intra
-    if token_weight is not None:
-        settings.token_weight = token_weight
+    # Layer 3: CLI flags
+    _apply_cli_overrides(
+        settings,
+        code_threshold=code_threshold,
+        code_min_lines=code_min_lines,
+        code_min_tokens=code_min_tokens,
+        code_max_cluster_size=code_max_cluster_size,
+        code_embedding_model=code_embedding_model,
+        model=model,
+        docs_embedding_model=docs_embedding_model,
+        backend=backend,
+        threshold=threshold,
+        threshold_intent=threshold_intent,
+        include=include,
+        exclude=exclude,
+        max_cost=max_cost,
+        min_words=min_words,
+        llm_max_doc_pairs=llm_max_doc_pairs,
+        concurrency=concurrency,
+        intra=intra,
+        token_weight=token_weight,
+    )
 
     return settings

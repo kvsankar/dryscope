@@ -7,6 +7,7 @@ import json
 from dryscope import __version__
 from dryscope.code.reporter import Cluster
 from dryscope.code.reporter import format_terminal as code_format_terminal
+from dryscope.docs.models import DocPairAnalysis, OverlapPair
 from dryscope.terminology import (
     CODE_MATCH,
     CODE_MATCH_SLUG,
@@ -38,9 +39,9 @@ def _code_cluster_to_finding(cluster: Cluster, finding_id: int) -> dict:
 
 
 def _doc_pair_to_finding(
-    pair,
+    pair: OverlapPair,
     finding_id: int,
-    analysis: object | None = None,
+    analysis: DocPairAnalysis | None = None,
 ) -> dict:
     """Convert a docs OverlapPair to a unified finding dict."""
     sections = []
@@ -80,8 +81,8 @@ def _doc_pair_to_finding(
 
 def format_unified_json(
     code_clusters: list[Cluster] | None = None,
-    doc_pairs: list | None = None,
-    doc_analyses: list | None = None,
+    doc_pairs: list[OverlapPair] | None = None,
+    doc_analyses: list[DocPairAnalysis] | None = None,
 ) -> str:
     """Build unified JSON output combining code and docs findings.
 
@@ -106,7 +107,7 @@ def format_unified_json(
     docs_summary = {"total": 0}
     if doc_pairs is not None:
         # Build lookup from (doc_a, doc_b) -> analysis
-        analysis_map: dict[tuple[str, str], object] = {}
+        analysis_map: dict[tuple[str, str], DocPairAnalysis] = {}
         if doc_analyses:
             for a in doc_analyses:
                 key = (a.doc_a_path, a.doc_b_path)

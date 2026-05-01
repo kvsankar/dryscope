@@ -133,6 +133,10 @@ class CodeUnit:
 
 def _get_name(node: Node) -> str:
     """Extract the name identifier from a function/class definition node."""
+
+    def _text(child: Node) -> str:
+        return (child.text or b"").decode("utf-8")
+
     if node.type == "type_declaration":
         for child in node.children:
             if child.type == "type_spec":
@@ -140,7 +144,7 @@ def _get_name(node: Node) -> str:
     if node.type == "method_declaration":
         for child in node.children:
             if child.type in ("identifier", "field_identifier", "property_identifier"):
-                return child.text.decode("utf-8")
+                return _text(child)
     for child in node.children:
         if child.type in (
             "identifier",
@@ -148,7 +152,7 @@ def _get_name(node: Node) -> str:
             "property_identifier",
             "field_identifier",
         ):
-            return child.text.decode("utf-8")
+            return _text(child)
     return "<anonymous>"
 
 
@@ -158,6 +162,51 @@ def _is_arrow_function(node: Node) -> bool:
         if child.type in {"arrow_function", "function", "generator_function"}:
             return True
     return False
+
+
+def _node_source(node: Node) -> str:
+    return (node.text or b"").decode("utf-8")
+
+
+def _make_unit(node: Node, name: str, unit_type: str, file_path: str, lang: str) -> CodeUnit:
+    return CodeUnit(
+        name=name,
+        unit_type=unit_type,
+        source=_node_source(node),
+        file_path=file_path,
+        start_line=node.start_point[0] + 1,
+        end_line=node.end_point[0] + 1,
+        lang=lang,
+    )
+
+
+def _function_unit_type(node: Node, parent_is_class: bool) -> str:
+    if node.type in {"method_definition", "method_declaration", "constructor_declaration"}:
+        return "method"
+    return "method" if parent_is_class else "function"
+
+
+def _extract_class_children(unit: CodeUnit, node: Node, file_path: str, lang: str) -> None:
+    """Attach language-specific class/member child units."""
+    if _is_js_family(lang) or _is_java_family(lang):
+        for body_child in node.children:
+            if body_child.type == "class_body":
+                unit.children = _extract_units(body_child, file_path, lang, parent_is_class=True)
+    elif _is_go_family(lang):
+        for body_child in node.children:
+            if body_child.type == "type_spec":
+                unit.children = _extract_units(body_child, file_path, lang, parent_is_class=True)
+
+
+def _extract_variable_function_units(node: Node, file_path: str, lang: str) -> list[CodeUnit]:
+    """Extract JS/TS function-valued variable declarations."""
+    units: list[CodeUnit] = []
+    if node.type not in {"lexical_declaration", "variable_declaration"} or not _is_js_family(lang):
+        return units
+    for declarator in node.children:
+        if declarator.type == _ARROW_DECLARATOR and _is_arrow_function(declarator):
+            units.append(_make_unit(node, _get_name(declarator), "function", file_path, lang))
+    return units
 
 
 def _extract_units(
@@ -183,23 +232,12 @@ def _extract_units(
 
         # Functions and class methods
         if child.type in _FUNCTION_TYPES:
-            name = _get_name(child)
-            if (
-                child.type in {"method_definition", "method_declaration", "constructor_declaration"}
-                or parent_is_class
-            ):
-                unit_type = "method"
-            else:
-                unit_type = "function"
-
-            unit = CodeUnit(
-                name=name,
-                unit_type=unit_type,
-                source=child.text.decode("utf-8"),
-                file_path=file_path,
-                start_line=child.start_point[0] + 1,
-                end_line=child.end_point[0] + 1,
-                lang=lang,
+            unit = _make_unit(
+                child,
+                _get_name(child),
+                _function_unit_type(child, parent_is_class),
+                file_path,
+                lang,
             )
             unit.children = _extract_units(
                 child,
@@ -212,48 +250,17 @@ def _extract_units(
 
         # Classes
         if child.type in _CLASS_TYPES:
-            name = _get_name(child)
-            unit = CodeUnit(
-                name=name,
-                unit_type="class",
-                source=child.text.decode("utf-8"),
-                file_path=file_path,
-                start_line=child.start_point[0] + 1,
-                end_line=child.end_point[0] + 1,
-                lang=lang,
-            )
+            unit = _make_unit(child, _get_name(child), "class", file_path, lang)
             # Extract methods from class body (TS only — Python methods
             # are included in the class source and not split out)
-            if _is_js_family(lang) or _is_java_family(lang):
-                for body_child in child.children:
-                    if body_child.type == "class_body":
-                        unit.children = _extract_units(
-                            body_child, file_path, lang, parent_is_class=True
-                        )
-            elif _is_go_family(lang):
-                for body_child in child.children:
-                    if body_child.type == "type_spec":
-                        unit.children = _extract_units(
-                            body_child, file_path, lang, parent_is_class=True
-                        )
+            _extract_class_children(unit, child, file_path, lang)
             units.append(unit)
             continue
 
         # Arrow/functions assigned to variables: const foo = () => {}
-        if child.type in {"lexical_declaration", "variable_declaration"} and _is_js_family(lang):
-            for declarator in child.children:
-                if declarator.type == _ARROW_DECLARATOR and _is_arrow_function(declarator):
-                    name = _get_name(declarator)
-                    unit = CodeUnit(
-                        name=name,
-                        unit_type="function",
-                        source=child.text.decode("utf-8"),
-                        file_path=file_path,
-                        start_line=child.start_point[0] + 1,
-                        end_line=child.end_point[0] + 1,
-                        lang=lang,
-                    )
-                    units.append(unit)
+        variable_units = _extract_variable_function_units(child, file_path, lang)
+        if variable_units:
+            units.extend(variable_units)
             continue
 
     return units

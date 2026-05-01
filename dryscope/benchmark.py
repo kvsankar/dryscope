@@ -14,6 +14,15 @@ ACTIONABLE_DOCS_LABELS = {
     "useful_doc_pair_review",
 }
 NON_ACTIONABLE_DOCS_LABELS = {"intentional_repetition", "not_actionable"}
+DocsSectionSignature = tuple[tuple[str, int], tuple[str, int]]
+
+
+def _section_signature(items: Iterable[tuple[str, int]]) -> DocsSectionSignature:
+    """Return exactly two sorted section anchors as a stable signature."""
+    ordered = tuple(sorted(items))
+    if len(ordered) != 2:
+        raise ValueError("docs section signatures must contain exactly two sections")
+    return ordered[0], ordered[1]
 
 
 def finding_signature(finding: dict, repo_root: str | Path) -> tuple[tuple[str, str], ...]:
@@ -151,6 +160,74 @@ def _label_quality_kind(
     return None
 
 
+def _scored_labels(
+    labels: list[dict],
+    repo_name: str,
+    positive_labels: set[str],
+    negative_labels: set[str],
+    *,
+    track: str | None = None,
+) -> list[dict]:
+    """Return labels for a repo that participate in quality metrics."""
+    return [
+        label
+        for label in labels
+        if label.get("repo") == repo_name
+        and (track is None or label.get("track") == track)
+        and _label_quality_kind(str(label.get("label", "")), positive_labels, negative_labels)
+    ]
+
+
+def _add_rank_metrics(
+    metrics: dict,
+    true_positive_items: list[dict],
+    false_positive_items: list[dict],
+    positive_gold_count: int,
+    k_values: tuple[int, ...],
+) -> None:
+    """Add precision@K and recall@K to a metrics dict."""
+    metrics["precision_at_k"] = {}
+    metrics["recall_at_k"] = {}
+    for k in k_values:
+        tp_at_k = sum(1 for item in true_positive_items if item["rank"] <= k)
+        fp_at_k = sum(1 for item in false_positive_items if item["rank"] <= k)
+        metrics["precision_at_k"][str(k)] = _safe_divide(tp_at_k, tp_at_k + fp_at_k)
+        metrics["recall_at_k"][str(k)] = _safe_divide(tp_at_k, positive_gold_count)
+
+
+def _quality_metrics_with_items(
+    scored_labels: list[dict],
+    positive_gold: list[dict],
+    surfaced_count: int,
+    true_positive_items: list[dict],
+    false_positive_items: list[dict],
+    false_negative_items: list[dict],
+    k_values: tuple[int, ...],
+) -> dict:
+    """Build benchmark quality metrics and attach item-level evidence."""
+    counts = {
+        "gold_positive_count": len(positive_gold),
+        "gold_negative_count": len(scored_labels) - len(positive_gold),
+        "surfaced_findings_count": surfaced_count,
+        "labeled_surfaced_count": len(true_positive_items) + len(false_positive_items),
+        "true_positives": len(true_positive_items),
+        "false_positives": len(false_positive_items),
+        "false_negatives": len(false_negative_items),
+    }
+    metrics = _quality_counts_to_metrics(counts)
+    _add_rank_metrics(
+        metrics,
+        true_positive_items,
+        false_positive_items,
+        len(positive_gold),
+        k_values,
+    )
+    metrics["true_positive_items"] = true_positive_items
+    metrics["false_positive_items"] = false_positive_items
+    metrics["false_negative_items"] = false_negative_items
+    return metrics
+
+
 def score_code_quality(
     repo_name: str,
     findings: list[dict],
@@ -168,12 +245,7 @@ def score_code_quality(
     """
     positive_labels = positive_labels or ACTIONABLE_CODE_LABELS
     negative_labels = negative_labels or NON_ACTIONABLE_CODE_LABELS
-    repo_labels = [label for label in labels if label.get("repo") == repo_name]
-    scored_labels = [
-        label
-        for label in repo_labels
-        if _label_quality_kind(str(label.get("label", "")), positive_labels, negative_labels)
-    ]
+    scored_labels = _scored_labels(labels, repo_name, positive_labels, negative_labels)
     positive_gold = [label for label in scored_labels if str(label.get("label")) in positive_labels]
 
     matched_label_ids: set[int] = set()
@@ -209,49 +281,33 @@ def score_code_quality(
         if idx not in matched_label_ids and label["label"] in positive_labels
     ]
 
-    counts = {
-        "gold_positive_count": len(positive_gold),
-        "gold_negative_count": len(scored_labels) - len(positive_gold),
-        "surfaced_findings_count": len(findings),
-        "labeled_surfaced_count": len(true_positive_items) + len(false_positive_items),
-        "true_positives": len(true_positive_items),
-        "false_positives": len(false_positive_items),
-        "false_negatives": len(false_negative_items),
-    }
-    metrics = _quality_counts_to_metrics(counts)
-    metrics["precision_at_k"] = {}
-    metrics["recall_at_k"] = {}
-    for k in k_values:
-        tp_at_k = sum(1 for item in true_positive_items if item["rank"] <= k)
-        fp_at_k = sum(1 for item in false_positive_items if item["rank"] <= k)
-        metrics["precision_at_k"][str(k)] = _safe_divide(tp_at_k, tp_at_k + fp_at_k)
-        metrics["recall_at_k"][str(k)] = _safe_divide(tp_at_k, len(positive_gold))
-    metrics["true_positive_items"] = true_positive_items
-    metrics["false_positive_items"] = false_positive_items
-    metrics["false_negative_items"] = false_negative_items
-    return metrics
+    return _quality_metrics_with_items(
+        scored_labels,
+        positive_gold,
+        len(findings),
+        true_positive_items,
+        false_positive_items,
+        false_negative_items,
+        k_values,
+    )
 
 
-def docs_section_signature(section_pair: dict) -> tuple[tuple[str, int], tuple[str, int]]:
+def docs_section_signature(section_pair: dict) -> DocsSectionSignature:
     """Return a stable signature for a Section Match pair."""
     chunk_a = section_pair.get("chunk_a", {})
     chunk_b = section_pair.get("chunk_b", {})
-    sections = (
-        (Path(str(chunk_a.get("file", ""))).as_posix(), int(chunk_a.get("line_start", 0))),
-        (Path(str(chunk_b.get("file", ""))).as_posix(), int(chunk_b.get("line_start", 0))),
-    )
-    return tuple(sorted(sections))
-
-
-def _docs_label_signature(label: dict) -> tuple[tuple[str, int], tuple[str, int]]:
-    sections = label.get("sections", [])
-    if len(sections) != 2:
-        raise ValueError("docs section labels must contain exactly two sections")
-    return tuple(
-        sorted(
-            (Path(str(section["path"])).as_posix(), int(section["line_start"]))
-            for section in sections
+    return _section_signature(
+        (
+            (Path(str(chunk_a.get("file", ""))).as_posix(), int(chunk_a.get("line_start", 0))),
+            (Path(str(chunk_b.get("file", ""))).as_posix(), int(chunk_b.get("line_start", 0))),
         )
+    )
+
+
+def _docs_label_signature(label: dict) -> DocsSectionSignature:
+    sections = label.get("sections", [])
+    return _section_signature(
+        (Path(str(section["path"])).as_posix(), int(section["line_start"])) for section in sections
     )
 
 
@@ -267,16 +323,13 @@ def score_docs_section_quality(
     """Score Section Match output against curated docs labels."""
     positive_labels = positive_labels or ACTIONABLE_DOCS_LABELS
     negative_labels = negative_labels or NON_ACTIONABLE_DOCS_LABELS
-    repo_labels = [
-        label
-        for label in labels
-        if label.get("repo") == repo_name and label.get("track") == "docs-section-match"
-    ]
-    scored_labels = [
-        label
-        for label in repo_labels
-        if _label_quality_kind(str(label.get("label", "")), positive_labels, negative_labels)
-    ]
+    scored_labels = _scored_labels(
+        labels,
+        repo_name,
+        positive_labels,
+        negative_labels,
+        track="docs-section-match",
+    )
     positive_gold = [label for label in scored_labels if label["label"] in positive_labels]
     label_index = {_docs_label_signature(label): label for label in scored_labels}
 
@@ -310,24 +363,12 @@ def score_docs_section_quality(
         if _docs_label_signature(label) not in matched_signatures
     ]
 
-    counts = {
-        "gold_positive_count": len(positive_gold),
-        "gold_negative_count": len(scored_labels) - len(positive_gold),
-        "surfaced_findings_count": len(section_pairs),
-        "labeled_surfaced_count": len(true_positive_items) + len(false_positive_items),
-        "true_positives": len(true_positive_items),
-        "false_positives": len(false_positive_items),
-        "false_negatives": len(false_negative_items),
-    }
-    metrics = _quality_counts_to_metrics(counts)
-    metrics["precision_at_k"] = {}
-    metrics["recall_at_k"] = {}
-    for k in k_values:
-        tp_at_k = sum(1 for item in true_positive_items if item["rank"] <= k)
-        fp_at_k = sum(1 for item in false_positive_items if item["rank"] <= k)
-        metrics["precision_at_k"][str(k)] = _safe_divide(tp_at_k, tp_at_k + fp_at_k)
-        metrics["recall_at_k"][str(k)] = _safe_divide(tp_at_k, len(positive_gold))
-    metrics["true_positive_items"] = true_positive_items
-    metrics["false_positive_items"] = false_positive_items
-    metrics["false_negative_items"] = false_negative_items
-    return metrics
+    return _quality_metrics_with_items(
+        scored_labels,
+        positive_gold,
+        len(section_pairs),
+        true_positive_items,
+        false_positive_items,
+        false_negative_items,
+        k_values,
+    )

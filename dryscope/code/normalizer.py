@@ -252,6 +252,9 @@ def normalize(source: str, lang: str = "python") -> str:
     id_counter = 0
     result_parts: list[str] = []
 
+    def _text(node: Node) -> str:
+        return (node.text or b"").decode("utf-8")
+
     # TypeScript node types to skip (type annotations don't affect logic)
     skip_types = set()
     if lang in ("typescript", "tsx"):
@@ -284,7 +287,7 @@ def normalize(source: str, lang: str = "python") -> str:
             return
 
         if node.child_count == 0:
-            text = node.text.decode("utf-8")
+            text = _text(node)
             if (
                 node.type in ("identifier", "type_identifier", "property_identifier")
                 and text not in preserve

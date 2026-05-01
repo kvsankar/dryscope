@@ -165,7 +165,7 @@ def _get_pricing(model: str) -> tuple[float, float]:
     """Look up (input, output) pricing per million tokens for a model."""
     model_lower = model.lower()
     # Check most-specific keys first (e.g. "gpt-4o-mini" before "gpt-4")
-    for key in sorted(MODEL_PRICING, key=len, reverse=True):
+    for key in sorted(MODEL_PRICING.keys(), key=lambda item: len(item), reverse=True):
         if key in model_lower:
             return MODEL_PRICING[key]
     return _DEFAULT_PRICING
@@ -249,6 +249,564 @@ def _save_all_reports(
     (run_store.run_dir / "report.html").write_text(render_html(md_content))
 
 
+def _finish_pipeline(
+    result: AnalysisResult,
+    similarity_pairs: list[OverlapPair],
+    suggestions: list[dict] | None,
+    output_format: str,
+    output_file: str | None,
+    console: Console,
+    settings: Settings,
+    scan_path: Path,
+    stages_run: list[str],
+    run_store: RunStore | None,
+) -> AnalysisResult:
+    """Save reports when available, emit requested output, and return result."""
+    if run_store:
+        _save_all_reports(
+            run_store, result, similarity_pairs, suggestions, settings, scan_path, stages_run
+        )
+    _output_results(
+        result,
+        similarity_pairs,
+        suggestions,
+        output_format,
+        output_file,
+        console,
+        settings,
+        scan_path,
+        stages_run,
+    )
+    return result
+
+
+def _discover_documents(
+    scan_path: Path,
+    settings: Settings,
+    console: Console,
+    file_list: list[Path] | None,
+) -> AnalysisResult:
+    """Discover docs, chunk them, and return a populated result shell."""
+    result = AnalysisResult()
+    with console.status("[bold green]Discovering and chunking documents..."):
+        if file_list is not None:
+            result.documents = chunk_file_list(file_list, scan_path)
+        else:
+            result.documents = chunk_documents(scan_path, settings.include, settings.exclude)
+        for doc in result.documents:
+            result.chunks.extend(doc.chunks)
+
+    console.print(
+        f"Found [bold]{len(result.documents)}[/bold] documents, "
+        f"[bold]{len(result.chunks)}[/bold] sections"
+    )
+    return result
+
+
+def _load_section_match_stage(
+    run_store: RunStore | None,
+    result: AnalysisResult,
+    console: Console,
+) -> list[OverlapPair] | None:
+    """Load resumable Section Match output if available."""
+    if not run_store or not run_store.stage_exists("docs_section_match.json"):
+        return None
+    saved = run_store.load_stage("docs_section_match.json")
+    if not saved:
+        return None
+    similarity_pairs = _deserialize_pairs(saved.get("matched_section_pairs", []), result.chunks)
+    if not similarity_pairs:
+        return None
+    console.print(
+        f"[green]Resumed {len(similarity_pairs)} matched section pairs from previous run.[/green]"
+    )
+    return similarity_pairs
+
+
+def _run_section_match_stage(
+    result: AnalysisResult,
+    settings: Settings,
+    cache: Cache | None,
+    console: Console,
+    run_store: RunStore | None,
+    scan_path: Path,
+) -> list[OverlapPair]:
+    """Run Section Match and persist resumable stage output."""
+    boilerplate_headings = detect_boilerplate_headings(result.chunks, len(result.documents))
+    if boilerplate_headings:
+        console.print(
+            f"Detected [bold]{len(boilerplate_headings)}[/bold] boilerplate headings "
+            f"(appear in >30% of docs): {', '.join(sorted(boilerplate_headings))}"
+        )
+
+    if settings.min_content_words > 0:
+        short_count = sum(
+            1 for c in result.chunks if len(c.content.split()) < settings.min_content_words
+        )
+        if short_count:
+            console.print(
+                f"Filtering [bold]{short_count}[/bold] short sections "
+                f"(<{settings.min_content_words} words)"
+            )
+
+    def emb_progress(done: int, total: int) -> None:
+        console.print(f"  Embedding {done}/{total} chunks...", end="\r")
+
+    with console.status("[bold green]Embedding all chunks..."):
+        embeddings = embed_chunks(
+            result.chunks,
+            settings.docs_embedding_model,
+            cache,
+            on_progress=emb_progress,
+            concurrency=settings.concurrency,
+        )
+
+    if cache:
+        cache.commit()
+
+    console.print(f"Embedded [bold]{len(embeddings)}[/bold] chunks")
+    similarity_pairs = find_similar_pairs(
+        result.chunks,
+        embeddings,
+        threshold=settings.threshold_similarity,
+        min_content_words=settings.min_content_words,
+        boilerplate_headings=boilerplate_headings,
+        include_intra=settings.include_intra,
+        token_weight=settings.token_weight,
+    )
+
+    if run_store:
+        from dryscope.docs.report import serialize_section_match_stage
+
+        run_store.save_stage(
+            "docs_section_match.json",
+            serialize_section_match_stage(result, similarity_pairs, settings, scan_path),
+        )
+    return similarity_pairs
+
+
+def _load_or_run_section_match(
+    result: AnalysisResult,
+    settings: Settings,
+    cache: Cache | None,
+    console: Console,
+    run_store: RunStore | None,
+    scan_path: Path,
+) -> list[OverlapPair]:
+    resumed = _load_section_match_stage(run_store, result, console)
+    if resumed is not None:
+        return resumed
+    return _run_section_match_stage(result, settings, cache, console, run_store, scan_path)
+
+
+def _load_docs_map_stage(
+    result: AnalysisResult,
+    run_store: RunStore | None,
+    console: Console,
+) -> tuple[bool, dict[str, list[str]], dict[tuple[str, str], list[dict]], dict | None]:
+    """Load resumable Docs Map output if available."""
+    if not run_store or not run_store.stage_exists("docs_map.json"):
+        return False, {}, {}, None
+    saved = run_store.load_stage("docs_map.json")
+    if not saved:
+        return False, {}, {}, None
+
+    result.document_descriptors = saved.get("document_descriptors", {})
+    result.topic_taxonomy = saved.get("topic_taxonomy")
+    if not (
+        saved.get("descriptor_based") and result.document_descriptors and result.topic_taxonomy
+    ):
+        return False, {}, {}, saved
+
+    doc_topics = saved.get("doc_topics", {})
+    intent_evidence: dict[tuple[str, str], list[dict]] = {}
+    for match in saved.get("intent_matches", []):
+        key = (min(match["doc_a"], match["doc_b"]), max(match["doc_a"], match["doc_b"]))
+        intent_evidence[key] = match["matched_topics"]
+    console.print(
+        f"[green]Resumed descriptor-based intent detection: {len(doc_topics)} documents, "
+        f"{len(intent_evidence)} intent pairs.[/green]"
+    )
+    return True, doc_topics, intent_evidence, saved
+
+
+def _discover_docs_map(
+    result: AnalysisResult,
+    settings: Settings,
+    cache: Cache | None,
+    console: Console,
+) -> None:
+    """Populate docs_map inside an existing topic taxonomy."""
+    from dryscope.docs.taxonomy import build_docs_map
+
+    if result.topic_taxonomy is None:
+        return
+    with console.status(f"[bold green]Discovering {DOCS_MAP}..."):
+        result.topic_taxonomy["docs_map"] = build_docs_map(
+            result.topic_taxonomy,
+            document_descriptors=result.document_descriptors,
+            llm_model=settings.model,
+            cache=cache,
+            backend=settings.backend,
+            ollama_host=settings.ollama_host,
+            cli_strip_api_key=settings.cli_strip_api_key,
+            cli_permission_mode=settings.cli_permission_mode,
+            cli_dangerously_skip_permissions=settings.cli_dangerously_skip_permissions,
+            facet_dimensions=settings.docs_map_facet_dimensions,
+            facet_values=settings.docs_map_facet_values,
+        )
+    docs_map = result.topic_taxonomy.get("docs_map", {})
+    console.print(
+        f"Discovered {DOCS_MAP}: "
+        f"[bold]{len(docs_map.get('topic_tree', []))}[/bold] top-level topic groups, "
+        f"[bold]{len(docs_map.get('facets', {}))}[/bold] facet dimensions, "
+        f"[bold]{len(docs_map.get('diagnostics', []))}[/bold] diagnostics"
+    )
+
+
+def _needs_docs_map_refresh(topic_taxonomy: dict | None) -> bool:
+    existing = topic_taxonomy.get("docs_map") if topic_taxonomy else None
+    return (
+        not isinstance(existing, dict)
+        or not existing
+        or str(existing.get("method", "")).startswith("deterministic")
+    )
+
+
+def _intent_doc_chunks_map(
+    doc_chunks_map: dict[str, list[Chunk]],
+    doc_pair_groups: dict[tuple[str, str], list[OverlapPair]],
+    settings: Settings,
+    console: Console,
+) -> dict[str, list[Chunk]]:
+    """Choose the documents that should receive Docs Map descriptor extraction."""
+    if _should_skip_intent_extraction(doc_chunks_map, doc_pair_groups, settings):
+        console.print(
+            "Skipping Docs Map extraction because there is no Section Match evidence "
+            f"and the corpus is large ([bold]{len(doc_chunks_map)}[/bold] docs)."
+        )
+        return {}
+    if settings.docs_intent_max_docs <= 0 or len(doc_chunks_map) <= settings.docs_intent_max_docs:
+        return doc_chunks_map
+
+    ranked_docs = _rank_doc_paths_by_similarity_evidence(doc_pair_groups)
+    if not ranked_docs:
+        return doc_chunks_map
+    allowed_docs = set(ranked_docs[: settings.docs_intent_max_docs])
+    limited_map = _filter_doc_chunks_map(doc_chunks_map, allowed_docs)
+    console.print(
+        "Limiting intent extraction to "
+        f"[bold]{len(limited_map)}[/bold] documents "
+        "with the strongest Section Match evidence"
+    )
+    return limited_map
+
+
+def _extract_docs_map_stage(
+    result: AnalysisResult,
+    doc_chunks_map: dict[str, list[Chunk]],
+    doc_pair_groups: dict[tuple[str, str], list[OverlapPair]],
+    settings: Settings,
+    cache: Cache | None,
+    console: Console,
+) -> tuple[dict[str, list[str]], dict[tuple[str, str], list[dict]], dict[str, list[str]]]:
+    """Run descriptor extraction, taxonomy building, Docs Map, and intent matching."""
+    from dryscope.docs.taxonomy import build_canonical_taxonomy
+    from dryscope.docs.topics import (
+        descriptor_labels,
+        embed_topics,
+        find_intent_doc_pairs,
+        run_document_descriptor_extraction,
+    )
+
+    intent_doc_chunks_map = _intent_doc_chunks_map(
+        doc_chunks_map, doc_pair_groups, settings, console
+    )
+    if not intent_doc_chunks_map:
+        return {}, {}, {}
+
+    def descriptor_progress(done: int, total: int) -> None:
+        console.print(f"  Extracting descriptors {done}/{total}...", end="\r")
+
+    result.document_descriptors = run_document_descriptor_extraction(
+        intent_doc_chunks_map,
+        settings.model,
+        cache,
+        backend=settings.backend,
+        concurrency=settings.concurrency,
+        on_progress=descriptor_progress,
+        ollama_host=settings.ollama_host,
+        cli_strip_api_key=settings.cli_strip_api_key,
+        cli_permission_mode=settings.cli_permission_mode,
+        cli_dangerously_skip_permissions=settings.cli_dangerously_skip_permissions,
+        facet_dimensions=settings.docs_map_facet_dimensions,
+        facet_values=settings.docs_map_facet_values,
+    )
+    if cache:
+        cache.commit()
+
+    raw_doc_topics = {
+        doc_path: descriptor_labels(descriptor)
+        for doc_path, descriptor in result.document_descriptors.items()
+    }
+    total_topics = sum(len(t) for t in raw_doc_topics.values())
+    console.print(
+        f"Extracted [bold]{len(result.document_descriptors)}[/bold] descriptors "
+        f"and [bold]{total_topics}[/bold] Docs Map labels"
+    )
+
+    with console.status("[bold green]Canonicalizing topics..."):
+        taxonomy = build_canonical_taxonomy(
+            raw_doc_topics,
+            llm_model=settings.model,
+            cache=cache,
+            backend=settings.backend,
+            llm_concurrency=settings.concurrency,
+            ollama_host=settings.ollama_host,
+            cli_strip_api_key=settings.cli_strip_api_key,
+            cli_permission_mode=settings.cli_permission_mode,
+            cli_dangerously_skip_permissions=settings.cli_dangerously_skip_permissions,
+        )
+    doc_topics = taxonomy.doc_topics
+    result.topic_taxonomy = taxonomy.to_dict()
+    topic_document_clusters = result.topic_taxonomy.get("topic_document_clusters", [])
+    console.print(
+        f"Normalized to [bold]{len(taxonomy.canonical_topics)}[/bold] canonical topics "
+        f"({taxonomy.method})"
+    )
+    console.print(
+        f"Found [bold]{len(topic_document_clusters)}[/bold] topic coverage clusters "
+        "(canonical topics covered by 2+ documents)"
+    )
+    _discover_docs_map(result, settings, cache, console)
+    if cache:
+        cache.commit()
+
+    all_topics = list({t for topics in doc_topics.values() for t in topics})
+    intent_evidence = {}
+    if all_topics:
+        topic_embeddings = embed_topics(all_topics, settings.docs_embedding_model, cache)
+        intent_evidence = find_intent_doc_pairs(
+            doc_topics, topic_embeddings, settings.threshold_intent
+        )
+
+    console.print(
+        f"Found [bold]{len(intent_evidence)}[/bold] intent-overlap document pairs "
+        f"(topic cosine > {settings.threshold_intent})"
+    )
+    return doc_topics, intent_evidence, raw_doc_topics
+
+
+def _save_docs_map_stage(
+    run_store: RunStore | None,
+    result: AnalysisResult,
+    raw_doc_topics: dict[str, list[str]],
+    doc_topics: dict[str, list[str]],
+    intent_evidence: dict[tuple[str, str], list[dict]],
+) -> None:
+    if not run_store:
+        return
+    intent_matches_data = [
+        {"doc_a": key[0], "doc_b": key[1], "matched_topics": matches}
+        for key, matches in intent_evidence.items()
+    ]
+    run_store.save_stage(
+        "docs_map.json",
+        {
+            "metadata": {},
+            "descriptor_based": True,
+            "document_descriptors": result.document_descriptors,
+            "descriptor_labels": raw_doc_topics,
+            "raw_doc_topics": raw_doc_topics,
+            "doc_topics": doc_topics,
+            "topic_taxonomy": result.topic_taxonomy,
+            "intent_matches": intent_matches_data,
+        },
+    )
+
+
+def _run_docs_map_stage(
+    result: AnalysisResult,
+    similarity_pairs: list[OverlapPair],
+    settings: Settings,
+    cache: Cache | None,
+    console: Console,
+    run_store: RunStore | None,
+) -> tuple[dict[tuple[str, str], list[OverlapPair]], dict[tuple[str, str], list[dict]]]:
+    """Run or resume Docs Map and return doc-pair groups plus intent evidence."""
+    doc_chunks_map = _build_doc_chunks_map(result.documents)
+    doc_pair_groups = _group_pairs_by_doc_pair(similarity_pairs)
+    intent_resumed, doc_topics, intent_evidence, saved = _load_docs_map_stage(
+        result, run_store, console
+    )
+
+    if intent_resumed and _needs_docs_map_refresh(result.topic_taxonomy):
+        _discover_docs_map(result, settings, cache, console)
+        if saved is not None and run_store:
+            saved["topic_taxonomy"] = result.topic_taxonomy
+            run_store.save_stage("docs_map.json", saved)
+        if cache:
+            cache.commit()
+
+    if not intent_resumed:
+        console.print()
+        console.print(f"[bold cyan]{DOCS_MAP}[/bold cyan]")
+        doc_topics, intent_evidence, raw_doc_topics = _extract_docs_map_stage(
+            result, doc_chunks_map, doc_pair_groups, settings, cache, console
+        )
+        _save_docs_map_stage(run_store, result, raw_doc_topics, doc_topics, intent_evidence)
+
+    for key in intent_evidence:
+        doc_pair_groups.setdefault(key, [])
+    return doc_pair_groups, intent_evidence
+
+
+def _limit_doc_pair_groups(
+    doc_pair_groups: dict[tuple[str, str], list[OverlapPair]],
+    settings: Settings,
+    console: Console,
+) -> dict[tuple[str, str], list[OverlapPair]]:
+    """Apply configured Doc Pair Review cap."""
+    if (
+        settings.docs_llm_max_doc_pairs <= 0
+        or len(doc_pair_groups) <= settings.docs_llm_max_doc_pairs
+    ):
+        return doc_pair_groups
+    original_count = len(doc_pair_groups)
+    limited = _restrict_doc_pair_groups(
+        doc_pair_groups,
+        max_pairs=settings.docs_llm_max_doc_pairs,
+    )
+    console.print(
+        f"Limiting {DOCS_PAIR_REVIEW} to "
+        f"[bold]{len(limited)}[/bold] of [bold]{original_count}[/bold] pairs "
+        "with the strongest Section Match evidence"
+    )
+    return limited
+
+
+def _doc_pair_review_allowed(
+    doc_pair_groups: dict[tuple[str, str], list[OverlapPair]],
+    doc_chunks_map: dict[str, list[Chunk]],
+    settings: Settings,
+    console: Console,
+    skip_confirm: bool,
+) -> bool:
+    """Print cost information and return whether Doc Pair Review should run."""
+    est_cost = estimate_doc_pair_cost(doc_pair_groups, doc_chunks_map, settings.model)
+    console.print()
+    console.print(f"[bold cyan]{DOCS_PAIR_REVIEW} (LLM)[/bold cyan]")
+    console.print(
+        f"  Analyzing [bold]{len(doc_pair_groups)}[/bold] document pairs "
+        f"-> ~${est_cost:.2f} ({settings.model})"
+    )
+    if est_cost > settings.max_cost:
+        console.print(
+            f"[red]Estimated cost ${est_cost:.2f} exceeds max_cost ${settings.max_cost:.2f}. "
+            f"Skipping LLM stage.[/red]"
+        )
+        return False
+    if skip_confirm:
+        return True
+
+    import click
+
+    if click.confirm("Proceed?"):
+        return True
+    console.print("[yellow]Skipping LLM stage.[/yellow]")
+    return False
+
+
+def _load_prior_doc_pair_analyses(
+    run_store: RunStore | None,
+    console: Console,
+) -> tuple[dict[str, dict], Path | None]:
+    """Load JSONL doc-pair analysis resume data."""
+    import json as _json
+
+    prior_analyses: dict[str, dict] = {}
+    doc_pairs_path = None
+    if run_store:
+        doc_pairs_path = run_store.run_dir / "docs_pair_review.jsonl"
+        if doc_pairs_path.exists():
+            for line in doc_pairs_path.read_text().splitlines():
+                if line.strip():
+                    entry = _json.loads(line)
+                    prior_analyses[entry["pair_key"]] = entry["analysis"]
+    if prior_analyses:
+        console.print(f"[green]Resumed {len(prior_analyses)} doc-pair analyses.[/green]")
+    return prior_analyses, doc_pairs_path
+
+
+def _run_doc_pair_review_stage(
+    result: AnalysisResult,
+    doc_pair_groups: dict[tuple[str, str], list[OverlapPair]],
+    doc_chunks_map: dict[str, list[Chunk]],
+    intent_evidence: dict[tuple[str, str], list[dict]],
+    settings: Settings,
+    cache: Cache | None,
+    console: Console,
+    run_store: RunStore | None,
+    scan_path: Path,
+    stages_run: list[str],
+    skip_confirm: bool,
+) -> list[dict] | None:
+    """Run Doc Pair Review when cost and confirmation allow it."""
+    if not _doc_pair_review_allowed(
+        doc_pair_groups, doc_chunks_map, settings, console, skip_confirm
+    ):
+        return None
+
+    try:
+        import json as _json
+
+        def doc_pair_progress(done: int, total: int) -> None:
+            console.print(f"  Analyzing doc pair {done}/{total}...", end="\r")
+
+        prior_analyses, doc_pairs_path = _load_prior_doc_pair_analyses(run_store, console)
+
+        def on_pair_analyzed(pair_key: str, raw: dict) -> None:
+            if doc_pairs_path:
+                with open(doc_pairs_path, "a") as f:
+                    f.write(_json.dumps({"pair_key": pair_key, "analysis": raw}) + "\n")
+
+        analyses, codes, categories, suggestions = run_doc_pair_pipeline(
+            doc_pair_groups,
+            doc_chunks_map,
+            settings.model,
+            cache,
+            on_progress=doc_pair_progress,
+            backend=settings.backend,
+            prior_analyses=prior_analyses,
+            on_pair_analyzed=on_pair_analyzed,
+            concurrency=settings.concurrency,
+            intent_evidence=intent_evidence if intent_evidence else None,
+            ollama_host=settings.ollama_host,
+            cli_strip_api_key=settings.cli_strip_api_key,
+            cli_permission_mode=settings.cli_permission_mode,
+            cli_dangerously_skip_permissions=settings.cli_dangerously_skip_permissions,
+        )
+        result.doc_pair_analyses = analyses
+        result.codes = codes
+        result.categories = categories
+        stages_run.append(DOCS_PAIR_REVIEW_SLUG)
+        if cache:
+            cache.commit()
+        if run_store:
+            from dryscope.docs.report import serialize_doc_pair_review_stage
+
+            run_store.save_stage(
+                "docs_pair_review.json",
+                serialize_doc_pair_review_stage(
+                    codes, categories, suggestions, settings, scan_path, analyses=analyses
+                ),
+            )
+        return suggestions
+    except Exception as e:
+        console.print(f"[yellow]LLM analysis stage failed: {e}[/yellow]")
+        return None
+
+
 def run_pipeline(
     scan_path: Path,
     settings: Settings,
@@ -279,450 +837,30 @@ def run_pipeline(
         allowed = ", ".join(sorted(valid_stages))
         raise ValueError(f"Unknown docs stage {stage!r}; expected one of: {allowed}")
 
-    if console is None:
-        console = Console(stderr=True)
-
-    result = AnalysisResult()
-    similarity_pairs: list[OverlapPair] = []
-    suggestions: list[dict] | None = None
-    stages_run: list[str] = []
-
-    # ─── Discover and chunk documents ───
-    with console.status("[bold green]Discovering and chunking documents..."):
-        if file_list is not None:
-            result.documents = chunk_file_list(file_list, scan_path)
-        else:
-            result.documents = chunk_documents(
-                scan_path,
-                settings.include,
-                settings.exclude,
-            )
-        for doc in result.documents:
-            result.chunks.extend(doc.chunks)
-
-    console.print(
-        f"Found [bold]{len(result.documents)}[/bold] documents, "
-        f"[bold]{len(result.chunks)}[/bold] sections"
-    )
-
+    console = console or Console(stderr=True)
+    result = _discover_documents(scan_path, settings, console, file_list)
     if not result.chunks:
         console.print("[yellow]No documentation sections found.[/yellow]")
         return result
 
-    # ─── Section Match ───
     console.print()
     console.print(f"[bold cyan]{DOCS_SECTION_MATCH}[/bold cyan]")
-
-    cache = None
-    if settings.cache_enabled:
-        cache = Cache(settings.resolved_cache_path)
-
-    similarity_resumed = False
-    if run_store and run_store.stage_exists("docs_section_match.json"):
-        saved = run_store.load_stage("docs_section_match.json")
-        if saved:
-            similarity_pairs = _deserialize_pairs(
-                saved.get("matched_section_pairs", []), result.chunks
-            )
-            if similarity_pairs:
-                similarity_resumed = True
-                console.print(
-                    f"[green]Resumed {len(similarity_pairs)} matched section pairs from previous run.[/green]"
-                )
-
-    if not similarity_resumed:
-        # Detect boilerplate headings
-        num_docs = len(result.documents)
-        boilerplate_headings = detect_boilerplate_headings(result.chunks, num_docs)
-        if boilerplate_headings:
-            console.print(
-                f"Detected [bold]{len(boilerplate_headings)}[/bold] boilerplate headings "
-                f"(appear in >30% of docs): {', '.join(sorted(boilerplate_headings))}"
-            )
-
-        if settings.min_content_words > 0:
-            short_count = sum(
-                1 for c in result.chunks if len(c.content.split()) < settings.min_content_words
-            )
-            if short_count:
-                console.print(
-                    f"Filtering [bold]{short_count}[/bold] short sections "
-                    f"(<{settings.min_content_words} words)"
-                )
-
-        # Embed all chunks
-        def emb_progress(done: int, total: int) -> None:
-            console.print(f"  Embedding {done}/{total} chunks...", end="\r")
-
-        with console.status("[bold green]Embedding all chunks..."):
-            embeddings = embed_chunks(
-                result.chunks,
-                settings.docs_embedding_model,
-                cache,
-                on_progress=emb_progress,
-                concurrency=settings.concurrency,
-            )
-
-        if cache:
-            cache.commit()
-
-        console.print(f"Embedded [bold]{len(embeddings)}[/bold] chunks")
-
-        # Find similar pairs
-        similarity_pairs = find_similar_pairs(
-            result.chunks,
-            embeddings,
-            threshold=settings.threshold_similarity,
-            min_content_words=settings.min_content_words,
-            boilerplate_headings=boilerplate_headings,
-            include_intra=settings.include_intra,
-            token_weight=settings.token_weight,
-        )
-
-        if run_store:
-            from dryscope.docs.report import serialize_section_match_stage
-
-            run_store.save_stage(
-                "docs_section_match.json",
-                serialize_section_match_stage(result, similarity_pairs, settings, scan_path),
-            )
-
-    result.overlaps = similarity_pairs
-    stages_run.append(DOCS_SECTION_MATCH_SLUG)
-
-    console.print(
-        f"Found [bold]{len(similarity_pairs)}[/bold] matched section pairs "
-        f"(cosine > {settings.threshold_similarity})"
-    )
+    cache = Cache(settings.resolved_cache_path) if settings.cache_enabled else None
+    suggestions: list[dict] | None = None
+    stages_run = [DOCS_SECTION_MATCH_SLUG]
 
     try:
-        if stage == DOCS_SECTION_MATCH_SLUG:
-            if run_store:
-                _save_all_reports(
-                    run_store,
-                    result,
-                    similarity_pairs,
-                    suggestions,
-                    settings,
-                    scan_path,
-                    stages_run,
-                )
-            _output_results(
-                result,
-                similarity_pairs,
-                suggestions,
-                output_format,
-                output_file,
-                console,
-                settings,
-                scan_path,
-                stages_run,
-            )
-            return result
-
-        # ─── Docs Map ───
-        doc_chunks_map = _build_doc_chunks_map(result.documents)
-        doc_pair_groups = _group_pairs_by_doc_pair(similarity_pairs)
-        intent_evidence: dict[tuple[str, str], list[dict]] = {}
-
-        if settings.threshold_intent > 0:
-            from dryscope.docs.topics import (
-                descriptor_labels,
-                embed_topics,
-                find_intent_doc_pairs,
-                run_document_descriptor_extraction,
-            )
-
-            intent_resumed = False
-            doc_topics: dict[str, list[str]] = {}
-
-            if run_store and run_store.stage_exists("docs_map.json"):
-                saved = run_store.load_stage("docs_map.json")
-                if saved:
-                    result.document_descriptors = saved.get("document_descriptors", {})
-                    result.topic_taxonomy = saved.get("topic_taxonomy")
-                    if (
-                        saved.get("descriptor_based")
-                        and result.document_descriptors
-                        and result.topic_taxonomy
-                    ):
-                        doc_topics = saved.get("doc_topics", {})
-                        for match in saved.get("intent_matches", []):
-                            key = (
-                                min(match["doc_a"], match["doc_b"]),
-                                max(match["doc_a"], match["doc_b"]),
-                            )
-                            intent_evidence[key] = match["matched_topics"]
-                        intent_resumed = True
-                        console.print(
-                            f"[green]Resumed descriptor-based intent detection: {len(doc_topics)} documents, "
-                            f"{len(intent_evidence)} intent pairs.[/green]"
-                        )
-                    existing_docs_map = (
-                        result.topic_taxonomy.get("docs_map") if result.topic_taxonomy else None
-                    )
-                    needs_docs_map = (
-                        not isinstance(existing_docs_map, dict)
-                        or not existing_docs_map
-                        or str(existing_docs_map.get("method", "")).startswith("deterministic")
-                    )
-                    if intent_resumed and result.topic_taxonomy and needs_docs_map:
-                        from dryscope.docs.taxonomy import build_docs_map
-
-                        with console.status(f"[bold green]Discovering {DOCS_MAP}..."):
-                            result.topic_taxonomy["docs_map"] = build_docs_map(
-                                result.topic_taxonomy,
-                                document_descriptors=result.document_descriptors,
-                                llm_model=settings.model,
-                                cache=cache,
-                                backend=settings.backend,
-                                ollama_host=settings.ollama_host,
-                                cli_strip_api_key=settings.cli_strip_api_key,
-                                cli_permission_mode=settings.cli_permission_mode,
-                                cli_dangerously_skip_permissions=settings.cli_dangerously_skip_permissions,
-                                facet_dimensions=settings.docs_map_facet_dimensions,
-                                facet_values=settings.docs_map_facet_values,
-                            )
-                        docs_map = result.topic_taxonomy.get("docs_map", {})
-                        console.print(
-                            f"Discovered {DOCS_MAP}: "
-                            f"[bold]{len(docs_map.get('topic_tree', []))}[/bold] top-level topic groups, "
-                            f"[bold]{len(docs_map.get('facets', {}))}[/bold] facet dimensions, "
-                            f"[bold]{len(docs_map.get('diagnostics', []))}[/bold] diagnostics"
-                        )
-                        saved["topic_taxonomy"] = result.topic_taxonomy
-                        run_store.save_stage("docs_map.json", saved)
-                        if cache:
-                            cache.commit()
-
-            if not intent_resumed:
-                console.print()
-                console.print(f"[bold cyan]{DOCS_MAP}[/bold cyan]")
-
-                intent_doc_chunks_map = doc_chunks_map
-                if _should_skip_intent_extraction(doc_chunks_map, doc_pair_groups, settings):
-                    console.print(
-                        "Skipping Docs Map extraction because there is no Section Match evidence "
-                        f"and the corpus is large ([bold]{len(doc_chunks_map)}[/bold] docs)."
-                    )
-                    intent_doc_chunks_map = {}
-                    doc_topics = {}
-                elif (
-                    settings.docs_intent_max_docs > 0
-                    and len(doc_chunks_map) > settings.docs_intent_max_docs
-                ):
-                    ranked_docs = _rank_doc_paths_by_similarity_evidence(doc_pair_groups)
-                    if ranked_docs:
-                        allowed_docs = set(ranked_docs[: settings.docs_intent_max_docs])
-                        intent_doc_chunks_map = _filter_doc_chunks_map(doc_chunks_map, allowed_docs)
-                        console.print(
-                            "Limiting intent extraction to "
-                            f"[bold]{len(intent_doc_chunks_map)}[/bold] documents "
-                            "with the strongest Section Match evidence"
-                        )
-
-                if intent_doc_chunks_map:
-
-                    def descriptor_progress(done: int, total: int) -> None:
-                        console.print(f"  Extracting descriptors {done}/{total}...", end="\r")
-
-                    result.document_descriptors = run_document_descriptor_extraction(
-                        intent_doc_chunks_map,
-                        settings.model,
-                        cache,
-                        backend=settings.backend,
-                        concurrency=settings.concurrency,
-                        on_progress=descriptor_progress,
-                        ollama_host=settings.ollama_host,
-                        cli_strip_api_key=settings.cli_strip_api_key,
-                        cli_permission_mode=settings.cli_permission_mode,
-                        cli_dangerously_skip_permissions=settings.cli_dangerously_skip_permissions,
-                        facet_dimensions=settings.docs_map_facet_dimensions,
-                        facet_values=settings.docs_map_facet_values,
-                    )
-
-                    if cache:
-                        cache.commit()
-
-                    raw_doc_topics = {
-                        doc_path: descriptor_labels(descriptor)
-                        for doc_path, descriptor in result.document_descriptors.items()
-                    }
-                    total_topics = sum(len(t) for t in raw_doc_topics.values())
-                    console.print(
-                        f"Extracted [bold]{len(result.document_descriptors)}[/bold] descriptors "
-                        f"and [bold]{total_topics}[/bold] Docs Map labels"
-                    )
-
-                    from dryscope.docs.taxonomy import build_canonical_taxonomy, build_docs_map
-
-                    with console.status("[bold green]Canonicalizing topics..."):
-                        taxonomy = build_canonical_taxonomy(
-                            raw_doc_topics,
-                            llm_model=settings.model,
-                            cache=cache,
-                            backend=settings.backend,
-                            llm_concurrency=settings.concurrency,
-                            ollama_host=settings.ollama_host,
-                            cli_strip_api_key=settings.cli_strip_api_key,
-                            cli_permission_mode=settings.cli_permission_mode,
-                            cli_dangerously_skip_permissions=settings.cli_dangerously_skip_permissions,
-                        )
-                    doc_topics = taxonomy.doc_topics
-                    result.topic_taxonomy = taxonomy.to_dict()
-                    topic_document_clusters = result.topic_taxonomy.get(
-                        "topic_document_clusters", []
-                    )
-                    console.print(
-                        "Normalized to "
-                        f"[bold]{len(taxonomy.canonical_topics)}[/bold] canonical topics "
-                        f"({taxonomy.method})"
-                    )
-                    console.print(
-                        "Found "
-                        f"[bold]{len(topic_document_clusters)}[/bold] topic coverage clusters "
-                        "(canonical topics covered by 2+ documents)"
-                    )
-                    with console.status(f"[bold green]Discovering {DOCS_MAP}..."):
-                        result.topic_taxonomy["docs_map"] = build_docs_map(
-                            result.topic_taxonomy,
-                            document_descriptors=result.document_descriptors,
-                            llm_model=settings.model,
-                            cache=cache,
-                            backend=settings.backend,
-                            ollama_host=settings.ollama_host,
-                            cli_strip_api_key=settings.cli_strip_api_key,
-                            cli_permission_mode=settings.cli_permission_mode,
-                            cli_dangerously_skip_permissions=settings.cli_dangerously_skip_permissions,
-                            facet_dimensions=settings.docs_map_facet_dimensions,
-                            facet_values=settings.docs_map_facet_values,
-                        )
-                    docs_map = result.topic_taxonomy.get("docs_map", {})
-                    console.print(
-                        f"Discovered {DOCS_MAP}: "
-                        f"[bold]{len(docs_map.get('topic_tree', []))}[/bold] top-level topic groups, "
-                        f"[bold]{len(docs_map.get('facets', {}))}[/bold] facet dimensions, "
-                        f"[bold]{len(docs_map.get('diagnostics', []))}[/bold] diagnostics"
-                    )
-
-                    if cache:
-                        cache.commit()
-
-                    # Embed all unique topics
-                    all_topics = list({t for topics in doc_topics.values() for t in topics})
-                    if all_topics:
-                        topic_embeddings = embed_topics(
-                            all_topics, settings.docs_embedding_model, cache
-                        )
-
-                        # Find intent doc-pairs
-                        intent_evidence = find_intent_doc_pairs(
-                            doc_topics,
-                            topic_embeddings,
-                            settings.threshold_intent,
-                        )
-
-                    console.print(
-                        f"Found [bold]{len(intent_evidence)}[/bold] intent-overlap document pairs "
-                        f"(topic cosine > {settings.threshold_intent})"
-                    )
-
-                    # Save stage1b
-                    if run_store:
-                        intent_matches_data = [
-                            {
-                                "doc_a": key[0],
-                                "doc_b": key[1],
-                                "matched_topics": matches,
-                            }
-                            for key, matches in intent_evidence.items()
-                        ]
-                        run_store.save_stage(
-                            "docs_map.json",
-                            {
-                                "metadata": {},
-                                "descriptor_based": True,
-                                "document_descriptors": result.document_descriptors,
-                                "descriptor_labels": raw_doc_topics,
-                                "raw_doc_topics": raw_doc_topics,
-                                "doc_topics": doc_topics,
-                                "topic_taxonomy": result.topic_taxonomy,
-                                "intent_matches": intent_matches_data,
-                            },
-                        )
-
-            stages_run.append(DOCS_MAP_SLUG)
-
-            # Add intent-only doc-pairs to groups (no content overlap, just topics)
-            for key in intent_evidence:
-                if key not in doc_pair_groups:
-                    doc_pair_groups[key] = []
-
-        if (
-            settings.docs_llm_max_doc_pairs > 0
-            and len(doc_pair_groups) > settings.docs_llm_max_doc_pairs
-        ):
-            original_count = len(doc_pair_groups)
-            doc_pair_groups = _restrict_doc_pair_groups(
-                doc_pair_groups,
-                max_pairs=settings.docs_llm_max_doc_pairs,
-            )
-            console.print(
-                f"Limiting {DOCS_PAIR_REVIEW} to "
-                f"[bold]{len(doc_pair_groups)}[/bold] of [bold]{original_count}[/bold] pairs "
-                "with the strongest Section Match evidence"
-            )
-
-        if not doc_pair_groups:
-            if run_store:
-                _save_all_reports(
-                    run_store,
-                    result,
-                    similarity_pairs,
-                    suggestions,
-                    settings,
-                    scan_path,
-                    stages_run,
-                )
-            _output_results(
-                result,
-                similarity_pairs,
-                suggestions,
-                output_format,
-                output_file,
-                console,
-                settings,
-                scan_path,
-                stages_run,
-            )
-            return result
-
-        # ─── Doc Pair Review ───
-        est_cost = estimate_doc_pair_cost(doc_pair_groups, doc_chunks_map, settings.model)
-
-        console.print()
-        console.print(f"[bold cyan]{DOCS_PAIR_REVIEW} (LLM)[/bold cyan]")
+        similarity_pairs = _load_or_run_section_match(
+            result, settings, cache, console, run_store, scan_path
+        )
+        result.overlaps = similarity_pairs
         console.print(
-            f"  Analyzing [bold]{len(doc_pair_groups)}[/bold] document pairs "
-            f"→ ~${est_cost:.2f} ({settings.model})"
+            f"Found [bold]{len(similarity_pairs)}[/bold] matched section pairs "
+            f"(cosine > {settings.threshold_similarity})"
         )
 
-        if est_cost > settings.max_cost:
-            console.print(
-                f"[red]Estimated cost ${est_cost:.2f} exceeds max_cost ${settings.max_cost:.2f}. "
-                f"Skipping LLM stage.[/red]"
-            )
-            if run_store:
-                _save_all_reports(
-                    run_store,
-                    result,
-                    similarity_pairs,
-                    suggestions,
-                    settings,
-                    scan_path,
-                    stages_run,
-                )
-            _output_results(
+        if stage == DOCS_SECTION_MATCH_SLUG:
+            return _finish_pipeline(
                 result,
                 similarity_pairs,
                 suggestions,
@@ -732,107 +870,35 @@ def run_pipeline(
                 settings,
                 scan_path,
                 stages_run,
+                run_store,
             )
-            return result
 
-        if not skip_confirm:
-            import click
+        doc_chunks_map = _build_doc_chunks_map(result.documents)
+        intent_evidence: dict[tuple[str, str], list[dict]] = {}
+        doc_pair_groups = _group_pairs_by_doc_pair(similarity_pairs)
+        if settings.threshold_intent > 0:
+            doc_pair_groups, intent_evidence = _run_docs_map_stage(
+                result, similarity_pairs, settings, cache, console, run_store
+            )
+            stages_run.append(DOCS_MAP_SLUG)
 
-            if not click.confirm("Proceed?"):
-                console.print("[yellow]Skipping LLM stage.[/yellow]")
-                if run_store:
-                    _save_all_reports(
-                        run_store,
-                        result,
-                        similarity_pairs,
-                        suggestions,
-                        settings,
-                        scan_path,
-                        stages_run,
-                    )
-                _output_results(
-                    result,
-                    similarity_pairs,
-                    suggestions,
-                    output_format,
-                    output_file,
-                    console,
-                    settings,
-                    scan_path,
-                    stages_run,
-                )
-                return result
-
-        try:
-            import json as _json
-
-            def doc_pair_progress(done: int, total: int) -> None:
-                console.print(f"  Analyzing doc pair {done}/{total}...", end="\r")
-
-            # Load prior doc-pair analyses for resume
-            prior_analyses: dict[str, dict] = {}
-            doc_pairs_path = None
-            if run_store:
-                doc_pairs_path = run_store.run_dir / "docs_pair_review.jsonl"
-                if doc_pairs_path.exists():
-                    for line in doc_pairs_path.read_text().splitlines():
-                        if line.strip():
-                            entry = _json.loads(line)
-                            prior_analyses[entry["pair_key"]] = entry["analysis"]
-                    if prior_analyses:
-                        console.print(
-                            f"[green]Resumed {len(prior_analyses)} doc-pair analyses.[/green]"
-                        )
-
-            # Incremental save callback
-            def on_pair_analyzed(pair_key: str, raw: dict) -> None:
-                if doc_pairs_path:
-                    with open(doc_pairs_path, "a") as f:
-                        f.write(_json.dumps({"pair_key": pair_key, "analysis": raw}) + "\n")
-
-            analyses, codes, categories, suggestions = run_doc_pair_pipeline(
+        doc_pair_groups = _limit_doc_pair_groups(doc_pair_groups, settings, console)
+        if doc_pair_groups:
+            suggestions = _run_doc_pair_review_stage(
+                result,
                 doc_pair_groups,
                 doc_chunks_map,
-                settings.model,
+                intent_evidence,
+                settings,
                 cache,
-                on_progress=doc_pair_progress,
-                backend=settings.backend,
-                prior_analyses=prior_analyses,
-                on_pair_analyzed=on_pair_analyzed,
-                concurrency=settings.concurrency,
-                intent_evidence=intent_evidence if intent_evidence else None,
-                ollama_host=settings.ollama_host,
-                cli_strip_api_key=settings.cli_strip_api_key,
-                cli_permission_mode=settings.cli_permission_mode,
-                cli_dangerously_skip_permissions=settings.cli_dangerously_skip_permissions,
-            )
-            result.doc_pair_analyses = analyses
-            result.codes = codes
-            result.categories = categories
-            stages_run.append(DOCS_PAIR_REVIEW_SLUG)
-
-            if cache:
-                cache.commit()
-
-            if run_store:
-                from dryscope.docs.report import serialize_doc_pair_review_stage
-
-                run_store.save_stage(
-                    "docs_pair_review.json",
-                    serialize_doc_pair_review_stage(
-                        codes, categories, suggestions, settings, scan_path, analyses=analyses
-                    ),
-                )
-        except Exception as e:
-            console.print(f"[yellow]LLM analysis stage failed: {e}[/yellow]")
-            suggestions = None
-
-        if run_store:
-            _save_all_reports(
-                run_store, result, similarity_pairs, suggestions, settings, scan_path, stages_run
+                console,
+                run_store,
+                scan_path,
+                stages_run,
+                skip_confirm,
             )
 
-        _output_results(
+        return _finish_pipeline(
             result,
             similarity_pairs,
             suggestions,
@@ -842,8 +908,8 @@ def run_pipeline(
             settings,
             scan_path,
             stages_run,
+            run_store,
         )
-        return result
     finally:
         if cache:
             cache.close()

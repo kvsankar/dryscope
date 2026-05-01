@@ -185,6 +185,108 @@ def help_topic(topic: tuple[str, ...]) -> None:
 # ─── Code scan ────────────────────────────────────────────────────────────
 
 
+def _profile_exclusions(
+    path: str,
+    exclude: tuple[str, ...],
+    exclude_type: tuple[str, ...],
+) -> tuple[list[str] | None, set[str] | None, set[str]]:
+    from dryscope.code.profiles import detect_profiles, merge_profiles
+
+    profiles = detect_profiles(path)
+    if profiles:
+        names = ", ".join(p.name for p in profiles)
+        click.echo(f"Detected project profile(s): {names}", err=True)
+
+    user_patterns = list(exclude) if exclude else None
+    user_types = set(exclude_type) if exclude_type else None
+    return merge_profiles(profiles, user_patterns, user_types)
+
+
+def _filter_units_by_lang(units: list, lang: str | None) -> list:
+    if not lang:
+        return units
+    lang_map = {
+        "python": "python",
+        "ts": "typescript",
+        "tsx": "tsx",
+        "typescript": "typescript",
+    }
+    target_lang = lang_map.get(lang)
+    return [u for u in units if u.lang == target_lang] if target_lang else units
+
+
+def _filter_units_by_tokens(
+    units: list,
+    normalized: list[str],
+    min_tokens: int,
+) -> tuple[list, list[str]] | None:
+    if min_tokens <= 0:
+        return units, normalized
+
+    filtered = [
+        (u, n) for u, n in zip(units, normalized, strict=True) if len(set(n.split())) >= min_tokens
+    ]
+    removed = len(units) - len(filtered)
+    if removed:
+        click.echo(f"Filtered {removed} units with < {min_tokens} unique tokens.", err=True)
+    if not filtered:
+        click.echo("No code units remaining after token filter.", err=True)
+        return None
+
+    kept_units, kept_normalized = zip(*filtered, strict=True)
+    return list(kept_units), list(kept_normalized)
+
+
+def _verify_code_clusters(
+    clusters: list,
+    settings: Settings,
+    llm_api_key: str | None,
+) -> list:
+    from dryscope.code.policy import EscalationPolicy, should_escalate_cluster
+    from dryscope.code.verifier import VERDICT_NOISE, verify_clusters
+
+    click.echo(
+        f"{CODE_REVIEW}: verifying {len(clusters)} clusters with {settings.model}...", err=True
+    )
+    results = verify_clusters(
+        clusters,
+        model=settings.model,
+        max_workers=settings.concurrency,
+        backend=settings.backend,
+        api_key=llm_api_key,
+        ollama_host=settings.ollama_host,
+        cli_strip_api_key=settings.cli_strip_api_key,
+        cli_permission_mode=settings.cli_permission_mode,
+        cli_dangerously_skip_permissions=settings.cli_dangerously_skip_permissions,
+    )
+
+    verified: list = []
+    noise_count = 0
+    policy_drop_count = 0
+    policy = EscalationPolicy(
+        refactor_min_lines=settings.code_escalate_refactor_min_lines,
+        refactor_min_actionability=settings.code_escalate_refactor_min_actionability,
+        refactor_min_units=settings.code_escalate_refactor_min_units,
+        keep_same_file_refactors=settings.code_keep_same_file_refactors,
+    )
+    for cluster, verdict, reason in results:
+        cluster.verdict = verdict
+        cluster.verdict_reason = reason
+        if verdict == VERDICT_NOISE:
+            noise_count += 1
+        elif should_escalate_cluster(cluster, policy):
+            verified.append(cluster)
+        else:
+            policy_drop_count += 1
+
+    click.echo(
+        f"LLM filtered {noise_count} noise clusters, policy dropped {policy_drop_count} "
+        f"low-priority verified clusters, {len(verified)} remaining.",
+        err=True,
+    )
+    return verified
+
+
 def _run_code_scan(
     path: str,
     settings: Settings,
@@ -202,7 +304,6 @@ def _run_code_scan(
     from dryscope.code.embedder import Embedder
     from dryscope.code.normalizer import normalize
     from dryscope.code.parser import parse_directory
-    from dryscope.code.profiles import detect_profiles, merge_profiles
     from dryscope.code.reporter import build_clusters
     from dryscope.similarity import cluster_duplicates, find_duplicates
 
@@ -211,21 +312,8 @@ def _run_code_scan(
     min_tokens = settings.code_min_tokens
     max_cluster_size = settings.code_max_cluster_size
     model = settings.code_embedding_model
-    llm_model = settings.model
 
-    # Detect project profiles and merge exclusions
-    profiles = detect_profiles(path)
-    if profiles:
-        names = ", ".join(p.name for p in profiles)
-        click.echo(f"Detected project profile(s): {names}", err=True)
-
-    user_patterns = list(exclude) if exclude else None
-    user_types = set(exclude_type) if exclude_type else None
-    exclude_patterns, exclude_types, extra_dirs = merge_profiles(
-        profiles,
-        user_patterns,
-        user_types,
-    )
+    exclude_patterns, exclude_types, extra_dirs = _profile_exclusions(path, exclude, exclude_type)
 
     click.echo(f"Parsing source files in {path}...", err=True)
     units = parse_directory(
@@ -236,17 +324,7 @@ def _run_code_scan(
         exclude_dirs=extra_dirs,
     )
 
-    # Filter by language if specified
-    if lang:
-        lang_map = {
-            "python": "python",
-            "ts": "typescript",
-            "tsx": "tsx",
-            "typescript": "typescript",
-        }
-        target_lang = lang_map.get(lang)
-        if target_lang:
-            units = [u for u in units if u.lang == target_lang]
+    units = _filter_units_by_lang(units, lang)
 
     if not units:
         click.echo("No code units found.", err=True)
@@ -256,21 +334,10 @@ def _run_code_scan(
     click.echo("Normalizing...", err=True)
     normalized = [normalize(u.source, lang=u.lang) for u in units]
 
-    # Filter by unique token count after normalization
-    if min_tokens > 0:
-        filtered = [
-            (u, n)
-            for u, n in zip(units, normalized, strict=True)
-            if len(set(n.split())) >= min_tokens
-        ]
-        removed = len(units) - len(filtered)
-        if removed:
-            click.echo(f"Filtered {removed} units with < {min_tokens} unique tokens.", err=True)
-            units, normalized = zip(*filtered, strict=True) if filtered else ([], [])
-            units, normalized = list(units), list(normalized)
-        if not units:
-            click.echo("No code units remaining after token filter.", err=True)
-            return None
+    filtered_units = _filter_units_by_tokens(units, normalized, min_tokens)
+    if filtered_units is None:
+        return None
+    units, normalized = filtered_units
 
     click.echo(f"Generating embeddings (model: {model})...", err=True)
     embedder = Embedder(model_name=model)
@@ -293,49 +360,7 @@ def _run_code_scan(
 
     # Code Review pass
     if verify:
-        from dryscope.code.policy import EscalationPolicy, should_escalate_cluster
-        from dryscope.code.verifier import VERDICT_NOISE, verify_clusters
-
-        click.echo(
-            f"{CODE_REVIEW}: verifying {len(clusters)} clusters with {llm_model}...", err=True
-        )
-        results = verify_clusters(
-            clusters,
-            model=llm_model,
-            max_workers=settings.concurrency,
-            backend=settings.backend,
-            api_key=llm_api_key,
-            ollama_host=settings.ollama_host,
-            cli_strip_api_key=settings.cli_strip_api_key,
-            cli_permission_mode=settings.cli_permission_mode,
-            cli_dangerously_skip_permissions=settings.cli_dangerously_skip_permissions,
-        )
-
-        verified: list = []
-        noise_count = 0
-        policy_drop_count = 0
-        policy = EscalationPolicy(
-            refactor_min_lines=settings.code_escalate_refactor_min_lines,
-            refactor_min_actionability=settings.code_escalate_refactor_min_actionability,
-            refactor_min_units=settings.code_escalate_refactor_min_units,
-            keep_same_file_refactors=settings.code_keep_same_file_refactors,
-        )
-        for cluster, verdict, reason in results:
-            cluster.verdict = verdict
-            cluster.verdict_reason = reason
-            if verdict == VERDICT_NOISE:
-                noise_count += 1
-            elif should_escalate_cluster(cluster, policy):
-                verified.append(cluster)
-            else:
-                policy_drop_count += 1
-
-        click.echo(
-            f"LLM filtered {noise_count} noise clusters, policy dropped {policy_drop_count} "
-            f"low-priority verified clusters, {len(verified)} remaining.",
-            err=True,
-        )
-        clusters = verified
+        clusters = _verify_code_clusters(clusters, settings, llm_api_key)
 
     return clusters
 
@@ -394,6 +419,100 @@ def _run_docs_scan(
 
 
 # ─── Unified scan command ─────────────────────────────────────────────────
+
+
+def _resolve_scan_modes(code: bool | None, docs: bool | None) -> tuple[bool, bool]:
+    if code is None and docs is None:
+        return True, False
+    if code is None:
+        return not bool(docs), bool(docs)
+    if docs is None:
+        return bool(code), not bool(code)
+    return bool(code), bool(docs)
+
+
+def _explicit(ctx: click.Context, param: str) -> bool:
+    return ctx.get_parameter_source(param) != click.core.ParameterSource.DEFAULT
+
+
+def _explicit_flag(ctx: click.Context, param: str) -> bool | None:
+    if ctx.get_parameter_source(param) == click.core.ParameterSource.DEFAULT:
+        return None
+    return bool(ctx.params[param])
+
+
+def _load_scan_settings(
+    ctx: click.Context,
+    path: str,
+    threshold: float,
+    min_lines: int,
+    min_tokens: int,
+    max_cluster_size: int,
+    model: str,
+    llm_model: str,
+    exclude: tuple[str, ...],
+    threshold_intent: float | None,
+    backend: str | None,
+    min_words: int | None,
+    llm_max_doc_pairs: int | None,
+    concurrency: int | None,
+    token_weight: float | None,
+) -> Settings:
+    from dryscope.config import load_settings
+
+    return load_settings(
+        Path(path).resolve(),
+        code_threshold=threshold if _explicit(ctx, "threshold") else None,
+        code_min_lines=min_lines if _explicit(ctx, "min_lines") else None,
+        code_min_tokens=min_tokens if _explicit(ctx, "min_tokens") else None,
+        code_max_cluster_size=max_cluster_size if _explicit(ctx, "max_cluster_size") else None,
+        code_embedding_model=model if _explicit(ctx, "model") else None,
+        docs_embedding_model=model if _explicit(ctx, "model") else None,
+        threshold=threshold if _explicit(ctx, "threshold") else None,
+        exclude=exclude if exclude else None,
+        threshold_intent=threshold_intent,
+        backend=backend,
+        model=llm_model if _explicit(ctx, "llm_model") else None,
+        min_words=min_words,
+        llm_max_doc_pairs=llm_max_doc_pairs,
+        concurrency=concurrency,
+        intra=_explicit_flag(ctx, "intra"),
+        token_weight=token_weight,
+    )
+
+
+def _validate_scan_modes(code: bool, docs: bool, output_format: str) -> None:
+    if not code and not docs:
+        click.echo("Error: must enable at least one of --code or --docs.", err=True)
+        sys.exit(1)
+    if code and output_format not in ("terminal", "json"):
+        click.echo(
+            f"Error: --format {output_format} is not supported for code scan (use terminal or json).",
+            err=True,
+        )
+        sys.exit(1)
+
+
+def _emit_scan_output(
+    code: bool,
+    output_format: str,
+    code_clusters: list | None,
+    docs_result: AnalysisResult | None,
+) -> None:
+    if code and output_format == "json":
+        from dryscope.unified_report import format_unified_json
+
+        click.echo(
+            format_unified_json(
+                code_clusters=code_clusters or [],
+                doc_pairs=docs_result.overlaps if docs_result is not None else None,
+                doc_analyses=docs_result.doc_pair_analyses if docs_result is not None else None,
+            )
+        )
+    elif code and code_clusters is not None:
+        from dryscope.unified_report import format_unified_terminal
+
+        click.echo(format_unified_terminal(code_clusters=code_clusters))
 
 
 @main.command(context_settings=CONTEXT_SETTINGS)
@@ -518,61 +637,32 @@ def scan(
       dryscope help output
       dryscope help json
     """
-    from dryscope.config import load_settings
-
-    # Default: --code if neither flag is set
-    if code is None and docs is None:
-        code = True
-        docs = False
-    elif code is None:
-        code = not docs  # --docs implies --no-code unless explicitly set
-    elif docs is None:
-        docs = not code  # --no-code implies --docs unless explicitly set
-
-    if not code and not docs:
-        click.echo("Error: must enable at least one of --code or --docs.", err=True)
-        sys.exit(1)
-
-    def _explicit(param: str) -> bool:
-        return ctx.get_parameter_source(param) != click.core.ParameterSource.DEFAULT
+    code, docs = _resolve_scan_modes(code, docs)
+    _validate_scan_modes(code, docs, output_format)
 
     # Build a single Settings object with all CLI overrides
-    scan_path = Path(path).resolve()
-    settings = load_settings(
-        scan_path,
-        # Code overrides
-        code_threshold=threshold if _explicit("threshold") else None,
-        code_min_lines=min_lines if _explicit("min_lines") else None,
-        code_min_tokens=min_tokens if _explicit("min_tokens") else None,
-        code_max_cluster_size=max_cluster_size if _explicit("max_cluster_size") else None,
-        code_embedding_model=model if _explicit("model") else None,
-        # Docs overrides
-        docs_embedding_model=model if _explicit("model") else None,
-        threshold=threshold if _explicit("threshold") else None,
-        exclude=exclude if exclude else None,
-        threshold_intent=threshold_intent,
-        backend=backend,
-        model=llm_model if _explicit("llm_model") else None,
-        min_words=min_words,
-        llm_max_doc_pairs=llm_max_doc_pairs,
-        concurrency=concurrency,
-        intra=intra
-        if ctx.get_parameter_source("intra") != click.core.ParameterSource.DEFAULT
-        else None,
-        token_weight=token_weight,
+    settings = _load_scan_settings(
+        ctx,
+        path,
+        threshold,
+        min_lines,
+        min_tokens,
+        max_cluster_size,
+        model,
+        llm_model,
+        exclude,
+        threshold_intent,
+        backend,
+        min_words,
+        llm_max_doc_pairs,
+        concurrency,
+        token_weight,
     )
 
     code_clusters = None
     docs_result = None
 
     if code:
-        if output_format not in ("terminal", "json"):
-            click.echo(
-                f"Error: --format {output_format} is not supported for code scan (use terminal or json).",
-                err=True,
-            )
-            sys.exit(1)
-
         code_clusters = _run_code_scan(
             path=path,
             settings=settings,
@@ -595,21 +685,7 @@ def scan(
             emit_output=not (code and output_format == "json"),
         )
 
-    # Output code results via unified reporter
-    if code and output_format == "json":
-        from dryscope.unified_report import format_unified_json
-
-        click.echo(
-            format_unified_json(
-                code_clusters=code_clusters or [],
-                doc_pairs=docs_result.overlaps if docs_result is not None else None,
-                doc_analyses=docs_result.doc_pair_analyses if docs_result is not None else None,
-            )
-        )
-    elif code and code_clusters is not None:
-        from dryscope.unified_report import format_unified_terminal
-
-        click.echo(format_unified_terminal(code_clusters=code_clusters))
+    _emit_scan_output(code, output_format, code_clusters, docs_result)
 
 
 # ─── Install / Uninstall ──────────────────────────────────────────────────

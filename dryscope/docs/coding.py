@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import threading
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from dryscope.cache import Cache
@@ -405,10 +406,10 @@ def run_doc_pair_pipeline(
     doc_chunks_map: dict[str, list[Chunk]],
     model: str,
     cache: Cache | None,
-    on_progress: callable | None = None,
+    on_progress: Callable[..., None] | None = None,
     backend: str = "litellm",
     prior_analyses: dict[str, dict] | None = None,
-    on_pair_analyzed: callable | None = None,
+    on_pair_analyzed: Callable[..., None] | None = None,
     concurrency: int = 1,
     intent_evidence: dict[tuple[str, str], list[dict]] | None = None,
     ollama_host: str | None = None,

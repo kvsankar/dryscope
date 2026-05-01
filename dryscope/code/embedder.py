@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
@@ -37,7 +38,7 @@ class Embedder:
 
     def __init__(self, model_name: str = "text-embedding-3-small"):
         self.model_name = model_name
-        self.model = None
+        self.model: Any = None
         if is_api_embedding_model(model_name):
             return
 
@@ -59,15 +60,16 @@ class Embedder:
         os.dup2(devnull_fd, 1)
         os.dup2(devnull_fd, 2)
         try:
-            kwargs = {"device": "cpu"}
-            if _has_local_huggingface_cache(model_name):
-                kwargs["local_files_only"] = True
+            local_files_only = _has_local_huggingface_cache(model_name)
             try:
-                self.model = SentenceTransformer(model_name, **kwargs)
+                self.model = SentenceTransformer(
+                    model_name,
+                    device="cpu",
+                    local_files_only=local_files_only,
+                )
             except Exception:
-                if kwargs.get("local_files_only"):
-                    kwargs.pop("local_files_only", None)
-                    self.model = SentenceTransformer(model_name, **kwargs)
+                if local_files_only:
+                    self.model = SentenceTransformer(model_name, device="cpu")
                 else:
                     raise
         finally:
