@@ -96,10 +96,12 @@ Docs Map might group these around a `search experience` topic, assign facets
 such as `requirements`, `design`, `research`, and `plan`, then recommend that
 the repo establish clearer canonical sources or cross-links.
 
-## Section Match Example
+## Section Match Examples
 
 Section Match works at a smaller level. Two documents can have distinct
 document-level purposes while still repeating the same supporting section.
+
+### Useful Consolidation Candidate
 
 | Document | Document purpose | Repeated section |
 | --- | --- | --- |
@@ -109,3 +111,48 @@ document-level purposes while still repeating the same supporting section.
 Section Match would point to those specific sections. The right fix might be a
 shared configuration reference page, a cross-link, or one canonical section that
 the other document references.
+
+### Useful Cross-Document Consistency Candidate
+
+Some repeated sections are not pure copy-paste mistakes. They may be repeated
+because related docs need to stay aligned.
+
+| Document | Section | Synthetic repeated content |
+| --- | --- | --- |
+| `docs/deploy/linux.md` | `Environment variables` | `APP_ENV`, `APP_CONFIG`, and `APP_LOG_LEVEL` setup |
+| `docs/deploy/windows.md` | `Environment variables` | the same variables plus Windows-specific shell syntax |
+
+Section Match can surface this as a maintenance risk. The likely fix is not
+necessarily to delete one section. A better fix might be one shared
+`docs/deploy/configuration.md` page plus short platform-specific examples in
+each deployment guide.
+
+### Intentional Repetition
+
+Other repeated sections are useful to detect but may not be worth consolidating.
+
+| Document | Section | Why it repeats |
+| --- | --- | --- |
+| `docs/integrations/react.md` | `Install the adapter` | parallel framework guide |
+| `docs/integrations/preact.md` | `Install the adapter` | parallel framework guide |
+| `docs/integrations/vue.md` | `Install the adapter` | parallel framework guide |
+
+These sections may have the same structure because readers land on one
+integration guide at a time. Section Match may still report them, but a reviewer
+could label the repetition intentional and keep the docs separate.
+
+### Related Documents Without Section Duplication
+
+Docs Map and Section Match answer different questions. Two documents can overlap
+in topic without having repeated sections.
+
+| Document | Purpose |
+| --- | --- |
+| `docs/billing-requirements.md` | define invoices, refunds, and user-visible billing behavior |
+| `docs/billing-design.md` | explain payment provider boundaries, database tables, and event flow |
+
+Docs Map might group both documents under `billing`, because their intent
+overlaps. Section Match might find nothing if the requirements doc and design
+doc do not repeat the same section-level text. That is a useful outcome: the
+documents are related at the corpus level, but they do not necessarily need
+section-level consolidation.
