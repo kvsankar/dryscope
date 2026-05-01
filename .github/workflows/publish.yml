@@ -1,0 +1,56 @@
+name: Publish to PyPI
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  publish:
+    name: Build, check, and publish
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          enable-cache: true
+          python-version: "3.11"
+
+      - name: Install project
+        run: uv sync --locked --extra dev
+
+      - name: Check release tag matches package version
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          VERSION="$(uv run python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+          if [ "${RELEASE_TAG}" != "v${VERSION}" ]; then
+            echo "Release tag ${RELEASE_TAG} does not match pyproject.toml version ${VERSION}."
+            echo "Expected tag: v${VERSION}"
+            exit 1
+          fi
+
+      - name: Run tests
+        run: uv run pytest
+
+      - name: Build package
+        run: uv build --no-sources
+
+      - name: Check package metadata
+        run: uvx twine check dist/*
+
+      - name: Smoke test built wheel
+        run: uvx --from dist/*.whl dryscope --version
+
+      - name: Publish package distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
