@@ -22,10 +22,13 @@ def finding_signature(finding: dict, repo_root: str | Path) -> tuple[tuple[str, 
     root = Path(repo_root).resolve()
     items: list[tuple[str, str]] = []
     for unit in finding.get("units", []):
-        unit_path = Path(unit["file"]).resolve()
-        try:
-            rel_path = unit_path.relative_to(root).as_posix()
-        except ValueError:
+        unit_path = Path(unit["file"])
+        if unit_path.is_absolute():
+            try:
+                rel_path = unit_path.resolve().relative_to(root).as_posix()
+            except ValueError:
+                rel_path = unit_path.as_posix()
+        else:
             rel_path = unit_path.as_posix()
         items.append((rel_path, unit["name"]))
     return tuple(sorted(items))

@@ -39,6 +39,23 @@ def test_finding_signature_uses_repo_relative_paths(tmp_path):
     )
 
 
+def test_finding_signature_preserves_relative_paths(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    finding = {
+        "units": [
+            {"file": "src/app.py", "name": "main"},
+            {"file": "src/app.py", "name": "helper"},
+        ]
+    }
+
+    assert finding_signature(finding, repo) == (
+        ("src/app.py", "helper"),
+        ("src/app.py", "main"),
+    )
+
+
 def test_score_labeled_findings_matches_public_labels(tmp_path):
     repo = tmp_path / "repo"
     src = repo / "src"
