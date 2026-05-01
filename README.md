@@ -4,7 +4,11 @@
 [![PyPI](https://img.shields.io/pypi/v/dryscope.svg)](https://pypi.org/project/dryscope/)
 [![Python](https://img.shields.io/pypi/pyversions/dryscope.svg)](https://pypi.org/project/dryscope/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+[![pytest](https://img.shields.io/badge/tests-pytest-0A9EDC.svg)](https://docs.pytest.org/)
+[![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen.svg)](https://pre-commit.com/)
 [![Ruff](https://img.shields.io/badge/lint-ruff-46a2f1.svg)](https://docs.astral.sh/ruff/)
+[![ty](https://img.shields.io/badge/types-ty-222222.svg)](https://docs.astral.sh/ty/)
+[![Xenon](https://img.shields.io/badge/complexity-xenon-blue.svg)](https://xenon.readthedocs.io/)
 [![uv](https://img.shields.io/badge/packaging-uv-6f42c1.svg)](https://docs.astral.sh/uv/)
 
 `dryscope` helps you find the parts of a large repository that are actually
