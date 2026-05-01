@@ -5,7 +5,7 @@ description = "Code duplicate and documentation overlap detection"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
-authors = [{ name = "Sankar" }]
+authors = [{ name = "Sankaranarayanan Viswanathan" }]
 keywords = ["duplicate", "clone", "detection", "tree-sitter", "embeddings", "DRY", "documentation", "overlap"]
 classifiers = [
     "Development Status :: 3 - Alpha",
