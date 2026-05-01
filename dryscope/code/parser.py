@@ -285,7 +285,9 @@ def parse_directory(
                 continue
             try:
                 flat = flatten_units(parse_file(src_file))
+                rel_path = rel.as_posix()
                 for u in flat:
+                    u.file_path = rel_path
                     if u.line_count >= min_lines and not _should_exclude_unit(u, exclude_types):
                         all_units.append(u)
             except Exception as e:

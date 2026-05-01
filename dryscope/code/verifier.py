@@ -86,7 +86,13 @@ encode different validation rules, escaping rules, or domain semantics.
 Intentional duplication in examples, demos, benchmarks, mirrored fixtures, or \
 parallel framework/router variants is usually "noise" unless it exposes a \
 substantive shared runtime helper that the project would realistically want to \
-extract."""
+extract.
+
+Do NOT classify cross-module or cross-product implementation copies as "noise" \
+just because the parent directories have different product, service, plugin, or \
+generated-app names. If the same runtime logic appears in independent generated \
+app/service/plugin subtrees and a bug fix would likely need to be made in \
+multiple places, choose "refactor" or "review"."""
 
 USER_TEMPLATE = """\
 Cluster {cluster_id} — {unit_count} code units, similarity={similarity:.4f}

@@ -513,6 +513,10 @@ canonical labels/aliases live inside Docs Map Taxonomy. The report avoids
 are collapsible in Markdown/HTML and nested under the corresponding section in
 JSON.
 
+Code findings use file paths relative to the scan root. That keeps JSON output
+stable across clone locations and prevents external artifact directories from
+affecting Code Review context.
+
 ## How It Works
 
 ### Code Pipeline

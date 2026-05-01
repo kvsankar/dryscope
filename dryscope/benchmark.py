@@ -17,7 +17,7 @@ def finding_signature(finding: dict, repo_root: str | Path) -> tuple[tuple[str, 
     """Return a stable signature for a finding using repo-relative unit paths.
 
     The signature is the sorted tuple of ``(relative_path, unit_name)`` pairs.
-    This makes labels resilient to different clone locations under ``/tmp``.
+    This makes labels resilient to different clone and artifact locations.
     """
     root = Path(repo_root).resolve()
     items: list[tuple[str, str]] = []

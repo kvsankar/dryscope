@@ -195,7 +195,8 @@ Labels are intentionally simple:
 - `not_worth_refactoring`
 - `uncertain`
 
-The labels are stored against normalized unit signatures using repo-relative paths, so they remain stable across different clone locations.
+Code benchmark outputs and labels use repo-relative paths, so they remain
+stable across different clone and artifact locations.
 
 ## New-Language Group
 

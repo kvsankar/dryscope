@@ -88,6 +88,12 @@ class TestParseDirectory:
         assert "calculate_area" in names
         assert "compute_surface" in names
 
+    def test_file_paths_are_relative_to_scan_root(self):
+        units = parse_directory(FIXTURES, min_lines=1)
+        assert units
+        assert all(not Path(u.file_path).is_absolute() for u in units)
+        assert {Path(u.file_path).name for u in units} >= {"sample_a.py", "sample_b.py"}
+
 
 # ── _is_excluded ────────────────────────────────────────────────────────
 

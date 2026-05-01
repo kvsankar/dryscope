@@ -259,3 +259,11 @@ def test_system_prompt_includes_general_low_value_duplication_rules():
     assert 'same-file helper pairs' in SYSTEM_PROMPT
     assert 'compatibility layers, adapter variants' in SYSTEM_PROMPT
     assert 'different validation rules, escaping rules, or domain semantics' in SYSTEM_PROMPT
+
+
+def test_system_prompt_preserves_cross_product_generated_duplicates():
+    from dryscope.code.verifier import SYSTEM_PROMPT
+
+    assert "cross-module or cross-product implementation copies" in SYSTEM_PROMPT
+    assert "generated-app names" in SYSTEM_PROMPT
+    assert "a bug fix would likely need to be made in multiple places" in SYSTEM_PROMPT
