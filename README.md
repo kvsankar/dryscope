@@ -1,8 +1,8 @@
 # dryscope
 
 [![CI](https://github.com/kvsankar/dryscope/actions/workflows/ci.yml/badge.svg)](https://github.com/kvsankar/dryscope/actions/workflows/ci.yml)
-[![PyPI](https://img.shields.io/pypi/v/dryscope.svg)](https://pypi.org/project/dryscope/)
-[![Python](https://img.shields.io/pypi/pyversions/dryscope.svg)](https://pypi.org/project/dryscope/)
+[![PyPI](https://img.shields.io/pypi/v/dryscope.svg?cacheSeconds=300)](https://pypi.org/project/dryscope/)
+[![Python](https://img.shields.io/badge/python-%3E%3D3.10-blue.svg)](https://pypi.org/project/dryscope/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 [![pytest](https://img.shields.io/badge/tests-pytest-0A9EDC.svg)](https://docs.pytest.org/)
 [![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen.svg)](https://pre-commit.com/)
