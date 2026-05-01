@@ -16,6 +16,8 @@ claim that every match should be refactored.
   - **Section Match** (`docs-section-match`): compares heading-based sections and ranks concrete section-level consolidation/link recommendations
   - **Doc Pair Review** (`docs-pair-review`): uses an LLM to review selected related document pairs
 
+![dryscope process diagram](./docs/images/dryscope-process.png)
+
 ## Motivation
 
 Large-repo cleanup usually starts with a vague but painful question: "where is
@@ -603,6 +605,7 @@ For docs:
 
 - [Architecture](./docs/architecture.md) — how the code, docs, reporting, cache, and CLI pieces fit together
 - [Analysis](./docs/analysis.md) — positioning, alternatives, benchmark notes, and product-readiness context
+- [Process image brief](./docs/dryscope-process-image.md) — single-file brief for generating the dryscope engineering process diagram
 - [JSON output](./docs/json-output.md) — machine-readable output contracts for agents and scripts
 - [Roadmap](./docs/roadmap.md) — forward-looking planning notes kept separate from architecture
 - [Synthetic examples](./docs/synthetic-examples.md) — small exposition-only examples for similarity, Code Match, Docs Map, and Section Match
