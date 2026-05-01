@@ -11,24 +11,35 @@ every possible duplicate in a repository.
 than pretending every possible non-duplicate code unit or doc section can
 be enumerated.
 
-| Cell | Meaning | Reported? |
+Rows are the curated truth. Columns are dryscope's output.
+
+| Curated truth / dryscope output | Surfaced finding (predicted positive) | Not surfaced (predicted negative) |
 | --- | --- | --- |
-| TP | A surfaced finding matches an actionable curated label. | yes |
-| FP | A surfaced finding matches a curated non-actionable label. | yes |
-| FN | An actionable curated label was not surfaced. | yes |
-| TN | A non-duplicate item was correctly ignored. | no; the negative space is too large to enumerate meaningfully |
+| Actionable duplicate or overlap (actual positive) | **TP**: dryscope found a curated actionable item. | **FN**: dryscope missed a curated actionable item. |
+| Non-actionable item (actual negative) | **FP**: dryscope surfaced an item curated as not actionable. | **TN**: dryscope correctly ignored it; not reported because the negative space is too large to enumerate meaningfully. |
 
 Unlabeled surfaced findings are not counted as false positives. The checked-in
 public labels are intentionally sparse, so these numbers describe the
 reviewed slice of benchmark output.
 
+Precision reads down the surfaced column: `TP / (TP + FP)`. Recall reads
+across the actionable row: `TP / (TP + FN)`.
+
 ## Metric Notes
 
-- **Labeled precision**: `TP / (TP + FP)` over surfaced findings that have curated labels.
-- **Curated recall**: `TP / (TP + FN)` over curated actionable labels.
-- **F1**: harmonic mean of labeled precision and curated recall.
-- **P@K / R@K**: top-of-shortlist precision and recall for `K = 5, 10, 15`.
-- **Gold + / Gold -**: curated positive and negative labels available for the benchmark repos.
+| Metric | Direction | How to read it |
+| --- | --- | --- |
+| TP | higher is better | Surfaced findings that match actionable curated labels. |
+| FP | lower is better | Surfaced findings that match curated non-actionable labels. |
+| FN | lower is better | Actionable curated labels that dryscope missed. |
+| Labeled precision | higher is better | `TP / (TP + FP)` over surfaced findings that have curated labels. |
+| Curated recall | higher is better | `TP / (TP + FN)` over curated actionable labels. |
+| F1 | higher is better | Harmonic mean of labeled precision and curated recall. |
+| P@K / R@K | higher is better | Top-of-shortlist precision and recall for `K = 5, 10, 15`. |
+| Labeled surfaced | no direct quality direction | Count of surfaced findings that had curated labels and were eligible for TP/FP scoring. |
+| Gold + / Gold - | no direct quality direction | Curated positive and negative labels available for the benchmark repos. |
+
+`n/a` means the denominator for that metric is zero.
 
 ## Aggregate Summary
 
