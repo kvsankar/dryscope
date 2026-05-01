@@ -558,6 +558,7 @@ For docs:
 
 - [Architecture](./docs/architecture.md) — how the code, docs, reporting, cache, and CLI pieces fit together
 - [Analysis](./docs/analysis.md) — positioning, alternatives, benchmark notes, and product-readiness context
+- [Roadmap](./docs/roadmap.md) — forward-looking planning notes kept separate from architecture
 - [Synthetic examples](./docs/synthetic-examples.md) — small exposition-only examples for similarity, Code Match, Docs Map, and Section Match
 - [Benchmark pack](./benchmarks/README.md) — public benchmark harness, artifact locations, and refresh commands
 - [Benchmark quality report](./benchmarks/quality_report.md) — readable TP/FP/FN summary generated from public labels
