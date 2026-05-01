@@ -11,12 +11,13 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
+from benchmarks.benchmark_paths import default_quality_report_dir, latest_results_dir, prepare_output_dir
 from dryscope.benchmark import score_code_quality, score_docs_section_quality
 
-DEFAULT_CODE_RESULTS = Path("/tmp/dryscope-public-benchmark-results")
+DEFAULT_CODE_RESULTS = latest_results_dir("code")
 DEFAULT_DOCS_RESULTS = [
-    Path("/tmp/dryscope-public-docs-benchmark-results"),
-    Path("/tmp/dryscope-public-docs-benchmark-stress-results"),
+    latest_results_dir("docs", ("public-docs-default",)),
+    latest_results_dir("docs", ("public-docs-stress",)),
 ]
 DEFAULT_CODE_LABELS = Path(__file__).with_name("public_labels.json")
 DEFAULT_DOCS_LABELS = Path(__file__).with_name("public_docs_labels.json")
@@ -100,7 +101,10 @@ def _quality_summary(
         code_metadata = code_summary.get("benchmark_metadata")
         for repo in code_summary.get("repos", []):
             repo_name = repo["repo"]
-            output_path = code_results_dir / f"{repo_name}_verify.json"
+            output_name = repo.get("verify_output") or repo.get("structural_output")
+            output_path = code_results_dir / output_name if output_name else None
+            if not output_path or not output_path.exists():
+                output_path = code_results_dir / f"{repo_name}_verify.json"
             if not output_path.exists():
                 output_path = code_results_dir / f"{repo_name}_structural.json"
             if not output_path.exists():
@@ -109,6 +113,9 @@ def _quality_summary(
             row = {
                 "repo": repo_name,
                 "group": repo.get("group"),
+                "benchmark_input_id": repo.get("benchmark_input_id"),
+                "benchmark_input_stem": repo.get("benchmark_input_stem"),
+                "repo_git_commit": repo.get("repo_git_commit"),
                 **score_code_quality(repo_name, findings, code_labels),
             }
             code_rows.append(row)
@@ -126,7 +133,8 @@ def _quality_summary(
         })
         for repo in summary.get("repos", []):
             repo_name = repo["repo"]
-            output_path = docs_dir / "artifacts" / repo_name / "docs_section_match.json"
+            artifact_dir = Path(repo.get("artifact_dir", str(Path("artifacts") / repo_name)))
+            output_path = docs_dir / artifact_dir / "docs_section_match.json"
             if not output_path.exists():
                 continue
             section_pairs = _load_json(output_path).get("matched_section_pairs", [])
@@ -134,6 +142,9 @@ def _quality_summary(
                 "repo": repo_name,
                 "group": repo.get("group"),
                 "results_dir": str(docs_dir),
+                "benchmark_input_id": repo.get("benchmark_input_id"),
+                "benchmark_input_stem": repo.get("benchmark_input_stem"),
+                "repo_git_commit": repo.get("repo_git_commit"),
                 **score_docs_section_quality(repo_name, section_pairs, docs_labels),
             }
             docs_rows.append(row)
@@ -169,13 +180,17 @@ def _markdown_table(title: str, rows: list[dict]) -> list[str]:
     lines = [
         f"## {title}",
         "",
-        "| Repo | TP | FP | FN | Labeled precision | Curated recall | F1 | Labeled surfaced | Gold + | Gold - |",
+        "| Benchmark input | TP | FP | FN | Labeled precision | Curated recall | F1 | Labeled surfaced | Gold + | Gold - |",
         "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
+    if not rows:
+        lines.append("| _No benchmark rows found_ | 0 | 0 | 0 | n/a | n/a | n/a | 0 | 0 | 0 |")
+        lines.append("")
+        return lines
     for row in rows:
         lines.append(
             "| {repo} | {tp} | {fp} | {fn} | {precision} | {recall} | {f1} | {labeled} | {gold_pos} | {gold_neg} |".format(
-                repo=row["repo"],
+                repo=row.get("benchmark_input_stem") or row["repo"],
                 tp=row["true_positives"],
                 fp=row["false_positives"],
                 fn=row["false_negatives"],
@@ -192,17 +207,58 @@ def _markdown_table(title: str, rows: list[dict]) -> list[str]:
 
 
 def _render_markdown(report: dict) -> str:
+    has_rows = bool(
+        report["code_review"]["by_repo"]
+        or report["docs_section_match"]["by_repo"]
+    )
     lines = [
         "# Benchmark Quality Report",
         "",
-        "This report scores generated benchmark outputs against curated public labels.",
-        "Unlabeled surfaced findings are not counted as false positives; true negatives are intentionally omitted.",
+        "This report is the readable companion to `quality_report.json`. It scores",
+        "generated benchmark outputs against curated public labels and is intended",
+        "as shortlist-quality evidence, not as a broad precision/recall claim over",
+        "every possible duplicate in a repository.",
         "",
-        "## Aggregate",
+    ]
+    if not has_rows:
+        lines.extend([
+            "> Note: this generated report did not find benchmark result rows in the",
+            "> configured input artifact directories, so the tables below show the",
+            "> presenter shape with empty values. Run the public benchmark harnesses",
+            "> first, then regenerate this report to populate real metrics.",
+            "",
+        ])
+    lines.extend([
+        "## How To Read This",
+        "",
+        "`dryscope` is a narrowing tool, so the report uses a practical 2x2 rather",
+        "than pretending every possible non-duplicate code unit or doc section can",
+        "be enumerated.",
+        "",
+        "| Cell | Meaning | Reported? |",
+        "| --- | --- | --- |",
+        "| TP | A surfaced finding matches an actionable curated label. | yes |",
+        "| FP | A surfaced finding matches a curated non-actionable label. | yes |",
+        "| FN | An actionable curated label was not surfaced. | yes |",
+        "| TN | A non-duplicate item was correctly ignored. | no; the negative space is too large to enumerate meaningfully |",
+        "",
+        "Unlabeled surfaced findings are not counted as false positives. The checked-in",
+        "public labels are intentionally sparse, so these numbers describe the",
+        "reviewed slice of benchmark output.",
+        "",
+        "## Metric Notes",
+        "",
+        "- **Labeled precision**: `TP / (TP + FP)` over surfaced findings that have curated labels.",
+        "- **Curated recall**: `TP / (TP + FN)` over curated actionable labels.",
+        "- **F1**: harmonic mean of labeled precision and curated recall.",
+        "- **P@K / R@K**: top-of-shortlist precision and recall for `K = 5, 10, 15`.",
+        "- **Gold + / Gold -**: curated positive and negative labels available for the benchmark repos.",
+        "",
+        "## Aggregate Summary",
         "",
         "| Track | TP | FP | FN | Labeled precision | Curated recall | F1 | P@5 | R@5 | Labeled surfaced | Gold + | Gold - |",
         "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
-    ]
+    ])
     for title, key in (("Code Review", "code_review"), ("Section Match", "docs_section_match")):
         agg = report[key]["aggregate"]
         lines.append(
@@ -238,7 +294,13 @@ def main() -> None:
     )
     parser.add_argument("--code-labels", default=str(DEFAULT_CODE_LABELS))
     parser.add_argument("--docs-labels", default=str(DEFAULT_DOCS_LABELS))
-    parser.add_argument("--out-dir", default="/tmp/dryscope-quality-report")
+    parser.add_argument("--out-dir", default=str(default_quality_report_dir()))
+    parser.add_argument("--overwrite", action="store_true", help="Replace an existing quality report directory")
+    parser.add_argument(
+        "--reference-md",
+        default=None,
+        help="Also write the Markdown report to a reference path, such as benchmarks/quality_report.md.",
+    )
     args = parser.parse_args()
 
     docs_dirs = [Path(path) for path in args.docs_results_dir] or DEFAULT_DOCS_RESULTS
@@ -249,10 +311,14 @@ def main() -> None:
         _load_labels(Path(args.docs_labels)),
     )
 
-    out_dir = Path(args.out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
+    out_dir = prepare_output_dir(Path(args.out_dir), overwrite=args.overwrite)
+    markdown = _render_markdown(report)
     (out_dir / "quality_report.json").write_text(json.dumps(report, indent=2))
-    (out_dir / "quality_report.md").write_text(_render_markdown(report))
+    (out_dir / "quality_report.md").write_text(markdown)
+    if args.reference_md:
+        reference_path = Path(args.reference_md)
+        reference_path.parent.mkdir(parents=True, exist_ok=True)
+        reference_path.write_text(markdown)
     print(json.dumps(report, indent=2))
 
 

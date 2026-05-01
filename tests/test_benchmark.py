@@ -271,6 +271,27 @@ def test_public_benchmark_pins_local_embedding_model():
     assert module.DEFAULT_EMBEDDING_MODEL == "all-MiniLM-L6-v2"
 
 
+def test_benchmark_artifact_paths_are_durable_and_run_specific(monkeypatch, tmp_path):
+    from benchmarks import benchmark_paths
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("DRYSCOPE_BENCHMARK_ROOT", raising=False)
+
+    root = tmp_path / ".dryscope" / "benchmarks"
+
+    assert benchmark_paths.benchmark_root() == root
+    assert benchmark_paths.default_repos_dir("code") == root / "repos" / "code"
+    assert (
+        benchmark_paths.default_repos_dir("docs", ("public-docs-default",))
+        == root / "repos" / "docs-default"
+    )
+    assert (
+        benchmark_paths.default_results_dir("code", ("public-ai-generated-duplicates",)).parent
+        == root / "results" / "code-ai-generated-duplicates"
+    )
+    assert benchmark_paths.default_quality_report_dir().parent == root / "reports" / "quality"
+
+
 def test_public_benchmark_metadata_records_commits(tmp_path):
     path = REPO_ROOT / "benchmarks" / "run_public_benchmark.py"
     spec = importlib.util.spec_from_file_location("run_public_benchmark", path)
@@ -283,5 +304,7 @@ def test_public_benchmark_metadata_records_commits(tmp_path):
 
     assert metadata["dryscope_git_commit"]
     assert metadata["repo_git_commit"]
+    assert metadata["benchmark_input_id"] == f"dryscope@{metadata['repo_git_commit']}"
+    assert metadata["benchmark_input_stem"].startswith("dryscope@")
     assert "dryscope_git_dirty" in metadata
     assert "repo_git_dirty" in metadata

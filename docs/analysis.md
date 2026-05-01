@@ -133,4 +133,5 @@ spent. In recent public validation:
 
 That is the right bar for dryscope: high-signal narrowing before expensive follow-up.
 Use `uv run python benchmarks/run_quality_report.py` to generate the current
-label-based quality report.
+label-based quality report from persistent benchmark outputs under
+`${DRYSCOPE_BENCHMARK_ROOT:-~/.dryscope/benchmarks}`.

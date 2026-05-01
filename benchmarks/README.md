@@ -38,6 +38,22 @@ Use the local virtualenv binary:
 uv run python benchmarks/run_public_benchmark.py
 ```
 
+Benchmark clones and generated outputs default to a persistent location outside
+the repository:
+
+- root: `${DRYSCOPE_BENCHMARK_ROOT:-~/.dryscope/benchmarks}`
+- full code clones: `repos/code`
+- docs default clones: `repos/docs-default`
+- docs stress clones: `repos/docs-stress`
+- generated benchmark results: `results/<track-or-group>/<run-id>`
+- generated quality reports: `reports/quality/<run-id>`
+
+Output directories are not silently reused. If the selected result directory is
+not empty, the runner exits before doing benchmark work. Choose a new
+`--out-dir`, or pass `--overwrite` when replacing that result set is intentional.
+Each result filename and summary row identifies benchmark inputs as
+`<repo>@<commit>` so outputs can be traced to the exact repository revision.
+
 Optional filters:
 
 ```bash
@@ -49,7 +65,10 @@ uv run python benchmarks/run_public_benchmark.py --group public-new-languages-st
 uv run python benchmarks/run_public_benchmark.py --group public-ai-generated-duplicates
 ```
 
-Outputs are written to `/tmp/dryscope-public-benchmark-results` by default.
+Full code benchmark outputs are written to
+`~/.dryscope/benchmarks/results/code/<run-id>` by default. Group-filtered runs
+use a group-specific default such as
+`~/.dryscope/benchmarks/results/code-ai-generated-duplicates/<run-id>`.
 Each summary row and saved JSON output records the dryscope git commit and the
 cloned benchmark repository git commit.
 
@@ -63,7 +82,8 @@ curated labels:
 uv run python benchmarks/run_quality_report.py
 ```
 
-Outputs are written to `/tmp/dryscope-quality-report` by default:
+Outputs are written to `~/.dryscope/benchmarks/reports/quality/<run-id>` by
+default:
 
 - `quality_report.json`
 - `quality_report.md`
@@ -87,6 +107,31 @@ The headline metrics are:
 Unlabeled surfaced findings are not counted as false positives. This keeps the
 current sparse public labels honest: the report is quality evidence over the
 reviewed slice, not a mature broad precision/recall claim.
+
+To refresh the checked-in readable reference report after generating benchmark
+artifacts, run:
+
+```bash
+uv run python benchmarks/run_quality_report.py --reference-md benchmarks/quality_report.md
+```
+
+Do not refresh `benchmarks/quality_report.md` from a partial run unless the file
+clearly says it is a partial sample.
+
+## Full Public Quality Run
+
+The full public quality run has three benchmark legs plus the report presenter:
+
+```bash
+uv run python benchmarks/run_public_benchmark.py --fresh-clone --verify-max-findings 15
+uv run python benchmarks/run_public_docs_benchmark.py --fresh-clone --group public-docs-default
+uv run python benchmarks/run_public_docs_benchmark.py --fresh-clone --group public-docs-stress
+uv run python benchmarks/run_quality_report.py --reference-md benchmarks/quality_report.md
+```
+
+Use `--fresh-clone` when intentionally updating the benchmark input commits.
+The generated summaries record both the `dryscope` commit and each benchmark
+input repository commit.
 
 For a bounded Code Review pass over the AI-generated group:
 
@@ -114,14 +159,15 @@ Run the default docs benchmark set:
 uv run python benchmarks/run_public_docs_benchmark.py --group public-docs-default
 ```
 
-Outputs are written to `/tmp/dryscope-public-docs-benchmark-results` by default.
+Outputs are written to
+`~/.dryscope/benchmarks/results/docs-default/<run-id>` by default.
 For each repo, the harness writes:
 
-- `<repo>.json` with the docs report JSON plus benchmark metadata
-- `artifacts/<repo>/report.md`
-- `artifacts/<repo>/report.html`
-- `artifacts/<repo>/report.json`
-- `artifacts/<repo>/benchmark_metadata.json`
+- `<repo>@<commit>.json` with the docs report JSON plus benchmark metadata
+- `artifacts/<repo>@<commit>/report.md`
+- `artifacts/<repo>@<commit>/report.html`
+- `artifacts/<repo>@<commit>/report.json`
+- `artifacts/<repo>@<commit>/benchmark_metadata.json`
 - track stage artifacts such as `docs_section_match.json`, `docs_map.json`, and `docs_pair_review.json`
 
 Each row and saved report JSON records both the dryscope git commit and the

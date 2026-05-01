@@ -14,6 +14,13 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
 from dryscope.benchmark import score_labeled_findings
+from benchmarks.benchmark_paths import (
+    benchmark_input_id,
+    benchmark_input_stem,
+    default_repos_dir,
+    default_results_dir,
+    prepare_output_dir,
+)
 
 DRYSCOPE_BIN = REPO_ROOT / ".venv" / "bin" / "dryscope"
 DEFAULT_MANIFEST = Path(__file__).with_name("public_repos.json")
@@ -44,12 +51,18 @@ def _git_dirty(path: Path) -> bool | None:
 
 
 def _benchmark_metadata(repo: dict, repo_path: Path) -> dict:
+    repo_name = repo.get("name", repo_path.name)
+    repo_commit = _git_commit(repo_path)
     return {
         "dryscope_git_commit": _git_commit(REPO_ROOT),
         "dryscope_git_dirty": _git_dirty(REPO_ROOT),
-        "repo_git_commit": _git_commit(repo_path),
+        "repo_name": repo_name,
+        "repo_git_commit": repo_commit,
         "repo_git_dirty": _git_dirty(repo_path),
         "repo_url": repo["url"],
+        "repo_path": str(repo_path),
+        "benchmark_input_id": benchmark_input_id(repo_name, repo_commit),
+        "benchmark_input_stem": benchmark_input_stem(repo_name, repo_commit),
     }
 
 
@@ -64,8 +77,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", default=str(DEFAULT_MANIFEST))
     parser.add_argument("--labels", default=str(DEFAULT_LABELS))
-    parser.add_argument("--repos-dir", default="/tmp/dryscope-public-benchmark-repos")
-    parser.add_argument("--out-dir", default="/tmp/dryscope-public-benchmark-results")
+    parser.add_argument("--repos-dir", default=None)
+    parser.add_argument("--out-dir", default=None)
     parser.add_argument("--group", action="append", default=[], help="Only run selected benchmark groups")
     parser.add_argument(
         "--embedding-model",
@@ -83,14 +96,23 @@ def main() -> None:
     parser.add_argument("--backend", default="cli", choices=["cli", "litellm"])
     parser.add_argument("--concurrency", type=int, default=8)
     parser.add_argument("--fresh-clone", action="store_true")
+    parser.add_argument("--overwrite", action="store_true", help="Replace an existing benchmark output directory")
     args = parser.parse_args()
 
     manifest = json.loads(Path(args.manifest).read_text())
     labels = json.loads(Path(args.labels).read_text()).get("labels", [])
-    repos_dir = Path(args.repos_dir)
-    out_dir = Path(args.out_dir)
+    repos_dir = (
+        Path(args.repos_dir).expanduser()
+        if args.repos_dir
+        else default_repos_dir("code", tuple(args.group))
+    )
+    out_dir = (
+        Path(args.out_dir).expanduser()
+        if args.out_dir
+        else default_results_dir("code", tuple(args.group))
+    )
     repos_dir.mkdir(parents=True, exist_ok=True)
-    out_dir.mkdir(parents=True, exist_ok=True)
+    out_dir = prepare_output_dir(out_dir, overwrite=args.overwrite)
 
     rows: list[dict] = []
     for repo in manifest["repos"]:
@@ -116,6 +138,7 @@ def main() -> None:
 
         metadata = _benchmark_metadata(repo, dest)
         row = {"repo": repo["name"], "group": repo["group"], **metadata}
+        input_stem = metadata["benchmark_input_stem"]
         try:
             structural = _run_json([
                 str(DRYSCOPE_BIN), "scan", str(dest),
@@ -143,18 +166,21 @@ def main() -> None:
 
         structural["benchmark_metadata"] = metadata
         structural_findings = structural.get("findings", [])
-        (out_dir / f"{repo['name']}_structural.json").write_text(json.dumps(structural, indent=2))
+        structural_output = f"{input_stem}_structural.json"
+        (out_dir / structural_output).write_text(json.dumps(structural, indent=2))
 
         verdicts: dict[str, int] = {}
         row.update({
             "structural_findings": len(structural_findings),
             "embedding_model": args.embedding_model,
+            "structural_output": structural_output,
         })
         if verified is not None:
             verified["benchmark_metadata"] = metadata
             verified_findings = verified.get("findings", [])
             score = score_labeled_findings(repo["name"], verified_findings, dest, labels)
-            (out_dir / f"{repo['name']}_verify.json").write_text(json.dumps(verified, indent=2))
+            verify_output = f"{input_stem}_verify.json"
+            (out_dir / verify_output).write_text(json.dumps(verified, indent=2))
 
             for finding in verified_findings:
                 verdict = finding.get("verdict", "")
@@ -164,6 +190,7 @@ def main() -> None:
                 "verified_findings": len(verified_findings),
                 "verdicts": verdicts,
                 "label_score": score,
+                "verify_output": verify_output,
             })
         rows.append(row)
 
@@ -171,6 +198,9 @@ def main() -> None:
         "benchmark_metadata": {
             "dryscope_git_commit": _git_commit(REPO_ROOT),
             "dryscope_git_dirty": _git_dirty(REPO_ROOT),
+            "repos_dir": str(repos_dir),
+            "results_dir": str(out_dir),
+            "run_id": out_dir.name,
         },
         "repos": rows,
     }

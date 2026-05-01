@@ -573,6 +573,12 @@ using TP/FP/FN, labeled precision, curated recall, F1, and precision@K/recall@K.
 True negatives are intentionally omitted because the non-duplicate search space
 is too large to enumerate.
 
+Benchmark clones and generated outputs are kept outside the repo under
+`${DRYSCOPE_BENCHMARK_ROOT:-~/.dryscope/benchmarks}` by default. Result and
+report directories are run-specific, and filenames/metadata identify benchmark
+inputs as `<repo>@<commit>`. The runners refuse to reuse a non-empty result
+directory unless `--overwrite` is passed.
+
 ## License
 
 MIT
