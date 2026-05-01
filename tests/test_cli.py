@@ -8,6 +8,9 @@ from click.testing import CliRunner
 
 from dryscope import __version__
 from dryscope.cli import main
+from dryscope.code.parser import CodeUnit
+from dryscope.code.reporter import Cluster, Tier
+from dryscope.docs.models import AnalysisResult, Chunk, OverlapPair
 
 FIXTURES = str(Path(__file__).parent / "fixtures")
 
@@ -22,6 +25,43 @@ class TestScanHelp:
         result = runner.invoke(main, ["scan", "--help"])
         assert result.exit_code == 0
         assert "Scan PATH" in result.output
+
+
+class TestProgressiveHelp:
+    def test_top_level_help_points_to_topics(self, runner):
+        result = runner.invoke(main, ["--help"])
+        assert result.exit_code == 0
+        assert "dryscope help output" in result.output
+        assert "dryscope help json" in result.output
+
+    def test_help_lists_topics(self, runner):
+        result = runner.invoke(main, ["help"])
+        assert result.exit_code == 0
+        assert "Help Topics" in result.output
+        assert "output" in result.output
+        assert "json" in result.output
+
+    def test_help_output_topic(self, runner):
+        result = runner.invoke(main, ["help", "output"])
+        assert result.exit_code == 0
+        assert "Output Formats" in result.output
+        assert "markdown" in result.output
+
+    def test_help_option_topic_alias(self, runner):
+        result = runner.invoke(main, ["--help", "json"])
+        assert result.exit_code == 0
+        assert "JSON Output" in result.output
+        assert "docs/json-output.md" in result.output
+
+    def test_help_option_command_path(self, runner):
+        result = runner.invoke(main, ["--help", "reports", "clean"])
+        assert result.exit_code == 0
+        assert "Clean old .dryscope/runs" in result.output
+
+    def test_partial_command_help(self, runner):
+        result = runner.invoke(main, ["reports", "clean", "--help"])
+        assert result.exit_code == 0
+        assert "--keep-last" in result.output
 
 
 class TestScanCode:
@@ -128,6 +168,59 @@ class TestScanDocs:
         assert "node_modules" in captured["exclude"]
         assert "drafts/**" in captured["exclude"]
         assert "*.tmp.md" in captured["exclude"]
+
+    def test_combined_json_emits_single_unified_payload(self, runner, tmp_path, monkeypatch):
+        captured = {}
+
+        unit_a = CodeUnit(
+            name="parse_a",
+            unit_type="function",
+            source="def parse_a():\n    return 1",
+            file_path="a.py",
+            start_line=1,
+            end_line=2,
+        )
+        unit_b = CodeUnit(
+            name="parse_b",
+            unit_type="function",
+            source="def parse_b():\n    return 1",
+            file_path="b.py",
+            start_line=1,
+            end_line=2,
+        )
+        cluster = Cluster(
+            cluster_id=0,
+            units=[unit_a, unit_b],
+            max_similarity=0.99,
+            tier=Tier.NEAR,
+            is_cross_file=True,
+            total_lines=4,
+            files=["a.py", "b.py"],
+            actionability=1.0,
+        )
+
+        def fake_run_code_scan(**kwargs):
+            return [cluster]
+
+        def fake_run_docs_scan(**kwargs):
+            captured["emit_output"] = kwargs["emit_output"]
+            result = AnalysisResult()
+            chunk_a = Chunk("docs/a.md", ["Configuration"], "API_KEY setup", 1, 5)
+            chunk_b = Chunk("docs/b.md", ["Configuration"], "API_KEY setup", 8, 12)
+            result.overlaps = [OverlapPair(chunk_a, chunk_b, embedding_similarity=0.95)]
+            return result
+
+        monkeypatch.setattr("dryscope.cli._run_code_scan", fake_run_code_scan)
+        monkeypatch.setattr("dryscope.cli._run_docs_scan", fake_run_docs_scan)
+
+        result = runner.invoke(main, ["scan", str(tmp_path), "--code", "--docs", "-f", "json"])
+
+        assert result.exit_code == 0
+        assert captured["emit_output"] is False
+        data = json.loads(result.output)
+        assert data["summary"]["code"]["total"] == 1
+        assert data["summary"]["docs"]["total"] == 1
+        assert [finding["mode"] for finding in data["findings"]] == ["code", "docs"]
 
 
 class TestScanErrors:

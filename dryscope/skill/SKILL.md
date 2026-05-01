@@ -37,6 +37,15 @@ The intended use is narrowing:
 {{DRYSCOPE_BIN}} scan <target-path> --code --docs
 ```
 
+Progressive help is available from the installed binary:
+
+```bash
+{{DRYSCOPE_BIN}} --help
+{{DRYSCOPE_BIN}} help output
+{{DRYSCOPE_BIN}} help json
+{{DRYSCOPE_BIN}} scan --help
+```
+
 ### Options
 
 | Flag | Default | Description |

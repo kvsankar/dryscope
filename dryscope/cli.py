@@ -12,6 +12,7 @@ from pathlib import Path
 import click
 
 from dryscope import __version__
+from dryscope.help_topics import OUTPUT_FORMATS, get_topic, render_topic, topic_summaries
 from dryscope.terminology import CODE_MATCH, CODE_REVIEW, DOCS_MAP, DOCS_PAIR_REVIEW, DOCS_SECTION_MATCH
 from dryscope.terminology import DOCS_REPORT_PACK_SLUG, DOCS_SECTION_MATCH_SLUG
 
@@ -21,6 +22,67 @@ SKILL_DESTS = [
     Path.home() / ".codex" / "skills" / "dryscope",
 ]
 SHARED_SKILL_VENV = Path(os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local" / "share"))) / "dryscope" / "skill-venv"
+CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
+OUTPUT_FORMAT_CHOICES = [name for name, _modes, _meaning in OUTPUT_FORMATS]
+
+
+class DryscopeGroup(click.Group):
+    """Click group with topic aliases such as `dryscope --help json`."""
+
+    def main(
+        self,
+        args: list[str] | tuple[str, ...] | None = None,
+        prog_name: str | None = None,
+        complete_var: str | None = None,
+        standalone_mode: bool = True,
+        windows_expand_args: bool = True,
+        **extra: object,
+    ) -> object:
+        arg_list = list(sys.argv[1:] if args is None else args)
+        if arg_list and arg_list[0] in ("--help", "-h") and len(arg_list) > 1:
+            text = _render_help_target(self, arg_list[1:], prog_name or "dryscope")
+            if text is None:
+                click.echo(f"Unknown help topic or command: {' '.join(arg_list[1:])}", err=True)
+                click.echo("Run `dryscope help` to list topics.", err=True)
+                if standalone_mode:
+                    raise SystemExit(2)
+                return 2
+            click.echo(text)
+            return None
+        return super().main(
+            args=args,
+            prog_name=prog_name,
+            complete_var=complete_var,
+            standalone_mode=standalone_mode,
+            windows_expand_args=windows_expand_args,
+            **extra,
+        )
+
+
+def _render_help_target(group: click.Group, path: list[str], prog_name: str) -> str | None:
+    """Render a topic or command help target from `dryscope --help TARGET`."""
+    if not path:
+        return None
+    topic = get_topic(path[0])
+    if topic is not None and len(path) == 1:
+        return render_topic(topic.name)
+    return _render_command_help(group, path, prog_name)
+
+
+def _render_command_help(group: click.Group, path: list[str], prog_name: str) -> str | None:
+    """Render nested Click command help for a path like `reports clean`."""
+    command: click.Command = group
+    parent_ctx = click.Context(group, info_name=prog_name)
+    ctx = parent_ctx
+    for token in path:
+        if not isinstance(command, click.Group):
+            return None
+        subcommand = command.get_command(ctx, token)
+        if subcommand is None:
+            return None
+        command = subcommand
+        ctx = click.Context(command, info_name=token, parent=ctx)
+    return command.get_help(ctx)
 
 
 def _find_project_root(start: Path | None = None) -> Path:
@@ -58,13 +120,49 @@ def _find_git_root(scan_path: Path) -> Path:
     return scan_path
 
 
-@click.group(invoke_without_command=True)
+@click.group(
+    cls=DryscopeGroup,
+    invoke_without_command=True,
+    context_settings=CONTEXT_SETTINGS,
+)
 @click.pass_context
 @click.version_option(version=__version__)
 def main(ctx: click.Context) -> None:
-    """dryscope — Code Match, Code Review, and docs track scanning."""
+    """dryscope - Code Match, Code Review, and docs track scanning.
+
+    Start with `dryscope scan PATH`.
+
+    \b
+    Progressive help:
+      dryscope help
+      dryscope help tracks
+      dryscope help output
+      dryscope help json
+
+    \b
+    Topic aliases also work as `dryscope --help json`.
+    Command help works at every command level, for example
+    `dryscope scan --help` and `dryscope reports clean --help`.
+    """
     if ctx.invoked_subcommand is None:
         click.echo(ctx.get_help())
+
+
+@main.command("help", context_settings=CONTEXT_SETTINGS)
+@click.argument("topic", nargs=-1)
+def help_topic(topic: tuple[str, ...]) -> None:
+    """Show progressive help topics."""
+    if not topic:
+        click.echo(topic_summaries())
+        return
+
+    topic_name = "-".join(topic)
+    found = get_topic(topic_name) or get_topic(topic[0])
+    if found is None:
+        raise click.UsageError(
+            f"unknown help topic: {' '.join(topic)}\n\n{topic_summaries()}"
+        )
+    click.echo(render_topic(found.name))
 
 
 # ─── Code scan ────────────────────────────────────────────────────────────
@@ -225,7 +323,8 @@ def _run_docs_scan(
     verify: bool,
     stage: str,
     resume: bool,
-) -> None:
+    emit_output: bool = True,
+) -> "AnalysisResult":
     """Run the docs track pipeline."""
     from rich.console import Console
 
@@ -247,11 +346,16 @@ def _run_docs_scan(
     else:
         store = RunStore(project_root)
 
-    run_pipeline(
+    output_file = None
+    if not emit_output:
+        output_file = str(store.run_dir / f"scan_output.{output_format}")
+
+    result = run_pipeline(
         scan_path=scan_path,
         settings=settings,
         stage=doc_stage,
         output_format=output_format,
+        output_file=output_file,
         skip_confirm=True,
         console=err_console,
         run_store=store,
@@ -259,12 +363,13 @@ def _run_docs_scan(
 
     store.update_latest_symlink()
     click.echo(f"Run saved to {store.run_dir}", err=True)
+    return result
 
 
 # ─── Unified scan command ─────────────────────────────────────────────────
 
 
-@main.command()
+@main.command(context_settings=CONTEXT_SETTINGS)
 @click.argument("path", type=click.Path(exists=True))
 # Mode flags
 @click.option("--code/--no-code", default=None, help=f"Run {CODE_MATCH}")
@@ -272,7 +377,7 @@ def _run_docs_scan(
 @click.option("--lang", type=click.Choice(["python", "go", "java", "js", "jsx", "ts", "tsx"]), default=None, help="Filter to specific language (code mode)")
 # Shared options
 @click.option("--threshold", "-t", default=0.90, type=click.FloatRange(0.0, 1.0), help="Similarity threshold (0.0-1.0)")
-@click.option("--format", "-f", "output_format", type=click.Choice(["terminal", "json", "markdown", "html"]), default="terminal")
+@click.option("--format", "-f", "output_format", type=click.Choice(OUTPUT_FORMAT_CHOICES), default="terminal")
 @click.option("--verify", is_flag=True, default=False, help=f"Run {CODE_REVIEW} for code; run {DOCS_REPORT_PACK_SLUG} for docs")
 @click.option("--llm-model", default="claude-haiku-4-5-20251001", envvar="DRYSCOPE_LLM_MODEL", help="LLM model for --verify")
 @click.option("--llm-api-key", default=None, help="API key for --verify")
@@ -333,6 +438,12 @@ def scan(
     By default, runs Code Match (--code is implied).
     Use --docs to run docs analysis tracks instead.
     Use --code --docs to run both pipelines.
+
+    \b
+    More detail:
+      dryscope help tracks
+      dryscope help output
+      dryscope help json
     """
     from dryscope.config import load_settings
 
@@ -376,6 +487,7 @@ def scan(
     )
 
     code_clusters = None
+    docs_result = None
 
     if code:
         if output_format not in ("terminal", "json"):
@@ -394,34 +506,35 @@ def scan(
         )
 
     if docs:
-        _run_docs_scan(
+        docs_result = _run_docs_scan(
             path=path,
             settings=settings,
             output_format=output_format,
             verify=verify,
             stage=stage,
             resume=resume,
+            emit_output=not (code and output_format == "json"),
         )
 
     # Output code results via unified reporter
-    if code and code_clusters is not None:
-        from dryscope.unified_report import format_unified_json, format_unified_terminal
+    if code and output_format == "json":
+        from dryscope.unified_report import format_unified_json
 
-        if output_format == "json":
-            click.echo(format_unified_json(code_clusters=code_clusters))
-        else:
-            click.echo(format_unified_terminal(code_clusters=code_clusters))
-    elif code and code_clusters is None:
-        # No units found — already reported to stderr
-        if output_format == "json":
-            from dryscope.unified_report import format_unified_json
-            click.echo(format_unified_json(code_clusters=[]))
+        click.echo(format_unified_json(
+            code_clusters=code_clusters or [],
+            doc_pairs=docs_result.overlaps if docs_result is not None else None,
+            doc_analyses=docs_result.doc_pair_analyses if docs_result is not None else None,
+        ))
+    elif code and code_clusters is not None:
+        from dryscope.unified_report import format_unified_terminal
+
+        click.echo(format_unified_terminal(code_clusters=code_clusters))
 
 
 # ─── Install / Uninstall ──────────────────────────────────────────────────
 
 
-@main.command()
+@main.command(context_settings=CONTEXT_SETTINGS)
 def install() -> None:
     """Install dryscope as both a Claude Code and Codex skill."""
     if not SKILL_TEMPLATE.exists():
@@ -460,7 +573,7 @@ def install() -> None:
     click.echo(f"Binary: {dryscope_bin}")
 
 
-@main.command()
+@main.command(context_settings=CONTEXT_SETTINGS)
 def uninstall() -> None:
     """Remove the dryscope Claude Code and Codex skills."""
     removed = False
@@ -480,7 +593,7 @@ def uninstall() -> None:
 # ─── Config init ──────────────────────────────────────────────────────────
 
 
-@main.command("init")
+@main.command("init", context_settings=CONTEXT_SETTINGS)
 def init_config() -> None:
     """Create a .dryscope.toml configuration file with defaults."""
     from dryscope.config import DEFAULT_CONFIG_TOML
@@ -507,13 +620,13 @@ def _parse_keep_since(value: str) -> datetime:
     raise click.BadParameter("expected YYYY-MM-DD or YYYY-MM")
 
 
-@main.group()
+@main.group(context_settings=CONTEXT_SETTINGS)
 def reports() -> None:
     """Manage saved dryscope report runs."""
     pass
 
 
-@reports.command("clean")
+@reports.command("clean", context_settings=CONTEXT_SETTINGS)
 @click.argument("path", type=click.Path(exists=True), default=".", required=False)
 @click.option("--keep-last", type=click.IntRange(min=0), default=None, help="Keep the newest N report runs.")
 @click.option("--keep-since", default=None, help="Keep report runs on or after YYYY-MM-DD or YYYY-MM.")
@@ -572,13 +685,13 @@ def reports_clean(
 # ─── Cache management ─────────────────────────────────────────────────────
 
 
-@main.group()
+@main.group(context_settings=CONTEXT_SETTINGS)
 def cache() -> None:
     """Cache management commands."""
     pass
 
 
-@cache.command("stats")
+@cache.command("stats", context_settings=CONTEXT_SETTINGS)
 def cache_stats() -> None:
     """Show cache statistics."""
     from dryscope.cache import Cache
@@ -603,7 +716,7 @@ def cache_stats() -> None:
     click.echo(f"DB size:    {stats.db_size_bytes:,} bytes")
 
 
-@cache.command("clear")
+@cache.command("clear", context_settings=CONTEXT_SETTINGS)
 def cache_clear() -> None:
     """Clear the cache database."""
     from dryscope.cache import Cache

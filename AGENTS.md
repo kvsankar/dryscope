@@ -14,6 +14,8 @@ Read only as far as the task needs:
   configuration, and the documentation index.
 - [docs/architecture.md](./docs/architecture.md) - code pipeline, docs
   pipeline, component responsibilities, and shared infrastructure.
+- [docs/json-output.md](./docs/json-output.md) - machine-readable output
+  contracts for agents, scripts, saved docs reports, and benchmarks.
 - [docs/synthetic-examples.md](./docs/synthetic-examples.md) - small synthetic
   examples for Code Match, Docs Map, Section Match, and similarity behavior.
 - [benchmarks/README.md](./benchmarks/README.md) - public benchmark harness,

@@ -186,6 +186,12 @@ uv pip install ".[local-embeddings]"
 ## Quick Start
 
 ```bash
+# Progressive help
+dryscope --help
+dryscope help output
+dryscope help json
+dryscope scan --help
+
 # Code Match (default)
 dryscope scan /path/to/project
 
@@ -503,6 +509,9 @@ remaining run.
 order: Run Overview, Docs Map, Docs Map Clusters, Section Match, optional Doc
 Pair Review, Docs Map Taxonomy, and Methodology.
 
+For machine-readable output contracts, see
+[JSON output](./docs/json-output.md).
+
 At the top level, JSON keeps only run metadata, a compact summary, and the
 ordered `report_structure`; detailed payloads live under their owning sections.
 
@@ -558,6 +567,7 @@ For docs:
 
 - [Architecture](./docs/architecture.md) — how the code, docs, reporting, cache, and CLI pieces fit together
 - [Analysis](./docs/analysis.md) — positioning, alternatives, benchmark notes, and product-readiness context
+- [JSON output](./docs/json-output.md) — machine-readable output contracts for agents and scripts
 - [Roadmap](./docs/roadmap.md) — forward-looking planning notes kept separate from architecture
 - [Synthetic examples](./docs/synthetic-examples.md) — small exposition-only examples for similarity, Code Match, Docs Map, and Section Match
 - [Benchmark pack](./benchmarks/README.md) — public benchmark harness, artifact locations, and refresh commands
