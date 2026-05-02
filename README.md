@@ -15,6 +15,10 @@
 worth reading before you ask an AI agent, stronger model, or human reviewer to
 clean it up.
 
+The name is a conflation of **DRY** ("Don't Repeat Yourself") and
+**telescope**: DRY for repeated code or overlapping knowledge, and telescope
+for looking across a large repository to spot the places worth inspecting.
+
 It scans code and docs for repeated implementation shapes, copy-pasted helpers,
 overlapping document sections, and scattered documentation topics. The output is
 a ranked shortlist of files and sections that deserve attention first, not a
