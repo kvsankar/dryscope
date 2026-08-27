@@ -195,13 +195,14 @@ def _parse_verdict(response_text: str) -> tuple[str, str]:
 
 def verify_cluster(
     cluster: Cluster,
-    model: str,
+    model: str | None,
     backend: str = "litellm",
     api_key: str | None = None,
     ollama_host: str | None = None,
     cli_strip_api_key: bool = True,
     cli_permission_mode: str | None = None,
     cli_dangerously_skip_permissions: bool = False,
+    timeout: int = 300,
 ) -> tuple[str, str]:
     """Verify a single cluster using an LLM.
 
@@ -227,13 +228,14 @@ def verify_cluster(
         cli_strip_api_key=cli_strip_api_key,
         cli_permission_mode=cli_permission_mode,
         cli_dangerously_skip_permissions=cli_dangerously_skip_permissions,
+        timeout=timeout,
     )
     return _parse_verdict(response_text)
 
 
 def verify_clusters(
     clusters: list[Cluster],
-    model: str,
+    model: str | None,
     max_workers: int = 1,
     backend: str = "litellm",
     api_key: str | None = None,
@@ -241,6 +243,7 @@ def verify_clusters(
     cli_strip_api_key: bool = True,
     cli_permission_mode: str | None = None,
     cli_dangerously_skip_permissions: bool = False,
+    timeout: int = 300,
 ) -> list[tuple[Cluster, str, str]]:
     """Verify all clusters in parallel.
 
@@ -261,6 +264,7 @@ def verify_clusters(
                 cli_strip_api_key,
                 cli_permission_mode,
                 cli_dangerously_skip_permissions,
+                timeout,
             ): cluster
             for cluster in clusters
         }

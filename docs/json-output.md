@@ -31,7 +31,7 @@ Code scans and combined code/docs scans use the unified findings shape:
 
 ```json
 {
-  "dryscope_version": "0.1.0",
+  "dryscope_version": "0.1.2",
   "findings": [],
   "summary": {}
 }
@@ -41,7 +41,7 @@ Code-only scans also include the active report pack and track:
 
 ```json
 {
-  "dryscope_version": "0.1.0",
+  "dryscope_version": "0.1.2",
   "report_pack": {
     "label": "Code Report Pack",
     "slug": "code-report-pack"
@@ -115,6 +115,10 @@ Combined `--code --docs -f json` output includes docs findings in the same
   "track": "Section Match",
   "track_slug": "docs-section-match",
   "similarity": 0.94,
+  "embedding_cosine": 0.97,
+  "token_similarity": 0.87,
+  "combined_similarity": 0.94,
+  "confidence": "strict-match",
   "files": ["docs/a.md", "docs/b.md"],
   "sections": [
     {
@@ -134,6 +138,11 @@ If Doc Pair Review ran and matched that document pair, `track` becomes
 `Doc Pair Review`, and `verdict` / `verdict_reason` summarize the relationship
 and recommended action.
 
+`similarity` remains a compatibility alias for `combined_similarity`. Consumers
+that need to reason about the configured threshold should use all three score
+components. Lower-band `semantic-candidate` entries are preflight leads, not
+verified duplication findings.
+
 ## Docs Report JSON
 
 Docs-only JSON output and saved `.dryscope/runs/<run-id>/report.json` use the
@@ -150,7 +159,11 @@ Docs Report Pack contract:
     "documents_scanned": 0,
     "chunks_analyzed": 0,
     "matched_section_pairs_found": 0,
-    "section_match_recommendations_found": 0
+    "semantic_candidates_found": 0,
+    "document_intent_relationships_found": 0,
+    "document_level_suggestions_found": 0,
+    "section_match_recommendations_found": 0,
+    "outcome": {}
   },
   "report_structure": []
 }
@@ -181,6 +194,25 @@ Common section IDs:
 The docs report avoids duplicate "sample first, full list later" payloads.
 Detailed data belongs under the owning section.
 
+`metadata` contains the exact relative input-file list and corpus count;
+Dryscope version, sanitized installation/source type, source revision, and
+dirty state when available;
+embedding model; strict threshold and label; semantic-candidate floor/cap;
+token weight; `include_intra`; `min_words`; backend; model override and
+effective model identity; timeout; and stage status. `stage_status` records
+completion, degradation or skipping plus exception category, fallback, and
+unavailable conclusions where relevant.
+
+Reports and stage artifacts do not serialize absolute project roots, source
+checkout paths, local `file://` URLs, or user-home paths. Paths within the scan
+scope are relative; an input outside that scope is labeled
+`<outside-scan-root>/<name>`.
+
+The summary outcome is `findings`, `clean-negative`, or `degraded`. Zero strict
+section matches is only “none above threshold.” It becomes `clean-negative`
+only if all relevant stages completed and document-intent, IA, candidate, and
+recommendation signals are also empty.
+
 ## Docs Stage Artifacts
 
 Docs runs save resumable stage artifacts under `.dryscope/runs/<run-id>/`.
@@ -189,7 +221,8 @@ final report contract.
 
 Common artifacts:
 
-- `docs_section_match.json`: matched section pairs and Section Match metadata.
+- `docs_section_match.json`: strict matched section pairs, bounded semantic
+  candidates, score components, provenance, and Section Match stage status.
 - `docs_map.json`: document descriptors, taxonomy, topic tree, facets, and
   Docs Map clusters.
 - `docs_pair_review.json`: Doc Pair Review analyses and suggestions.

@@ -13,6 +13,13 @@ import mistune
 
 from dryscope.docs.models import Chunk, Document
 
+_SECONDARY_CHUNK_MIN_WORDS = 120
+_SECONDARY_WINDOW_WORDS = 160
+_SECONDARY_MAX_FRAGMENTS = 40
+_LIST_ITEM_RE = re.compile(r"^\s*(?:[-*+]\s+(?:\[[ xX]\]\s+)?|\d+[.)]\s+)\S")
+_TABLE_ROW_RE = re.compile(r"^\s*\|.*\|\s*$")
+_TABLE_SEPARATOR_RE = re.compile(r"^\s*\|(?:\s*:?-+:?\s*\|)+\s*$")
+
 
 def detect_boilerplate_headings(
     chunks: list[Chunk],
@@ -141,17 +148,119 @@ def _chunks_from_sections(
     chunks: list[Chunk] = []
     for heading_path, line_start, line_end in sections:
         content = "\n".join(lines[line_start - 1 : line_end]).strip()
-        if content:
-            chunks.append(
-                Chunk(
-                    document_path=file_path,
-                    heading_path=list(heading_path),
-                    content=content,
-                    line_start=line_start,
-                    line_end=line_end,
-                )
+        if not content:
+            continue
+        parent = Chunk(
+            document_path=file_path,
+            heading_path=list(heading_path),
+            content=content,
+            line_start=line_start,
+            line_end=line_end,
+        )
+        chunks.append(parent)
+        chunks.extend(
+            _secondary_markdown_chunks(
+                parent,
+                lines[line_start - 1 : line_end],
+                source_line_start=line_start,
             )
+        )
     return chunks
+
+
+def _word_count(text: str) -> int:
+    return len(re.findall(r"\b[\w.-]+\b", text))
+
+
+def _structured_line_ranges(section_lines: list[str]) -> list[tuple[int, int, str]]:
+    """Return local line ranges for table rows and list items."""
+    fragments: list[tuple[int, int, str]] = []
+
+    table_indices = [
+        idx
+        for idx, line in enumerate(section_lines)
+        if _TABLE_ROW_RE.match(line) and not _TABLE_SEPARATOR_RE.match(line)
+    ]
+    # A header plus at least four data rows is large enough to be useful.
+    if len(table_indices) >= 5:
+        for idx in table_indices[1:]:
+            fragments.append((idx, idx, "table-row"))
+
+    item_starts = [idx for idx, line in enumerate(section_lines) if _LIST_ITEM_RE.match(line)]
+    if len(item_starts) >= 4:
+        for pos, start in enumerate(item_starts):
+            limit = (
+                item_starts[pos + 1] - 1 if pos + 1 < len(item_starts) else len(section_lines) - 1
+            )
+            stop = start
+            for idx in range(start + 1, limit + 1):
+                line = section_lines[idx]
+                if not line.strip() or line[:1].isspace():
+                    stop = idx
+                    continue
+                break
+            while stop > start and not section_lines[stop].strip():
+                stop -= 1
+            fragments.append((start, stop, "list-item"))
+
+    # Keep stable source order and avoid duplicate ranges where a table row also
+    # happens to look like another structured element.
+    return sorted(set(fragments), key=lambda item: (item[0], item[1], item[2]))
+
+
+def _window_line_ranges(section_lines: list[str]) -> list[tuple[int, int, str]]:
+    """Split very large unstructured sections into bounded source-line windows."""
+    ranges: list[tuple[int, int, str]] = []
+    start: int | None = None
+    words = 0
+    for idx, line in enumerate(section_lines):
+        line_words = _word_count(line)
+        if start is None and line.strip():
+            start = idx
+        words += line_words
+        if start is not None and words >= _SECONDARY_WINDOW_WORDS:
+            ranges.append((start, idx, "bounded-window"))
+            start = None
+            words = 0
+    if start is not None:
+        ranges.append((start, len(section_lines) - 1, "bounded-window"))
+    return ranges if len(ranges) >= 2 else []
+
+
+def _secondary_markdown_chunks(
+    parent: Chunk,
+    section_lines: list[str],
+    *,
+    source_line_start: int,
+) -> list[Chunk]:
+    """Add bounded, line-accurate fragments for oversized Markdown sections."""
+    word_count = _word_count(parent.content)
+    ranges = _structured_line_ranges(section_lines)
+    # The structure itself is the size guard for tables and lists: at least four
+    # data rows/items must be present before _structured_line_ranges returns
+    # fragments. Unstructured prose keeps the stricter word-count guard.
+    if len(ranges) < 4 and word_count >= 2 * _SECONDARY_CHUNK_MIN_WORDS:
+        ranges = _window_line_ranges(section_lines)
+    if len(ranges) < 2:
+        return []
+
+    fragments: list[Chunk] = []
+    for local_start, local_end, kind in ranges[:_SECONDARY_MAX_FRAGMENTS]:
+        content = "\n".join(section_lines[local_start : local_end + 1]).strip()
+        if _word_count(content) < 5:
+            continue
+        fragments.append(
+            Chunk(
+                document_path=parent.document_path,
+                heading_path=list(parent.heading_path),
+                content=content,
+                line_start=source_line_start + local_start,
+                line_end=source_line_start + local_end,
+                kind=kind,
+                parent_id=parent.id,
+            )
+        )
+    return fragments
 
 
 def chunk_markdown(text: str, file_path: str) -> list[Chunk]:

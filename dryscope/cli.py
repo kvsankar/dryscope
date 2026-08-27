@@ -114,13 +114,21 @@ def _find_project_root(start: Path | None = None) -> Path:
 
 def _find_install_source() -> str:
     """Resolve the package source to install into the shared skill venv."""
-    try:
-        return str(_find_project_root(Path.cwd()))
-    except FileNotFoundError:
+    from dryscope.config import load_toml
+
+    for start in (Path.cwd(), Path(__file__).resolve().parent):
         try:
-            return str(_find_project_root())
+            root = _find_project_root(start)
         except FileNotFoundError:
-            return f"dryscope=={__version__}"
+            continue
+        project = load_toml(root / "pyproject.toml").get("project", {})
+        if (
+            isinstance(project, dict)
+            and project.get("name") == "dryscope"
+            and (root / "dryscope" / "cli.py").is_file()
+        ):
+            return str(root)
+    return f"dryscope=={__version__}"
 
 
 def _find_git_root(scan_path: Path) -> Path:
@@ -246,7 +254,8 @@ def _verify_code_clusters(
     from dryscope.code.verifier import VERDICT_NOISE, verify_clusters
 
     click.echo(
-        f"{CODE_REVIEW}: verifying {len(clusters)} clusters with {settings.model}...", err=True
+        f"{CODE_REVIEW}: verifying {len(clusters)} clusters with {settings.llm_model_identity}...",
+        err=True,
     )
     results = verify_clusters(
         clusters,
@@ -258,6 +267,7 @@ def _verify_code_clusters(
         cli_strip_api_key=settings.cli_strip_api_key,
         cli_permission_mode=settings.cli_permission_mode,
         cli_dangerously_skip_permissions=settings.cli_dangerously_skip_permissions,
+        timeout=settings.llm_timeout,
     )
 
     verified: list = []
@@ -449,7 +459,7 @@ def _load_scan_settings(
     min_tokens: int,
     max_cluster_size: int,
     model: str,
-    llm_model: str,
+    llm_model: str | None,
     exclude: tuple[str, ...],
     threshold_intent: float | None,
     backend: str | None,
@@ -457,6 +467,9 @@ def _load_scan_settings(
     llm_max_doc_pairs: int | None,
     concurrency: int | None,
     token_weight: float | None,
+    candidate_threshold: float | None,
+    max_semantic_candidates: int | None,
+    llm_timeout: int | None,
 ) -> Settings:
     from dryscope.config import load_settings
 
@@ -469,6 +482,8 @@ def _load_scan_settings(
         code_embedding_model=model if _explicit(ctx, "model") else None,
         docs_embedding_model=model if _explicit(ctx, "model") else None,
         threshold=threshold if _explicit(ctx, "threshold") else None,
+        candidate_threshold=candidate_threshold,
+        max_semantic_candidates=max_semantic_candidates,
         exclude=exclude if exclude else None,
         threshold_intent=threshold_intent,
         backend=backend,
@@ -478,6 +493,7 @@ def _load_scan_settings(
         concurrency=concurrency,
         intra=_explicit_flag(ctx, "intra"),
         token_weight=token_weight,
+        llm_timeout=llm_timeout,
     )
 
 
@@ -536,7 +552,7 @@ def _emit_scan_output(
     "-t",
     default=0.90,
     type=click.FloatRange(0.0, 1.0),
-    help="Similarity threshold (0.0-1.0)",
+    help="Strict similarity threshold; docs use hybrid similarity when token weight is active",
 )
 @click.option(
     "--format", "-f", "output_format", type=click.Choice(OUTPUT_FORMAT_CHOICES), default="terminal"
@@ -549,9 +565,9 @@ def _emit_scan_output(
 )
 @click.option(
     "--llm-model",
-    default="claude-haiku-4-5-20251001",
+    default=None,
     envvar="DRYSCOPE_LLM_MODEL",
-    help="LLM model for --verify",
+    help="Optional LLM model override; CLI backends otherwise use their configured default",
 )
 @click.option("--llm-api-key", default=None, help="API key for --verify")
 # Code-specific options
@@ -588,13 +604,34 @@ def _emit_scan_output(
 )
 @click.option("--concurrency", default=None, type=int, help="Max parallel LLM calls (docs)")
 @click.option(
+    "--llm-timeout",
+    default=None,
+    type=click.IntRange(min=1),
+    help="Per-call LLM backend timeout in seconds",
+)
+@click.option(
     "--backend",
     type=click.Choice(["litellm", "cli", "codex-cli", "ollama"]),
     default=None,
     help="LLM backend for --verify",
 )
 @click.option(
-    "--token-weight", default=None, type=float, help="Token Jaccard weight in hybrid similarity"
+    "--token-weight",
+    default=None,
+    type=click.FloatRange(0.0, 1.0),
+    help="Token Jaccard weight in hybrid similarity",
+)
+@click.option(
+    "--candidate-threshold",
+    default=None,
+    type=click.FloatRange(0.0, 1.0),
+    help="Embedding-cosine floor for the bounded semantic-candidate band",
+)
+@click.option(
+    "--max-semantic-candidates",
+    default=None,
+    type=click.IntRange(min=0),
+    help="Maximum below-threshold semantic candidates to retain",
 )
 @click.pass_context
 def scan(
@@ -606,7 +643,7 @@ def scan(
     threshold: float,
     output_format: str,
     verify: bool,
-    llm_model: str,
+    llm_model: str | None,
     llm_api_key: str | None,
     min_lines: int,
     min_tokens: int,
@@ -622,8 +659,11 @@ def scan(
     threshold_intent: float | None,
     llm_max_doc_pairs: int | None,
     concurrency: int | None,
+    llm_timeout: int | None,
     backend: str | None,
     token_weight: float | None,
+    candidate_threshold: float | None,
+    max_semantic_candidates: int | None,
 ) -> None:
     """Scan PATH with Code Match and/or docs tracks.
 
@@ -657,6 +697,9 @@ def scan(
         llm_max_doc_pairs,
         concurrency,
         token_weight,
+        candidate_threshold,
+        max_semantic_candidates,
+        llm_timeout,
     )
 
     code_clusters = None
@@ -720,13 +763,15 @@ def install() -> None:
             "uv",
             "pip",
             "install",
-            "--upgrade",
+            "--reinstall-package",
+            "dryscope",
             "--python",
             str(venv_dir / "bin" / "python"),
             install_source,
         ],
         check=True,
     )
+    click.echo(f"Installed source: {install_source}", err=True)
 
     template = SKILL_TEMPLATE.read_text()
     rendered = template.replace("{{DRYSCOPE_BIN}}", str(dryscope_bin))

@@ -9,8 +9,10 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from html import escape
-from pathlib import Path
+from importlib import metadata as importlib_metadata
+from pathlib import Path, PureWindowsPath
 from typing import cast
+from urllib.parse import unquote, urlparse
 
 from rich.console import Console
 from rich.panel import Panel
@@ -41,6 +43,7 @@ class MarkdownContext:
     overview: dict
     section_titles: dict[str, str]
     child_titles: dict[str, str]
+    candidate_pairs: list[OverlapPair]
 
 
 def _short_path(path: str | None) -> str:
@@ -95,6 +98,61 @@ def _docs_map(result: AnalysisResult) -> dict:
     return docs_map if isinstance(docs_map, dict) else {}
 
 
+def _doc_pair_action_count(result: AnalysisResult) -> int:
+    """Count actionable topic suggestions produced by Doc Pair Review."""
+    return sum(
+        1
+        for analysis in result.doc_pair_analyses
+        for topic in analysis.topics
+        if topic.action_for_other != "keep"
+    )
+
+
+def _report_outcome(result: AnalysisResult, strict_pairs: list[OverlapPair]) -> dict:
+    """Classify a report without equating a strict zero with no overlap."""
+    docs_map = _docs_map(result)
+    unavailable = [
+        name
+        for name, status in result.stage_status.items()
+        if status.get("status") in {"degraded", "failed"}
+        or (status.get("status") == "skipped" and status.get("unavailable_conclusions"))
+    ]
+    relationship_count = len(result.doc_pair_analyses)
+    action_count = _doc_pair_action_count(result)
+    finding_count = (
+        len(strict_pairs)
+        + len(result.candidate_overlaps)
+        + len(_topic_document_clusters(result))
+        + len(docs_map.get("diagnostics", []))
+        + relationship_count
+        + action_count
+    )
+    if unavailable:
+        status = "degraded"
+        statement = (
+            "The run is degraded; some conclusions are unavailable. Empty outputs from "
+            "affected stages are not clean-negative evidence."
+        )
+    elif finding_count:
+        status = "findings"
+        statement = "The preflight surfaced candidates or document-intent relationships for review."
+    else:
+        status = "clean-negative"
+        statement = (
+            "No candidates were surfaced by the completed stages for this exact scanned corpus and "
+            "configuration. This is a preflight result, not proof that no overlap exists."
+        )
+    return {
+        "status": status,
+        "statement": statement,
+        "strict_threshold_result": (
+            f"{len(strict_pairs)} section pairs at or above the configured strict threshold; "
+            "pairs below it may still appear in the semantic-candidate or document-intent tracks."
+        ),
+        "degraded_stages": unavailable,
+    }
+
+
 def _build_run_overview(
     result: AnalysisResult,
     similarity_pairs: list[OverlapPair],
@@ -107,6 +165,8 @@ def _build_run_overview(
     taxonomy = result.topic_taxonomy or {}
     canonical_topics = taxonomy.get("canonical_topics", []) if isinstance(taxonomy, dict) else []
     coverage_clusters = _topic_document_clusters(result)
+    doc_pair_actions = _doc_pair_action_count(result)
+    outcome = _report_outcome(result, similarity_pairs)
     docs_tracks_ran = bool(
         result.documents or DOCS_SECTION_MATCH_SLUG in stages or DOCS_MAP_SLUG in stages
     )
@@ -131,7 +191,9 @@ def _build_run_overview(
                     f"{_plural(len(result.documents), 'document')}, "
                     f"{_plural(len(result.chunks), 'section')}, "
                     f"{_plural(len(similarity_pairs), 'matched section pair')}, "
-                    f"{_plural(len(coverage_clusters), 'consolidation cluster')}."
+                    f"{_plural(len(result.candidate_overlaps), 'semantic candidate')}, "
+                    f"{_plural(len(result.doc_pair_analyses), 'document-intent relationship')}, "
+                    f"{_plural(doc_pair_actions, 'document-level suggestion')}."
                 ),
             },
         },
@@ -172,6 +234,7 @@ def _build_run_overview(
                 "results": {
                     "sections_analyzed": len(result.chunks),
                     "matched_section_pairs": len(similarity_pairs),
+                    "semantic_candidates": len(result.candidate_overlaps),
                     "section_match_recommendations": len(recommendations),
                 },
             },
@@ -182,8 +245,12 @@ def _build_run_overview(
                 "label": DOCS_PAIR_REVIEW,
                 "slug": DOCS_PAIR_REVIEW_SLUG,
                 "pairs_analyzed": len(result.doc_pair_analyses),
+                "relationships_found": len(result.doc_pair_analyses),
+                "recommendations_found": doc_pair_actions,
             },
             "stages_run": stages_run or [],
+            "stage_status": result.stage_status,
+            "outcome": outcome,
         },
     }
 
@@ -204,6 +271,10 @@ def _pair_to_dict(pair: OverlapPair) -> dict:
             "line_end": pair.chunk_b.line_end,
         },
         "embedding_similarity": pair.embedding_similarity,
+        "embedding_cosine": pair.embedding_cosine,
+        "token_similarity": pair.token_similarity,
+        "combined_similarity": pair.combined_score,
+        "confidence": pair.confidence,
         "shared_codes": pair.shared_codes,
     }
 
@@ -219,6 +290,7 @@ def _doc_pair_analysis_to_dict(analysis: DocPairAnalysis) -> dict:
         "doc_b_purpose": analysis.doc_b_purpose,
         "relationship": analysis.relationship,
         "confidence": analysis.confidence,
+        "analysis_error": analysis.analysis_error,
         "topics": [
             {
                 "name": topic.name,
@@ -262,6 +334,7 @@ def _report_structure(
     """Return the ordered report sections and backing data for JSON consumers."""
     taxonomy = result.topic_taxonomy or {}
     matched_section_pairs = [_pair_to_dict(pair) for pair in similarity_pairs]
+    semantic_candidates = [_pair_to_dict(pair) for pair in result.candidate_overlaps]
     sections: list[dict] = [
         {
             "id": "run_overview",
@@ -271,6 +344,8 @@ def _report_structure(
                 "scanned_documents": [
                     doc.path for doc in sorted(result.documents, key=lambda d: d.path)
                 ],
+                "stage_status": result.stage_status,
+                "outcome": _report_outcome(result, similarity_pairs),
             },
         },
     ]
@@ -299,6 +374,7 @@ def _report_structure(
             "slug": DOCS_SECTION_MATCH_SLUG,
             "data": {
                 "matched_section_pairs": len(similarity_pairs),
+                "semantic_candidates": len(result.candidate_overlaps),
                 "section_match_recommendations": len(recommendations),
             },
             "children": [
@@ -313,6 +389,12 @@ def _report_structure(
                     "title": "Matched Section Pairs",
                     "slug": DOCS_SECTION_MATCH_SLUG,
                     "data": matched_section_pairs,
+                },
+                {
+                    "id": "semantic_candidates",
+                    "title": "Below-Threshold Semantic Candidates",
+                    "slug": DOCS_SECTION_MATCH_SLUG,
+                    "data": semantic_candidates,
                 },
             ],
         }
@@ -407,27 +489,51 @@ def _markdown_table_cell(value: object) -> str:
     return " ".join(text.split())
 
 
-def _render_terminal_section_match(console: Console, similarity_pairs: list[OverlapPair]) -> None:
+def _score_text(value: float | None) -> str:
+    return f"{value:.3f}" if value is not None else "-"
+
+
+def _render_terminal_section_match(
+    console: Console,
+    similarity_pairs: list[OverlapPair],
+    candidate_pairs: list[OverlapPair],
+) -> None:
     console.print(f"[bold]{DOCS_SECTION_MATCH}[/bold]", style="cyan")
-    console.print(f"Found [bold]{len(similarity_pairs)}[/bold] matched section pairs")
+    console.print(
+        f"Found [bold]{len(similarity_pairs)}[/bold] strict matched section pairs and "
+        f"[bold]{len(candidate_pairs)}[/bold] bounded semantic candidates"
+    )
+    if not similarity_pairs:
+        console.print(
+            "[yellow]No section pairs were above the configured strict threshold; "
+            "this does not mean the corpus has no overlap.[/yellow]"
+        )
     console.print()
 
-    if not similarity_pairs:
+    displayed_pairs = [*similarity_pairs[:10], *candidate_pairs[:10]]
+    if not displayed_pairs:
         return
     table = Table(title="Top Section Match Results", show_lines=True)
-    table.add_column("Similarity", style="yellow", width=10)
+    table.add_column("Band", style="cyan", width=18)
+    table.add_column("Cosine", style="yellow", width=8)
+    table.add_column("Token", style="yellow", width=8)
+    table.add_column("Combined", style="yellow", width=9)
     table.add_column("Section A", style="green")
     table.add_column("Section B", style="green")
 
-    for pair in similarity_pairs[:10]:
+    for pair in displayed_pairs:
         heading_a = " > ".join(pair.chunk_a.heading_path) or "(no heading)"
         heading_b = " > ".join(pair.chunk_b.heading_path) or "(no heading)"
         loc_a = f"{_short_path(pair.chunk_a.document_path)}: {heading_a}"
         loc_b = f"{_short_path(pair.chunk_b.document_path)}: {heading_b}"
-        sim_str = (
-            f"{pair.embedding_similarity:.3f}" if pair.embedding_similarity is not None else "-"
+        table.add_row(
+            pair.confidence,
+            _score_text(pair.embedding_cosine),
+            _score_text(pair.token_similarity),
+            _score_text(pair.combined_score),
+            loc_a,
+            loc_b,
         )
-        table.add_row(sim_str, loc_a, loc_b)
 
     console.print(table)
     console.print()
@@ -535,6 +641,9 @@ def render_terminal(
     similarity_pairs: list[OverlapPair],
     suggestions: list[dict] | None,
     console: Console | None = None,
+    settings: Settings | None = None,
+    project_root: Path | None = None,
+    stages_run: list[str] | None = None,
 ) -> None:
     """Render analysis results to terminal using Rich."""
     if console is None:
@@ -545,11 +654,45 @@ def render_terminal(
     console.print()
     console.print(
         f"Scanned: [bold]{len(result.documents)}[/bold] documents, "
-        f"[bold]{len(result.chunks)}[/bold] sections"
+        f"[bold]{len(result.chunks)}[/bold] sections/fragments"
     )
+    console.print(
+        "[dim]Scope boundary: conclusions apply only to the exact input files listed in this run.[/dim]"
+    )
+    console.print("[dim]Input files:[/dim]")
+    for document in sorted(result.documents, key=lambda item: item.path):
+        display_path = (
+            _relative_path(document.path, project_root)
+            if project_root is not None
+            else document.path
+        )
+        console.print(f"  [dim]- {display_path}[/dim]")
+    if settings is not None and project_root is not None:
+        provenance = _build_metadata(settings, project_root, result=result)
+        source_revision = provenance.get("dryscope_source_revision")
+        console.print(
+            f"[dim]dryscope {__import__('dryscope').__version__}; backend={settings.backend}; "
+            f"model={settings.llm_model_identity}; embedding={settings.docs_embedding_model}; "
+            f"threshold={settings.threshold_similarity}; token_weight={settings.token_weight}; "
+            f"candidate_threshold={settings.docs_candidate_threshold}; "
+            f"include_intra={settings.include_intra}; min_words={settings.min_content_words}; "
+            f"timeout={settings.llm_timeout}s[/dim]"
+        )
+        if source_revision:
+            console.print(f"[dim]dryscope source revision={source_revision}[/dim]")
     console.print()
 
-    _render_terminal_section_match(console, similarity_pairs)
+    outcome = _report_outcome(result, similarity_pairs)
+    style = "yellow" if outcome["status"] == "degraded" else "cyan"
+    console.print(f"[{style}]{outcome['statement']}[/{style}]")
+    for stage_name, status in result.stage_status.items():
+        console.print(
+            f"  {stage_name}: [bold]{status.get('status', 'unknown')}[/bold]"
+            + (f"; fallback={status.get('fallback')}" if status.get("fallback") else "")
+        )
+    console.print()
+
+    _render_terminal_section_match(console, similarity_pairs, result.candidate_overlaps)
     _render_terminal_doc_pair_review(console, result)
     _render_terminal_topic_clusters(console, result)
     _render_terminal_taxonomy(console, result)
@@ -587,6 +730,7 @@ def _build_markdown_context(
         overview=overview,
         section_titles=section_titles,
         child_titles=child_titles,
+        candidate_pairs=result.candidate_overlaps,
     )
 
 
@@ -608,6 +752,10 @@ def _append_markdown_dashboard(
     n_docs_map_groups = len(context.docs_map.get("topic_tree", []))
     n_docs_map_facets = len(context.docs_map.get("facets", {}))
     n_consolidation_clusters = len(_topic_document_clusters(result))
+    n_candidates = len(result.candidate_overlaps)
+    n_doc_relationships = len(result.doc_pair_analyses)
+    n_doc_actions = _doc_pair_action_count(result)
+    outcome = _report_outcome(result, similarity_pairs)
     docs_map_ran = bool(context.docs_map or result.document_descriptors or result.topic_taxonomy)
     section_match_ran = bool(DOCS_SECTION_MATCH_SLUG in set(stages_run) or similarity_pairs)
 
@@ -629,27 +777,41 @@ def _append_markdown_dashboard(
         metric_cards.extend(
             [
                 _metric_card(n_pairs, "Matched Section Pairs"),
+                _metric_card(n_candidates, "Semantic Candidates"),
                 _metric_card(n_recs, "Section Match Recs"),
             ]
         )
         track_bits.append(
-            f"{DOCS_SECTION_MATCH}: {n_pairs} matched section pairs, {n_recs} recommendations."
+            f"{DOCS_SECTION_MATCH}: {n_pairs} strict matched section pairs, "
+            f"{n_candidates} semantic candidates, {n_recs} strict-match recommendations."
+        )
+    if DOCS_PAIR_REVIEW_SLUG in set(stages_run) or result.doc_pair_analyses:
+        metric_cards.extend(
+            [
+                _metric_card(n_doc_relationships, "Doc Relationships"),
+                _metric_card(n_doc_actions, "Doc Suggestions"),
+            ]
+        )
+        track_bits.append(
+            f"{DOCS_PAIR_REVIEW}: {n_doc_relationships} relationships, "
+            f"{n_doc_actions} refactoring/reference suggestions."
         )
     if not docs_map_ran and not section_match_ran:
         metric_cards.append(_metric_card(len(result.chunks), "Sections"))
 
-    scan_path_str = str(project_root) if project_root else "unknown"
-    git_name = ""
+    git_context = ""
     if project_root:
         commit = _git_commit(project_root)
-        git_name = f" ({project_root.name}, {commit[:8]})" if commit else f" ({project_root.name})"
+        git_context = f" at Git revision <code>{commit[:8]}</code>" if commit else ""
 
     lines.append(
         '<div class="dashboard">\n'
         f"{''.join(metric_cards)}"
         f'  <div class="pipeline-bar">Pipeline: {pipeline_dots}</div>\n'
         f'  <div class="track-summary">{" ".join(track_bits) if track_bits else "No docs analysis tracks ran."}</div>\n'
-        f'  <div class="scan-context">Scanned: <code>{scan_path_str}</code>{git_name}</div>\n'
+        f'  <div class="track-summary"><strong>Outcome:</strong> {escape(outcome["statement"])}</div>\n'
+        f'  <div class="scan-context">Scope: exactly {n_docs} listed files{git_context}. '
+        "Do not generalize beyond the listed files.</div>\n"
         "</div>\n"
     )
 
@@ -661,6 +823,24 @@ def _append_markdown_run_overview(
     project_root: Path | None,
 ) -> None:
     lines.append(f"## {context.section_titles['run_overview']}\n")
+    outcome = context.overview["supporting_results"]["outcome"]
+    lines.append(f"**Outcome: {outcome['status']}** — {outcome['statement']}\n")
+    lines.append(f"{outcome['strict_threshold_result']}\n")
+
+    lines.append("### Stage Status\n")
+    lines.append("| Stage | Status | Exception | Fallback | Unavailable Conclusions |")
+    lines.append("|-------|--------|-----------|----------|-------------------------|")
+    for stage_name, status in result.stage_status.items():
+        unavailable = "; ".join(status.get("unavailable_conclusions", [])) or "-"
+        lines.append(
+            f"| {stage_name} | {status.get('status', 'unknown')} "
+            f"| {status.get('exception_category') or '-'} "
+            f"| {status.get('fallback') or '-'} | {unavailable} |"
+        )
+    if not result.stage_status:
+        lines.append("| (not recorded) | unknown | - | - | stage availability is unknown |")
+    lines.append("")
+
     lines.append("### Capabilities Exercised\n")
     lines.append("| Capability | Ran | What It Does | Result |")
     lines.append("|------------|-----|--------------|--------|")
@@ -695,6 +875,9 @@ def _append_markdown_run_overview(
         ]
         lines.append("### Scanned Documents\n")
         lines.append(
+            "These are the exact corpus boundaries for this report. Unlisted files were not analyzed.\n"
+        )
+        lines.append(
             _details_block(
                 f"{len(scanned_docs)} documents scanned",
                 _html_list(scanned_docs),
@@ -713,6 +896,15 @@ def _append_markdown_docs_map(
     if not docs_map:
         return
     lines.append(f"## {context.section_titles['docs_map']}\n")
+    stage_status = docs_map.get("stage_status", {})
+    if stage_status.get("status") in {"degraded", "failed"}:
+        unavailable = "; ".join(stage_status.get("unavailable_conclusions", []))
+        lines.append(
+            f"> **Degraded {DOCS_MAP} stage.** {stage_status.get('exception_category', 'LLM failure')}. "
+            f"Fallback: {stage_status.get('fallback', 'none')}. "
+            f"Unavailable conclusions: {unavailable or 'not recorded'}. "
+            "Zero groups, facets, or diagnostics from this stage must not be read as a clean result.\n"
+        )
     lines.append(
         f"Method: `{docs_map.get('method', 'unknown')}`. "
         f"Top-level topic groups: {len(docs_map.get('topic_tree', []))}. "
@@ -916,9 +1108,20 @@ def _append_markdown_section_match(
         "Section Match is the docs section-level pass: split documents into sections, "
         "embed them, and report matched cross-document section pairs.\n"
     )
-    lines.append(f"Found {len(similarity_pairs)} matched section pairs.\n")
+    lines.append(
+        f"Found {len(similarity_pairs)} strict matched section pairs and "
+        f"{len(context.candidate_pairs)} "
+        "bounded semantic candidates.\n"
+    )
+    if not similarity_pairs:
+        lines.append(
+            "**No section candidates were above the configured strict threshold.** "
+            "This is not a claim that the scanned documents have no overlap; inspect the "
+            "semantic-candidate, Docs Map, and Doc Pair Review sections.\n"
+        )
     _append_markdown_recommendations(lines, context)
     _append_markdown_matched_pairs(lines, similarity_pairs, context)
+    _append_markdown_semantic_candidates(lines, context)
 
 
 def _append_markdown_recommendations(lines: list[str], context: MarkdownContext) -> None:
@@ -955,17 +1158,40 @@ def _append_markdown_matched_pairs(
     if not similarity_pairs:
         return
     lines.append(f"### {context.child_titles['matched_section_pairs']}\n")
-    lines.append("| Similarity | Section A | Section B |")
-    lines.append("|------------|-----------|-----------|")
+    lines.append("| Embedding Cosine | Token Similarity | Combined Score | Section A | Section B |")
+    lines.append("|------------------|------------------|----------------|-----------|-----------|")
     for pair in similarity_pairs:
         heading_a = " > ".join(pair.chunk_a.heading_path) or "(no heading)"
         heading_b = " > ".join(pair.chunk_b.heading_path) or "(no heading)"
         loc_a = f"`{_short_path(pair.chunk_a.document_path)}`: {heading_a}"
         loc_b = f"`{_short_path(pair.chunk_b.document_path)}`: {heading_b}"
-        sim_str = (
-            f"{pair.embedding_similarity:.3f}" if pair.embedding_similarity is not None else "-"
+        lines.append(
+            f"| {_score_text(pair.embedding_cosine)} | {_score_text(pair.token_similarity)} "
+            f"| {_score_text(pair.combined_score)} | {loc_a} | {loc_b} |"
         )
-        lines.append(f"| {sim_str} | {loc_a} | {loc_b} |")
+    lines.append("")
+
+
+def _append_markdown_semantic_candidates(lines: list[str], context: MarkdownContext) -> None:
+    candidates = context.candidate_pairs
+    if not candidates:
+        return
+    lines.append(f"### {context.child_titles['semantic_candidates']}\n")
+    lines.append(
+        "These are bounded, below-strict-threshold preflight candidates selected by embedding cosine. "
+        "They require LLM or human review and are not duplication findings.\n"
+    )
+    lines.append("| Embedding Cosine | Token Similarity | Combined Score | Section A | Section B |")
+    lines.append("|------------------|------------------|----------------|-----------|-----------|")
+    for pair in candidates:
+        heading_a = " > ".join(pair.chunk_a.heading_path) or "(no heading)"
+        heading_b = " > ".join(pair.chunk_b.heading_path) or "(no heading)"
+        loc_a = f"`{_short_path(pair.chunk_a.document_path)}`: {heading_a}"
+        loc_b = f"`{_short_path(pair.chunk_b.document_path)}`: {heading_b}"
+        lines.append(
+            f"| {_score_text(pair.embedding_cosine)} | {_score_text(pair.token_similarity)} "
+            f"| {_score_text(pair.combined_score)} | {loc_a} | {loc_b} |"
+        )
     lines.append("")
 
 
@@ -1085,16 +1311,17 @@ def _append_markdown_methodology(
         f"1. **{DOCS_MAP}** (`{DOCS_MAP_SLUG}`) - Extracts document descriptors, canonicalizes aboutness and "
         "reader-intent labels, discovers an IA topic tree and facets, and lists multi-document "
         "consolidation clusters.\n"
-        f"2. **{DOCS_SECTION_MATCH}** (`{DOCS_SECTION_MATCH_SLUG}`) - Splits documents into sections, generates API or local embeddings, "
-        "finds cross-document section pairs above the similarity threshold, and produces section match "
-        "recommendations.\n"
+        f"2. **{DOCS_SECTION_MATCH}** (`{DOCS_SECTION_MATCH_SLUG}`) - Splits documents into sections and safe structured fragments, "
+        "reports strict hybrid matches plus a bounded below-threshold semantic-candidate band, and produces "
+        "preflight recommendations. Depending on configuration it compares cross-document pairs only or also "
+        "intra-document pairs.\n"
         f"3. **{DOCS_PAIR_REVIEW}** (`{DOCS_PAIR_REVIEW_SLUG}`) - Sends selected document pairs to an LLM for "
         "relationship classification, topic-level canonical/action assignments, and consolidation suggestions.\n"
     )
     lines.append("### Scoring\n")
     lines.append(
         "Each recommendation is scored 0-100 based on:\n\n"
-        "- **Embedding similarity** (0-60 base): `similarity * 60`\n"
+        "- **Combined similarity** (0-60 base): `combined_score * 60`\n"
         "- **LLM confirmation** (+15): overlap confirmed by coding stage\n"
         "- **Multiple sections** (+5 each): additional overlapping section pairs\n"
         "- **Boilerplate penalty** (-15): structural/boilerplate overlap\n\n"
@@ -1119,12 +1346,25 @@ def _append_markdown_config(lines: list[str], settings: Settings, project_root: 
     lines.append(f"- **Date**: {meta['timestamp']}")
     lines.append(f"- **dryscope version**: {__version__}")
     if meta.get("git_commit"):
-        lines.append(f"- **Git commit**: `{meta['git_commit'][:12]}`")
-    lines.append(f"- **Similarity threshold**: {settings.threshold_similarity}")
+        lines.append(f"- **Scanned project Git commit**: `{meta['git_commit'][:12]}`")
+    if meta.get("dryscope_source_revision"):
+        lines.append(f"- **dryscope source revision**: `{meta['dryscope_source_revision'][:12]}`")
+    lines.append(f"- **dryscope source type**: `{meta['dryscope_source_type']}`")
+    threshold_name = (
+        "Hybrid-similarity threshold" if settings.token_weight > 0 else "Embedding-cosine threshold"
+    )
+    lines.append(f"- **{threshold_name}**: {settings.threshold_similarity}")
+    lines.append(f"- **Semantic-candidate cosine floor**: {settings.docs_candidate_threshold}")
+    lines.append(f"- **Maximum semantic candidates**: {settings.docs_max_semantic_candidates}")
+    lines.append(f"- **Token weight**: {settings.token_weight}")
+    lines.append(f"- **Include intra-document pairs**: {settings.include_intra}")
+    lines.append(f"- **Minimum section words**: {settings.min_content_words}")
     if settings.threshold_intent > 0:
         lines.append(f"- **Intent threshold**: {settings.threshold_intent}")
     lines.append(f"- **Embedding model**: {settings.docs_embedding_model}")
-    lines.append(f"- **LLM model**: {settings.model}")
+    lines.append(f"- **LLM backend**: {settings.backend}")
+    lines.append(f"- **LLM model behavior**: {settings.llm_model_identity}")
+    lines.append(f"- **LLM timeout**: {settings.llm_timeout} seconds")
     lines.append("")
 
 
@@ -1165,7 +1405,7 @@ def render_markdown(
     _append_markdown_taxonomy(lines, result, context)
     _append_markdown_suggestions(lines, suggestions)
     _append_markdown_methodology(lines, context, settings, project_root)
-    return "\n".join(lines)
+    return _redact_machine_paths("\n".join(lines))
 
 
 def render_json(
@@ -1196,7 +1436,12 @@ def render_json(
             "documents_scanned": len(result.documents),
             "chunks_analyzed": len(result.chunks),
             "matched_section_pairs_found": len(similarity_pairs),
+            "semantic_candidates_found": len(result.candidate_overlaps),
             "section_match_recommendations_found": len(recommendations),
+            "document_intent_relationships_found": len(result.doc_pair_analyses),
+            "document_level_suggestions_found": _doc_pair_action_count(result),
+            "recommendations_count": len(recommendations) + _doc_pair_action_count(result),
+            "outcome": _report_outcome(result, similarity_pairs),
         },
         "report_structure": _report_structure(
             overview,
@@ -1207,10 +1452,7 @@ def render_json(
     }
 
     if settings is not None and project_root is not None:
-        data["metadata"] = _build_metadata(settings, project_root)
-    if recommendations:
-        data["summary"]["recommendations_count"] = len(recommendations)
-
+        data["metadata"] = _build_metadata(settings, project_root, result=result)
     if result.categories:
         data["categories"] = {
             cat.name: {
@@ -1222,6 +1464,8 @@ def render_json(
     if suggestions:
         data["refactoring_suggestions"] = suggestions
 
+    if project_root is not None:
+        data = _sanitize_report_paths(data, project_root)
     return json.dumps(data, indent=2)
 
 
@@ -1565,13 +1809,51 @@ def _inject_recommendation_slider(html: str) -> str:
 
 
 def _relative_path(path: str | None, root: Path) -> str | None:
-    """Absolute path → relative to project root. Falls back to original if not under root."""
+    """Return a report-safe path relative to the scan root."""
     if not path:
         return None
     try:
         return str(Path(path).relative_to(root))
     except ValueError:
-        return path
+        return f"<outside-scan-root>/{Path(path).name}"
+
+
+def _sanitize_report_paths(value, root: Path):
+    """Recursively remove absolute machine paths from report payloads."""
+    if isinstance(value, dict):
+        return {
+            _sanitize_report_paths(key, root)
+            if isinstance(key, str)
+            else key: _sanitize_report_paths(item, root)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_sanitize_report_paths(item, root) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_sanitize_report_paths(item, root) for item in value)
+    if isinstance(value, str):
+        if Path(value).is_absolute():
+            return _relative_path(value, root)
+        if PureWindowsPath(value).is_absolute():
+            return f"<absolute-path>/{PureWindowsPath(value).name}"
+        return _redact_machine_paths(value)
+    return value
+
+
+def _redact_machine_paths(text: str) -> str:
+    """Redact user-home paths embedded inside otherwise free-form text."""
+    import re
+
+    text = re.sub(
+        r"(?i)(?:file://)?/(?:home|users)/[^\s`\"'<>|]+",
+        "<redacted-user-path>",
+        text,
+    )
+    return re.sub(
+        r"(?i)\b[A-Z]:\\Users\\[^\s`\"'<>|]+",
+        "<redacted-user-path>",
+        text,
+    )
 
 
 def _git_commit(root: Path) -> str | None:
@@ -1590,22 +1872,114 @@ def _git_commit(root: Path) -> str | None:
     return None
 
 
-def _build_metadata(settings: Settings, project_root: Path) -> dict:
+def _git_dirty(root: Path) -> bool | None:
+    """Return whether a Git worktree is dirty, or None outside Git."""
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(root), "status", "--porcelain"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if proc.returncode == 0:
+            return bool(proc.stdout.strip())
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        pass
+    return None
+
+
+def _installation_origin() -> str | None:
+    """Read the installed distribution origin when direct_url metadata exists."""
+    try:
+        raw = importlib_metadata.distribution("dryscope").read_text("direct_url.json")
+        data = json.loads(raw) if raw else {}
+        return str(data.get("url")) if data.get("url") else None
+    except (importlib_metadata.PackageNotFoundError, json.JSONDecodeError, TypeError):
+        return None
+
+
+def _installation_source_path(origin: str | None) -> Path | None:
+    """Resolve a local direct-url origin for source revision provenance."""
+    if not origin:
+        return None
+    parsed = urlparse(origin)
+    if parsed.scheme != "file":
+        return None
+    path = Path(unquote(parsed.path)).resolve()
+    return path if path.exists() else None
+
+
+def _installation_origin_label(origin: str | None) -> str:
+    """Describe installation provenance without serializing a private URL or path."""
+    if not origin:
+        return "package-index-or-environment"
+    scheme = urlparse(origin).scheme.lower()
+    if scheme == "file":
+        return "local-source"
+    if "git" in scheme:
+        return "vcs-source"
+    return "remote-source"
+
+
+def _build_metadata(
+    settings: Settings,
+    project_root: Path,
+    *,
+    result: AnalysisResult | None = None,
+) -> dict:
     """Build metadata dict for JSON outputs."""
     from dryscope import __version__
 
+    source_root = Path(__file__).resolve().parents[2]
+    installation_origin = _installation_origin()
+    installation_source = _installation_source_path(installation_origin)
+    source_revision = _git_commit(source_root)
+    source_dirty = _git_dirty(source_root)
+    source_type = "source-checkout" if source_revision is not None else "installed-package"
+    if source_revision is None and installation_source is not None:
+        source_revision = _git_commit(installation_source)
+        source_dirty = _git_dirty(installation_source)
+    input_files = (
+        sorted(
+            filter(
+                None,
+                (_relative_path(document.path, project_root) for document in result.documents),
+            )
+        )
+        if result is not None
+        else []
+    )
     return {
         "timestamp": datetime.now(timezone.utc).isoformat(),
-        "project_root": str(project_root),
+        "project_root": ".",
         "git_commit": _git_commit(project_root),
         "dryscope_version": __version__,
+        "dryscope_source_path": None,
+        "dryscope_source_type": source_type,
+        "dryscope_source_revision": source_revision,
+        "dryscope_source_dirty": source_dirty,
+        "installation_origin": _installation_origin_label(installation_origin),
+        "input_files": input_files,
+        "stage_status": result.stage_status if result is not None else {},
         "config": {
             "threshold_similarity": settings.threshold_similarity,
+            "threshold_label": (
+                "hybrid-similarity" if settings.token_weight > 0 else "embedding-cosine"
+            ),
+            "candidate_threshold": settings.docs_candidate_threshold,
+            "max_semantic_candidates": settings.docs_max_semantic_candidates,
             "threshold_intent": settings.threshold_intent,
             "include": settings.include,
             "exclude": settings.exclude,
-            "model": settings.model,
+            "backend": settings.backend,
+            "model_override": settings.model,
+            "effective_model_identity": settings.llm_model_identity,
+            "uses_configured_default_model": settings.model is None,
             "embedding_model": settings.docs_embedding_model,
+            "token_weight": settings.token_weight,
+            "include_intra": settings.include_intra,
+            "min_words": settings.min_content_words,
+            "llm_timeout_seconds": settings.llm_timeout,
             "docs_map_facet_dimensions": settings.docs_map_facet_dimensions,
             "docs_map_facet_values": settings.docs_map_facet_values,
         },
@@ -1621,16 +1995,21 @@ def _pair_to_rich_dict(pair: OverlapPair, root: Path) -> dict:
             "heading_path": chunk.heading_path,
             "line_start": chunk.line_start,
             "line_end": chunk.line_end,
+            "kind": chunk.kind,
             "content_snippet": chunk.content[:300],
         }
 
     return {
         # Keys for deserialization (matching back to in-memory Chunk objects)
-        "chunk_a_key": f"{pair.chunk_a.document_path}:{pair.chunk_a.line_start}",
-        "chunk_b_key": f"{pair.chunk_b.document_path}:{pair.chunk_b.line_start}",
+        "chunk_a_key": f"{_relative_path(pair.chunk_a.document_path, root)}:{pair.chunk_a.line_start}",
+        "chunk_b_key": f"{_relative_path(pair.chunk_b.document_path, root)}:{pair.chunk_b.line_start}",
         "chunk_a": _chunk_dict(pair.chunk_a),
         "chunk_b": _chunk_dict(pair.chunk_b),
         "embedding_similarity": pair.embedding_similarity,
+        "embedding_cosine": pair.embedding_cosine,
+        "token_similarity": pair.token_similarity,
+        "combined_similarity": pair.combined_score,
+        "confidence": pair.confidence,
         "shared_codes": pair.shared_codes,
     }
 
@@ -1643,21 +2022,36 @@ def serialize_section_match_stage(
     similarity_pairs: list[OverlapPair],
     settings: Settings,
     project_root: Path,
+    *,
+    candidate_pairs: list[OverlapPair] | None = None,
 ) -> dict:
     """Serialize Section Match output for persistent storage."""
-    return {
+    data = {
         "track": DOCS_SECTION_MATCH,
         "track_slug": DOCS_SECTION_MATCH_SLUG,
-        "metadata": _build_metadata(settings, project_root),
+        "metadata": _build_metadata(settings, project_root, result=result),
+        "stage_status": result.stage_status.get(DOCS_SECTION_MATCH_SLUG, {}),
         "summary": {
             "documents_scanned": len(result.documents),
             "chunks_analyzed": len(result.chunks),
             "matched_section_pairs_found": len(similarity_pairs),
+            "semantic_candidates_found": len(candidate_pairs or []),
             "threshold": settings.threshold_similarity,
+            "threshold_label": (
+                "hybrid-similarity" if settings.token_weight > 0 else "embedding-cosine"
+            ),
+            "candidate_threshold": settings.docs_candidate_threshold,
+            "token_weight": settings.token_weight,
+            "include_intra": settings.include_intra,
+            "min_words": settings.min_content_words,
             "model": settings.docs_embedding_model,
         },
         "matched_section_pairs": [_pair_to_rich_dict(p, project_root) for p in similarity_pairs],
+        "semantic_candidates": [
+            _pair_to_rich_dict(p, project_root) for p in (candidate_pairs or [])
+        ],
     }
+    return _sanitize_report_paths(data, project_root)
 
 
 def serialize_doc_pair_review_stage(
@@ -1667,16 +2061,20 @@ def serialize_doc_pair_review_stage(
     settings: Settings,
     project_root: Path,
     analyses: list[DocPairAnalysis] | None = None,
+    result: AnalysisResult | None = None,
 ) -> dict:
     """Serialize Doc Pair Review output for persistent storage."""
     data: dict = {
         "track": DOCS_PAIR_REVIEW,
         "track_slug": DOCS_PAIR_REVIEW_SLUG,
-        "metadata": _build_metadata(settings, project_root),
+        "metadata": _build_metadata(settings, project_root, result=result),
+        "stage_status": (
+            result.stage_status.get(DOCS_PAIR_REVIEW_SLUG, {}) if result is not None else {}
+        ),
         "summary": {
             "codes_found": len(codes),
             "categories_found": len(categories),
-            "model": settings.model,
+            "model": settings.llm_model_identity,
         },
         "categories": {
             cat.name: {
@@ -1699,6 +2097,7 @@ def serialize_doc_pair_review_stage(
                 "doc_b_purpose": a.doc_b_purpose,
                 "relationship": a.relationship,
                 "confidence": a.confidence,
+                "analysis_error": a.analysis_error,
                 "topics": [
                     {
                         "name": t.name,
@@ -1711,7 +2110,7 @@ def serialize_doc_pair_review_stage(
             }
             for a in analyses
         ]
-    return data
+    return _sanitize_report_paths(data, project_root)
 
 
 # ─── Prioritized Recommendations ───────────────────────────────────────
@@ -1944,8 +2343,8 @@ def _build_file_pair_recommendation(
     pairs: list[OverlapPair],
     suggestion_codes: set[str],
 ) -> dict:
-    best_pair = max(pairs, key=lambda p: p.embedding_similarity or 0)
-    best_similarity = best_pair.embedding_similarity or 0
+    best_pair = max(pairs, key=lambda p: p.combined_score or 0)
+    best_similarity = best_pair.combined_score or 0
     overlap_type = _classify_overlap(best_pair)
     action = _suggest_action(overlap_type, best_pair)
     score = _recommendation_score(best_pair, pairs, suggestion_codes, overlap_type)
@@ -1958,6 +2357,10 @@ def _build_file_pair_recommendation(
         ],
         "overlap_type": overlap_type,
         "embedding_similarity": round(best_similarity, 4),
+        "embedding_cosine": round(best_pair.embedding_cosine or 0, 4),
+        "token_similarity": round(best_pair.token_similarity or 0, 4),
+        "combined_similarity": round(best_similarity, 4),
+        "confidence": best_pair.confidence,
         "suggested_action": action,
         "action_detail": _recommendation_detail(action, file_a, file_b, best_similarity),
     }
@@ -1969,7 +2372,7 @@ def _recommendation_score(
     suggestion_codes: set[str],
     overlap_type: str,
 ) -> int:
-    best_similarity = best_pair.embedding_similarity or 0
+    best_similarity = best_pair.combined_score or 0
     score = best_similarity * 60
     if best_pair.shared_codes and any(c in suggestion_codes for c in best_pair.shared_codes):
         score += 15
@@ -2044,13 +2447,17 @@ def render_final_report(
     )
 
     report: dict = {
-        "metadata": _build_metadata(settings, project_root),
+        "metadata": _build_metadata(settings, project_root, result=result),
         "summary": {
             "documents_scanned": len(result.documents),
             "chunks_analyzed": len(result.chunks),
             "matched_section_pairs_found": len(similarity_pairs),
-            "recommendations_count": len(recommendations),
+            "semantic_candidates_found": len(result.candidate_overlaps),
+            "recommendations_count": len(recommendations) + _doc_pair_action_count(result),
             "section_match_recommendations_found": len(recommendations),
+            "document_intent_relationships_found": len(result.doc_pair_analyses),
+            "document_level_suggestions_found": _doc_pair_action_count(result),
+            "outcome": _report_outcome(result, similarity_pairs),
         },
         "report_structure": _report_structure(
             overview,
@@ -2060,4 +2467,4 @@ def render_final_report(
         ),
     }
 
-    return report
+    return _sanitize_report_paths(report, project_root)

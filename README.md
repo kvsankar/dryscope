@@ -247,7 +247,13 @@ For repository development from a source checkout:
 ```bash
 uv sync --extra dev
 uv run dryscope --help
+uv run dryscope install
 ```
+
+Run `uv run dryscope install` from the intended source checkout to install or
+update the agent skill. The command force-reinstalls that checkout into the
+isolated skill venv, then renders both agent skill files. This avoids leaving a
+stale copied package behind when a checkout moves or its version changes.
 
 ## Development Quality Gates
 
@@ -390,6 +396,8 @@ keep_same_file_refactors = false
 include = ["*.md", "*.mdx", "*.rst", "*.txt", "*.adoc"]
 exclude = ["node_modules", "venv", ".git", ".dryscope", "*.lock"]
 threshold_similarity = 0.9
+candidate_threshold = 0.60
+max_semantic_candidates = 20
 threshold_intent = 0.8
 min_content_words = 15
 include_intra = false
@@ -414,10 +422,11 @@ surface = ["public", "internal", "generated", "extension", "package", "integrati
 canonicality = ["primary", "supporting", "archive", "duplicate", "index", "unknown"]
 
 [llm]
-model = "claude-haiku-4-5-20251001"
 backend = "cli"       # "cli" (claude -p), "codex-cli", "litellm" (provider API keys), or "ollama" (local Ollama)
 max_cost = 5.00
 concurrency = 8
+timeout = 300
+# model = "claude-haiku-4-5-20251001"  # Optional CLI model override
 # ollama_host = "http://localhost:11434"
 # cli_strip_api_key = true
 # cli_permission_mode = "bypassPermissions"
@@ -467,18 +476,22 @@ dryscope scan /path/to/project --verify --backend cli --llm-model claude-haiku-4
 ```toml
 [llm]
 backend = "codex-cli"
-# Use the Codex default model, or set one your Codex auth supports.
-model = "gpt-5.4"
+# model is optional; omitting it uses the Codex CLI configured default.
+timeout = 300
 ```
 
 ```bash
-dryscope scan /path/to/project --verify --backend codex-cli --llm-model gpt-5.4
+dryscope scan /path/to/project --verify --backend codex-cli
 ```
 
-`codex-cli` shells out to `codex exec`. On this machine, explicit mini models like
-`gpt-4o-mini` were rejected under ChatGPT-account Codex auth, while the default
-Codex model worked. If you want mini models through Codex CLI, use API-key login
-with `codex login --with-api-key` if your account supports them.
+`codex-cli` shells out non-interactively to `codex exec --ephemeral`. It uses
+the existing Codex CLI login, so an API key is not required when that CLI is
+already authenticated. `--llm-model` is an override, not the switch that
+enables LLM stages: when it is omitted, descriptor extraction, taxonomy
+canonicalization, Docs Map discovery, and Doc Pair Review still run with the
+Codex configured default. Reports and cache keys record this as
+`codex-cli:configured-default` because Codex does not expose the resolved model
+name to Dryscope.
 
 ### LiteLLM Providers
 
@@ -531,7 +544,9 @@ dryscope uninstall  # Remove the skill
 `dryscope install` creates a shared skill venv under
 `$XDG_DATA_HOME/dryscope/skill-venv` or `~/.local/share/dryscope/skill-venv`,
 then renders `SKILL.md` into both `~/.claude/skills/dryscope` and
-`~/.codex/skills/dryscope`.
+`~/.codex/skills/dryscope`. Re-running the command updates the venv from the
+current Dryscope source checkout (when invoked through `uv run dryscope`) or
+from the installed Dryscope release.
 
 ## CLI Reference
 
@@ -544,7 +559,7 @@ dryscope scan <path> [OPTIONS]
 | `--code / --no-code` | `--code` | Run Code Match |
 | `--docs / --no-docs` | off | Run docs tracks |
 | `--lang` | all | Filter: `python`, `go`, `java`, `js`, `jsx`, `ts`, `tsx` |
-| `-t, --threshold` | `0.90` | Similarity threshold (0.0-1.0) |
+| `-t, --threshold` | `0.90` | Strict hybrid-similarity threshold for docs when token weight is active; code similarity threshold otherwise |
 | `-f, --format` | `terminal` | Output: `terminal`, `json`, `markdown`, `html` |
 | `-m, --min-lines` | `6` | Minimum lines per code unit |
 | `--min-tokens` | `0` | Minimum unique normalized tokens |
@@ -554,7 +569,11 @@ dryscope scan <path> [OPTIONS]
 | `--exclude-type` | | Base class types to exclude (code) |
 | `--embedding-model` | `text-embedding-3-small` | Embedding model; API models use LiteLLM, local sentence-transformers such as `all-MiniLM-L6-v2` require the `dryscope[local-embeddings]` extra |
 | `--verify` | off | Run Code Review for code; run full docs tracks for docs |
-| `--llm-model` | `claude-haiku-4-5-20251001` | LLM model for Code Review and Doc Pair Review |
+| `--candidate-threshold` | `0.60` | Embedding-cosine floor for the bounded semantic-candidate band below the strict docs threshold |
+| `--max-semantic-candidates` | `20` | Maximum lower-band semantic candidates retained for preflight review |
+| `--token-weight` | `0.30` | Token-Jaccard weight in docs hybrid similarity |
+| `--llm-model` | configured default | Optional model override; CLI backends use their configured default when omitted |
+| `--llm-timeout` | `300` | Per-call LLM backend timeout in seconds |
 | `--stage` | `docs-section-match` | Docs stage: `docs-section-match` runs Section Match; `docs-report-pack` adds Docs Map and Doc Pair Review |
 | `--resume` | off | Resume from latest docs run |
 | `--intra` | off | Include intra-document overlap (docs) |
@@ -616,6 +635,13 @@ For machine-readable output contracts, see
 
 At the top level, JSON keeps only run metadata, a compact summary, and the
 ordered `report_structure`; detailed payloads live under their owning sections.
+The metadata records exact input files, Dryscope version/source revision,
+backend and effective model identity, embedding/scoring options, timeout, and
+stage completion or degradation. The corpus boundary is deliberately
+prominent: findings do not apply to files outside the listed inputs.
+Repository and document paths are relative to the scan root. Local installation
+URLs and user-home paths are never serialized; provenance records a source type
+and revision instead.
 
 Each detailed list is owned by one section. For example, topic documents live
 inside Docs Map, consolidation documents live inside Docs Map Clusters, and
@@ -640,9 +666,9 @@ affecting Code Review context.
 7. **Escalate** _(with `--verify`)_ — deterministic policy keeps all `review` findings and only higher-value `refactor` findings
 
 ### Docs Pipeline
-1. **Chunk** — split documents into heading-based sections
+1. **Chunk** — split documents into heading-based sections, with bounded row/item/window fragments for oversized structured Markdown sections
 2. **Embed** — API embeddings through LiteLLM or local sentence-transformers embeddings
-3. **Section Match** — hybrid similarity finds cross-document section overlap
+3. **Section Match** — strict hybrid similarity finds stronger repeated-section matches while a bounded cosine-based semantic-candidate band preserves useful preflight leads
 4. **Docs Map descriptors** _(full stage)_ — LLM profiles each document with title, summary, aboutness labels, reader intents, role, audience, lifecycle, content type, surface, and canonicality
 5. **Docs Map taxonomy** _(full stage)_ — deterministic matching plus optional LLM canonicalization turns raw aboutness/intent labels into a corpus-level canonical label taxonomy
 6. **Docs Map discovery** _(full stage)_ — LLM builds a candidate topic tree, facets, diagnostics, and consolidation clusters
@@ -660,8 +686,10 @@ For code:
 For docs:
 - a Docs Map section showing topic groups, facets, and diagnostics
 - Docs Map clusters from canonical labels shared by multiple documents
-- Section Match recommendations only when section-level overlap exists
-- 0 Section Match recommendations on clean negative repos, while Docs Map may still report organizational signals
+- all score components for each Section Match pair: embedding cosine, token similarity, and combined score
+- Section Match recommendations only for strict section-level matches, with lower-band semantic candidates clearly labeled as leads rather than duplicate findings
+- explicit document-intent relationships and Doc Pair Review suggestions even when no section pair exceeded the strict threshold
+- a clean-negative outcome only when every relevant stage completed and no section, intent, IA, or recommendation signal was found; zero strict pairs alone is reported as “none above threshold,” not “no overlap”
 - a few grouped Section Match recommendations on docs-heavy repos
 - one family recommendation for many near-identical sibling docs, rather than many pairwise duplicates
 

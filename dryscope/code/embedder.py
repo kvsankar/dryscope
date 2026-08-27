@@ -27,10 +27,15 @@ def is_api_embedding_model(model_name: str) -> bool:
 
 def _has_local_huggingface_cache(model_name: str) -> bool:
     """Return True if the sentence-transformer model already exists in HF cache."""
-    safe_name = model_name.replace("/", "--")
-    cache_dir = Path.home() / ".cache" / "huggingface" / "hub" / f"models--{safe_name}"
-    snapshots = cache_dir / "snapshots"
-    return snapshots.exists() and any(snapshots.iterdir())
+    cache_root = Path.home() / ".cache" / "huggingface" / "hub"
+    model_ids = [model_name]
+    if "/" not in model_name:
+        model_ids.append(f"sentence-transformers/{model_name}")
+    return any(
+        (snapshots := cache_root / f"models--{model_id.replace('/', '--')}" / "snapshots").exists()
+        and any(snapshots.iterdir())
+        for model_id in model_ids
+    )
 
 
 class Embedder:

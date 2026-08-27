@@ -8,13 +8,14 @@ import re
 import sys
 from collections import Counter, defaultdict
 from collections.abc import Iterable
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 from pathlib import Path
+from typing import Any
 
 from dryscope.cache import Cache
 from dryscope.config import DEFAULT_DOCS_MAP_FACET_DIMENSIONS, DEFAULT_DOCS_MAP_FACET_VALUES
+from dryscope.llm_backend import model_identity
 from dryscope.terminology import DOCS_MAP
 
 _TOPIC_STOPWORDS = {
@@ -92,6 +93,7 @@ class TopicTaxonomy:
     doc_topics: dict[str, list[str]]
     co_occurrence: list[dict]
     method: str = "deterministic"
+    stage_status: dict = field(default_factory=lambda: {"status": "completed", "fallback": None})
 
     def to_dict(self) -> dict:
         """Serialize the taxonomy for reports and run-store stages."""
@@ -130,6 +132,7 @@ class TopicTaxonomy:
             "doc_topics": dict(sorted(self.doc_topics.items())),
             "co_occurrence": self.co_occurrence,
             "method": self.method,
+            "stage_status": self.stage_status,
         }
 
 
@@ -364,7 +367,7 @@ def _parse_json_object_response(text: str) -> dict:
 def _cluster_groups_with_llm(
     groups: list[dict],
     *,
-    model: str,
+    model: str | None,
     cache: Cache | None,
     backend: str,
     batch_size: int,
@@ -374,6 +377,8 @@ def _cluster_groups_with_llm(
     cli_permission_mode: str | None,
     cli_dangerously_skip_permissions: bool,
     concurrency: int = 1,
+    timeout: int = 300,
+    status: dict | None = None,
 ) -> dict[str, str]:
     """Cluster preliminary topic groups into canonical topic names via LLM."""
     from dryscope.docs.coding import call_llm_cached
@@ -437,7 +442,7 @@ Respond with ONLY valid JSON:
 
         cache_key = hashlib.sha256(
             json.dumps(payload, sort_keys=True).encode()
-            + model.encode()
+            + model_identity(backend, model).encode()
             + TAXONOMY_LLM_VERSION.encode()
         ).hexdigest()
         try:
@@ -452,9 +457,22 @@ Respond with ONLY valid JSON:
                 cli_strip_api_key=cli_strip_api_key,
                 cli_permission_mode=cli_permission_mode,
                 cli_dangerously_skip_permissions=cli_dangerously_skip_permissions,
+                timeout=timeout,
             )
             batch_mapping = _parse_mapping_response(text)
-        except Exception:
+        except Exception as exc:
+            if status is not None:
+                status.update(
+                    {
+                        "status": "degraded",
+                        "exception_category": type(exc).__name__,
+                        "fallback": "deterministic labels for failed taxonomy batches",
+                        "unavailable_conclusions": [
+                            "some synonym merges may be missing",
+                            "canonical topic counts may be inflated",
+                        ],
+                    }
+                )
             print(
                 f"warning: topic canonicalization batch {batch_start // batch_size + 1} "
                 "failed; falling back to deterministic labels for that batch",
@@ -466,29 +484,22 @@ Respond with ONLY valid JSON:
             for group in batch
         }
 
-    seed_existing = [group["raw"] for group in groups[:existing_limit]]
-    if concurrency > 1 and len(batches) > 1:
-        with ThreadPoolExecutor(max_workers=concurrency) as executor:
-            futures = {
-                executor.submit(_map_batch, batch_start, batch, seed_existing): batch_start
-                for batch_start, batch in batches
-            }
-            for future in as_completed(futures):
-                batch_mapping = future.result()
-                group_to_canonical.update(batch_mapping)
-                canonical_counts.update(batch_mapping.values())
-    else:
-        for batch_start, batch in batches:
-            existing = [
-                name
-                for name, _count in sorted(
-                    canonical_counts.items(),
-                    key=lambda item: (-item[1], item[0]),
-                )[:existing_limit]
-            ]
-            batch_mapping = _map_batch(batch_start, batch, existing)
-            group_to_canonical.update(batch_mapping)
-            canonical_counts.update(batch_mapping.values())
+    # Canonicalization is deliberately correctness-first and sequential. Giving
+    # every parallel batch all raw labels as "existing canonicals" encouraged
+    # identity mappings and made results depend on concurrency. Later batches
+    # now see only canonical names produced by earlier batches.
+    _ = concurrency
+    for batch_start, batch in batches:
+        existing = [
+            name
+            for name, _count in sorted(
+                canonical_counts.items(),
+                key=lambda item: (-item[1], item[0]),
+            )[:existing_limit]
+        ]
+        batch_mapping = _map_batch(batch_start, batch, existing)
+        group_to_canonical.update(batch_mapping)
+        canonical_counts.update(batch_mapping.values())
 
     reconciled = _reconcile_canonical_names(group_to_canonical.values())
     return {
@@ -538,6 +549,7 @@ def build_canonical_taxonomy(
     fuzzy_threshold: float = 0.86,
     max_co_occurrence: int = 30,
     llm_model: str | None = None,
+    llm_enabled: bool | None = None,
     cache: Cache | None = None,
     backend: str = "litellm",
     llm_batch_size: int = 100,
@@ -548,6 +560,7 @@ def build_canonical_taxonomy(
     cli_permission_mode: str | None = None,
     cli_dangerously_skip_permissions: bool = False,
     llm_concurrency: int = 1,
+    llm_timeout: int = 300,
 ) -> TopicTaxonomy:
     """Normalize raw per-document topics into a corpus-level canonical taxonomy.
 
@@ -562,7 +575,8 @@ def build_canonical_taxonomy(
         fuzzy_threshold,
     )
 
-    if not llm_model:
+    use_llm = llm_enabled if llm_enabled is not None else llm_model is not None
+    if not use_llm:
         return _build_taxonomy_from_mapping(
             doc_topics,
             raw_to_preliminary,
@@ -576,6 +590,7 @@ def build_canonical_taxonomy(
     llm_groups = [
         group for group in groups if int(group.get("document_count") or 0) >= llm_min_document_count
     ]
+    taxonomy_status = {"status": "completed", "fallback": None}
     group_to_canonical = _cluster_groups_with_llm(
         llm_groups,
         model=llm_model,
@@ -588,12 +603,14 @@ def build_canonical_taxonomy(
         cli_permission_mode=cli_permission_mode,
         cli_dangerously_skip_permissions=cli_dangerously_skip_permissions,
         concurrency=llm_concurrency,
+        timeout=llm_timeout,
+        status=taxonomy_status,
     )
     raw_to_canonical = {
         raw: group_to_canonical.get(preliminary, preliminary)
         for raw, preliminary in raw_to_preliminary.items()
     }
-    return _build_taxonomy_from_mapping(
+    taxonomy = _build_taxonomy_from_mapping(
         doc_topics,
         raw_to_canonical,
         raw_counts,
@@ -601,6 +618,8 @@ def build_canonical_taxonomy(
         max_co_occurrence,
         method="llm",
     )
+    taxonomy.stage_status = taxonomy_status
+    return taxonomy
 
 
 def _docs_map_topic_cluster_payload(
@@ -786,6 +805,7 @@ def build_docs_map(
     facet_dimensions: list[str] | None = None,
     facet_values: dict[str, list[str]] | None = None,
     llm_model: str | None = None,
+    llm_enabled: bool | None = None,
     cache: Cache | None = None,
     backend: str = "litellm",
     max_topic_coverage_clusters: int = 160,
@@ -795,6 +815,7 @@ def build_docs_map(
     cli_strip_api_key: bool = True,
     cli_permission_mode: str | None = None,
     cli_dangerously_skip_permissions: bool = False,
+    llm_timeout: int = 300,
 ) -> dict:
     """Infer a generic Docs Map view from topic evidence.
 
@@ -838,8 +859,15 @@ def build_docs_map(
         },
     }
 
-    if not llm_model:
-        return _fallback_docs_map(taxonomy, method="deterministic")
+    use_llm = llm_enabled if llm_enabled is not None else llm_model is not None
+    if not use_llm:
+        fallback = _fallback_docs_map(taxonomy, method="deterministic")
+        fallback["stage_status"] = {
+            "status": "skipped",
+            "fallback": "deterministic vocabulary grouping",
+            "unavailable_conclusions": ["LLM-synthesized IA groups, facets, and diagnostics"],
+        }
+        return fallback
 
     from dryscope.docs.coding import call_llm_cached
 
@@ -917,9 +945,10 @@ Respond with ONLY valid JSON:
 
     cache_key = hashlib.sha256(
         json.dumps(payload, sort_keys=True).encode()
-        + llm_model.encode()
+        + model_identity(backend, llm_model).encode()
         + DOCS_MAP_LLM_VERSION.encode()
     ).hexdigest()
+    ia: dict[str, Any]
     try:
         text = call_llm_cached(
             llm_model,
@@ -932,6 +961,7 @@ Respond with ONLY valid JSON:
             cli_strip_api_key=cli_strip_api_key,
             cli_permission_mode=cli_permission_mode,
             cli_dangerously_skip_permissions=cli_dangerously_skip_permissions,
+            timeout=llm_timeout,
         )
         ia = _parse_json_object_response(text)
     except Exception as exc:
@@ -941,10 +971,34 @@ Respond with ONLY valid JSON:
             f"({type(exc).__name__}: {exc})",
             file=sys.stderr,
         )
-        ia = {}
+        ia = {
+            "_stage_error": {
+                "status": "degraded",
+                "exception_category": type(exc).__name__,
+                "exception_message": str(exc)[:500],
+                "fallback": "deterministic vocabulary grouping",
+                "unavailable_conclusions": [
+                    "LLM-synthesized IA groups",
+                    "LLM-synthesized facets",
+                    "LLM-synthesized IA diagnostics",
+                ],
+            }
+        }
 
-    if not ia:
-        return _fallback_docs_map(taxonomy, method="deterministic-fallback")
+    if not ia or "_stage_error" in ia:
+        stage_error = ia.get("_stage_error") or {
+            "status": "degraded",
+            "exception_category": "InvalidLLMResponse",
+            "fallback": "deterministic vocabulary grouping",
+            "unavailable_conclusions": [
+                "LLM-synthesized IA groups",
+                "LLM-synthesized facets",
+                "LLM-synthesized IA diagnostics",
+            ],
+        }
+        fallback = _fallback_docs_map(taxonomy, method="deterministic-fallback")
+        fallback["stage_status"] = stage_error
+        return fallback
 
     ia.setdefault("method", "llm")
     ia.setdefault("topic_tree", [])
@@ -956,4 +1010,5 @@ Respond with ONLY valid JSON:
         "single_document_topics_sent": len(single_doc_topics),
         "documents_sent": len(documents),
     }
+    ia["stage_status"] = {"status": "completed", "fallback": None}
     return ia

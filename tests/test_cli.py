@@ -2,12 +2,13 @@
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from click.testing import CliRunner
 
 from dryscope import __version__
-from dryscope.cli import main
+from dryscope.cli import _find_install_source, main
 from dryscope.code.parser import CodeUnit
 from dryscope.code.reporter import Cluster, Tier
 from dryscope.docs.models import AnalysisResult, Chunk, OverlapPair
@@ -238,6 +239,66 @@ class TestVersion:
         result = runner.invoke(main, ["--version"])
         assert result.exit_code == 0
         assert __version__ in result.output
+
+
+class TestInstallSource:
+    def test_ignores_unrelated_cwd_project(self, tmp_path, monkeypatch):
+        (tmp_path / "pyproject.toml").write_text('[project]\nname = "other-project"\n')
+        monkeypatch.chdir(tmp_path)
+
+        source = Path(_find_install_source())
+
+        assert source.name == "dryscope"
+        assert (source / "dryscope" / "cli.py").is_file()
+
+    def test_prefers_intended_dryscope_checkout(self, tmp_path, monkeypatch):
+        checkout = tmp_path / "dryscope-source"
+        (checkout / "dryscope").mkdir(parents=True)
+        (checkout / "pyproject.toml").write_text('[project]\nname = "dryscope"\n')
+        (checkout / "dryscope" / "cli.py").write_text("# source marker\n")
+        monkeypatch.chdir(checkout)
+
+        assert _find_install_source() == str(checkout)
+
+    def test_install_reinstalls_only_dryscope(self, runner, tmp_path, monkeypatch):
+        import dryscope.cli as cli
+
+        template = tmp_path / "SKILL.md"
+        template.write_text("binary={{DRYSCOPE_BIN}}\n")
+        venv = tmp_path / "skill-venv"
+        (venv / "bin").mkdir(parents=True)
+        (venv / "bin" / "python").write_text("")
+        destinations = (tmp_path / "claude", tmp_path / "codex")
+        commands = []
+
+        monkeypatch.setattr(cli, "SKILL_TEMPLATE", template)
+        monkeypatch.setattr(cli, "SHARED_SKILL_VENV", venv)
+        monkeypatch.setattr(cli, "SKILL_DESTS", destinations)
+        monkeypatch.setattr(cli, "_find_install_source", lambda: "/source/dryscope")
+        monkeypatch.setattr(
+            cli.subprocess,
+            "run",
+            lambda command, **_kwargs: commands.append(command) or SimpleNamespace(returncode=0),
+        )
+
+        result = runner.invoke(main, ["install"])
+
+        assert result.exit_code == 0
+        assert commands == [
+            [
+                "uv",
+                "pip",
+                "install",
+                "--reinstall-package",
+                "dryscope",
+                "--python",
+                str(venv / "bin" / "python"),
+                "/source/dryscope",
+            ]
+        ]
+        assert (
+            "binary=" + str(venv / "bin" / "dryscope") in (destinations[1] / "SKILL.md").read_text()
+        )
 
 
 class TestReportsClean:

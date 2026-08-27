@@ -13,7 +13,7 @@ embeddings, and clusters similar items together. User-facing outputs use these t
 - **Code Match** (`code-match`): structural duplicate-code candidates
 - **Code Review** (`code-review`): optional LLM/policy filtering of Code Match findings
 - **Docs Map** (`docs-map`): document descriptors, canonical labels, topic tree, facets, diagnostics, and consolidation clusters
-- **Section Match** (`docs-section-match`): heading-based section comparison and concrete section-level recommendations
+- **Section Match** (`docs-section-match`): heading/structured-fragment comparison, bounded semantic candidates, and concrete section-level recommendations
 - **Doc Pair Review** (`docs-pair-review`): optional LLM review of selected related document pairs
 
 The intended use is narrowing:
@@ -53,7 +53,7 @@ Progressive help is available from the installed binary:
 | `--code` | on | Run Code Match |
 | `--docs` | off | Run docs tracks |
 | `--lang` | auto | Language filter: `python`, `go`, `java`, `js`, `jsx`, `ts`, `tsx` |
-| `-t, --threshold` | `0.90` | Similarity threshold (0.0-1.0). Higher = stricter. |
+| `-t, --threshold` | `0.90` | Strict hybrid-similarity threshold for docs when token weighting is active. Higher = stricter. |
 | `-m, --min-lines` | `6` | Minimum lines for a code unit to be considered |
 | `--min-tokens` | `0` | Minimum unique normalized tokens (filters trivial units) |
 | `--max-cluster-size` | `15` | Drop clusters larger than this |
@@ -63,12 +63,16 @@ Progressive help is available from the installed binary:
 | `-f, --format` | `terminal` | Output format: `terminal`, `json`, `markdown`, or `html` |
 | `--embedding-model` | `text-embedding-3-small` | Embedding model; API models use LiteLLM, local sentence-transformers require the `dryscope[local-embeddings]` extra |
 | `--verify` | off | Run Code Review for code; run full docs tracks for docs |
-| `--llm-model` | `claude-haiku-4-5-20251001` | LLM model for verification |
+| `--candidate-threshold` | `0.60` | Embedding-cosine floor for the bounded semantic-candidate band |
+| `--max-semantic-candidates` | `20` | Maximum lower-band docs candidates retained |
+| `--token-weight` | `0.30` | Token-Jaccard weight in docs hybrid similarity |
+| `--llm-model` | configured default | Optional model override; CLI backends use their configured default when omitted |
+| `--llm-timeout` | `300` | Per-call LLM backend timeout in seconds |
 | `--llm-max-doc-pairs` | config | Maximum document pairs for Doc Pair Review |
 
 ### Recommended usage
 
-**Prefer `--verify` for higher-signal results.** Without it, the tool reports all structurally similar items — including framework boilerplate and coincidental matches. The `--verify` flag uses an LLM (default: claude-haiku-4-5) to label each cluster as `refactor`, `review`, or `noise`, then applies a deterministic policy so low-value `refactor` findings do not automatically survive.
+**Prefer `--verify` for higher-signal results.** Without it, the tool reports all structurally similar items — including framework boilerplate and coincidental matches. The `--verify` flag uses the configured LLM backend to label code clusters as `refactor`, `review`, or `noise`, then applies a deterministic policy so low-value `refactor` findings do not automatically survive.
 
 For documentation repos, `--docs --verify` now also:
 - extracts rich document descriptors across the selected docs corpus
@@ -108,6 +112,11 @@ Backend options:
 - `backend = "litellm"` uses provider API keys such as `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`
 - `backend = "ollama"` uses the local Ollama API at `OLLAMA_HOST` or `http://localhost:11434`
 
+For `codex-cli`, omit `--llm-model` to use the authenticated Codex CLI's
+configured default. Dryscope still runs every enabled LLM stage and records the
+effective identity as `codex-cli:configured-default`; no provider API key is
+needed when Codex CLI is already logged in.
+
 Saved report cleanup:
 - `{{DRYSCOPE_BIN}} reports clean /path/to/project --keep-last 10` previews deleting all but the newest 10 saved runs
 - `{{DRYSCOPE_BIN}} reports clean /path/to/project --keep-since 2026-04-01` previews deleting runs before the cutoff date
@@ -139,7 +148,7 @@ Saved report cleanup:
 
 ### Docs tracks
 - **Docs Map**: Corpus-level topic groups, facets, diagnostics, and consolidation clusters. Use this to understand how docs should be organized.
-- **Section Match**: Matched section pairs and section-level recommendations. Use this to find repeated text that should be consolidated or cross-referenced.
+- **Section Match**: Strict matched pairs expose embedding cosine, token similarity, and combined score. A separate bounded `semantic-candidate` band preserves broader preflight leads without calling them duplicates.
 - **Doc Pair Review**: Optional deeper LLM analysis of related document pairs when enabled and within the configured cost cap.
 
 ## What it detects
@@ -168,4 +177,10 @@ Summarize the findings for the user, highlighting:
 4. **Section Match findings**: concrete repeated sections and recommendations
 5. **Legitimate patterns** that look similar but serve different purposes
 
-If the repo is docs-heavy and Section Match returns no recommendations, still check whether Docs Map found consolidation clusters or diagnostics. A clean negative result is a useful outcome, not a failure.
+Always state the exact scanned file boundary. If Section Match has zero strict
+pairs, say “none above the configured threshold,” then check semantic
+candidates, document-intent relationships, Docs Map findings, Doc Pair Review
+suggestions, and stage status. Do not call the run clean when a stage degraded
+or conclusions are unavailable. A genuine clean-negative result requires all
+relevant stages to complete with no signal and is still preflight evidence, not
+proof that no overlap exists.

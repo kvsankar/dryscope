@@ -36,13 +36,13 @@ Source Files (.py, .ts, .tsx)
 Documentation Files (.md, .mdx, .rst, .txt, .adoc)
     |
     v
-[Chunker] ──> Heading-based sections with line tracking
+[Chunker] ──> Heading sections + bounded structured fragments with line tracking
     |
     v
 [Embedder] ──> Vector embeddings per section (API embeddings or local sentence-transformers)
     |
     v
-[Section Match] ──> Cross-document section pairs above threshold
+[Section Match] ──> Strict hybrid matches + bounded semantic candidates
     |                              (docs-section-match)
     v
 [Section Match Recommendations] ──> Ranked section-level consolidation/link suggestions
@@ -77,7 +77,10 @@ The docs report has named tracks:
 3. **Doc Pair Review** (`docs-pair-review`) — optional LLM review of selected related document pairs.
 
 Docs Map is corpus-level and helps decide how to organize documentation. Section
-Match is section-level and points at concrete repeated text.
+Match is section-level and points at concrete repeated text. A strict zero-pair
+result means only that no section exceeded the configured threshold; it does
+not erase document-intent relationships or prove that the corpus has no
+overlap.
 
 ## Core Components
 
@@ -128,6 +131,9 @@ Match is section-level and points at concrete repeated text.
 
 **Chunker** (`docs/chunker.py`)
 - Heading-based Markdown/MDX chunking via mistune AST
+- Secondary table-row and list-item fragments for sufficiently large structured sections
+- Bounded heading-context windows for oversized unstructured sections
+- Parent path, heading path, source line range, fragment kind, and parent identity are retained
 - Plaintext paragraph chunking with line tracking
 - File discovery via git ls-files or recursive glob
 - Boilerplate heading detection across document corpus
@@ -135,6 +141,8 @@ Match is section-level and points at concrete repeated text.
 **Embeddings** (`docs/embeddings.py`)
 - LiteLLM for API embedding models and optional sentence-transformers for local models
 - Hybrid similarity: `(1 - token_weight) * cosine + token_weight * Jaccard`
+- Exposes embedding cosine, token Jaccard, and combined score separately
+- Uses a strict combined-score band plus a bounded lower cosine-based semantic-candidate band
 - Cross-document and intra-document pair finding
 
 **Topics** (`docs/topics.py`)
@@ -149,6 +157,7 @@ Match is section-level and points at concrete repeated text.
 - Canonical label taxonomy with document coverage, aliases, and co-occurrence
 - Docs Map discovery: topic tree, facets, diagnostics, and consolidation clusters
 - Facet seeds are configurable under `[docs.map]`; they guide generic dimensions but do not impose a product-specific taxonomy
+- Correctness-first canonicalization lets each label batch see only canonical topics produced by earlier batches, so requesting parallel concurrency cannot seed identity mappings with every raw label
 
 **Coding** (`docs/coding.py`)
 - Doc Pair Review with relationship classification
@@ -162,6 +171,8 @@ Match is section-level and points at concrete repeated text.
 - Cost estimation with model-specific pricing
 - Run persistence via RunStore, with cleanup support for keeping the newest N runs or runs newer than a date cutoff
 - Progress tracking with rich console
+- Separates backend enablement, optional model override, and reproducible model identity; Codex CLI stages remain enabled when no model override is supplied
+- Carries explicit stage status, exception category, fallback, and unavailable conclusions through saved artifacts and final reports
 
 **Report Generation** (`docs/report.py`)
 - Produces matching markdown, HTML, and JSON report structures
@@ -170,6 +181,9 @@ Match is section-level and points at concrete repeated text.
 - JSON uses the same ordered `report_structure` section list and avoids duplicate top-level IA/taxonomy payloads
 - Builds prioritized Section Match recommendations from overlap pairs
 - Separates Docs Map clusters from Section Match recommendations so the report does not mix corpus organization signals with repeated-section findings
+- Aggregates strict matches, semantic candidates, document-intent relationships, and Doc Pair Review suggestions without allowing an earlier zero to conceal a later finding
+- Makes exact scan scope and run provenance visible in terminal, Markdown, HTML, JSON, and stage artifacts
+- Reserves `clean-negative` for fully completed runs with no signal; degraded or skipped conclusions are reported as unavailable
 
 ### Shared (`dryscope/`)
 
@@ -198,7 +212,8 @@ Match is section-level and points at concrete repeated text.
 - Provides cleanup primitives for `dryscope reports clean`, including keep-newest, keep-since, keep-days, dry-run, and latest-symlink repair after deletion
 
 **LLM Backend** (`llm_backend.py`)
-- Abstraction over litellm API and `claude -p` CLI backend
+- Abstraction over LiteLLM, Ollama, `claude -p`, and non-interactive `codex exec --ephemeral`
+- Optional CLI model override, stable cache/model identity, and configurable per-call timeout
 - Configurable via `.dryscope.toml` `[llm]` section
 
 **Unified Reporter** (`unified_report.py`)

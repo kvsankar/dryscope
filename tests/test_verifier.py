@@ -62,6 +62,7 @@ def test_run_code_scan_passes_backend_to_verifier(monkeypatch):
         cli_strip_api_key=True,
         cli_permission_mode=None,
         cli_dangerously_skip_permissions=False,
+        timeout=300,
     ):
         captured["max_workers"] = max_workers
         captured["backend"] = backend
@@ -69,6 +70,7 @@ def test_run_code_scan_passes_backend_to_verifier(monkeypatch):
         captured["cli_strip_api_key"] = cli_strip_api_key
         captured["cli_permission_mode"] = cli_permission_mode
         captured["cli_dangerously_skip_permissions"] = cli_dangerously_skip_permissions
+        captured["timeout"] = timeout
         return [(cluster, "review", "ok") for cluster in clusters]
 
     monkeypatch.setattr(verifier, "verify_clusters", fake_verify)
@@ -97,6 +99,7 @@ def test_run_code_scan_passes_backend_to_verifier(monkeypatch):
     assert captured["cli_strip_api_key"] is True
     assert captured["cli_permission_mode"] == "bypassPermissions"
     assert captured["cli_dangerously_skip_permissions"] is True
+    assert captured["timeout"] == 300
 
 
 def test_run_code_scan_applies_escalation_policy(monkeypatch):
@@ -152,6 +155,7 @@ def test_run_code_scan_applies_escalation_policy(monkeypatch):
         cli_strip_api_key=True,
         cli_permission_mode=None,
         cli_dangerously_skip_permissions=False,
+        timeout=300,
     ):
         return [
             (clusters[0], "refactor", "low-priority same-file helper"),

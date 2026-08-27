@@ -22,6 +22,28 @@ from dryscope.terminology import (
 )
 
 
+def _rounded_score(value: float | None) -> float | None:
+    return round(value, 4) if value is not None else None
+
+
+def _docs_score_fields(pair: OverlapPair) -> dict:
+    return {
+        "similarity": _rounded_score(pair.embedding_similarity),
+        "embedding_cosine": _rounded_score(pair.embedding_cosine),
+        "token_similarity": _rounded_score(pair.token_similarity),
+        "combined_similarity": _rounded_score(pair.combined_score),
+        "confidence": pair.confidence,
+    }
+
+
+def _docs_score_text(pair: OverlapPair) -> str:
+    scores = (pair.embedding_cosine, pair.token_similarity, pair.combined_score)
+    if any(score is None for score in scores):
+        return "score unavailable"
+    cosine, token, combined = scores
+    return f"cosine={cosine:.4f}, token={token:.4f}, combined={combined:.4f}"
+
+
 def _code_cluster_to_finding(cluster: Cluster, finding_id: int) -> dict:
     """Convert a code Cluster to a unified finding dict."""
     d = cluster.to_dict()
@@ -69,9 +91,7 @@ def _doc_pair_to_finding(
         "mode": "docs",
         "track": DOCS_PAIR_REVIEW if analysis is not None else DOCS_SECTION_MATCH,
         "track_slug": DOCS_PAIR_REVIEW_SLUG if analysis is not None else DOCS_SECTION_MATCH_SLUG,
-        "similarity": round(pair.embedding_similarity, 4)
-        if pair.embedding_similarity is not None
-        else None,
+        **_docs_score_fields(pair),
         "files": sorted({pair.chunk_a.document_path, pair.chunk_b.document_path}),
         "sections": sections,
         "verdict": verdict,
@@ -169,15 +189,14 @@ def format_unified_terminal(
         title = DOCS_PAIR_REVIEW if doc_analyses else DOCS_SECTION_MATCH
         parts.append(f"=== {title} ===\n")
         if not doc_pairs:
-            parts.append("No matched documentation sections found.")
+            parts.append(
+                "No documentation section pairs were above the configured threshold; "
+                "this does not establish that the corpus has no overlap."
+            )
         else:
             parts.append(f"Found {len(doc_pairs)} matched section pair(s).\n")
             for pair in doc_pairs:
-                sim = (
-                    f"{pair.embedding_similarity:.4f}"
-                    if pair.embedding_similarity is not None
-                    else "N/A"
-                )
+                sim = _docs_score_text(pair)
                 file_a = pair.chunk_a.document_path
                 file_b = pair.chunk_b.document_path
                 heading_a = (

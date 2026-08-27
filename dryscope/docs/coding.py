@@ -17,9 +17,14 @@ from dryscope.docs.models import (
     OverlapPair,
     TopicAnalysis,
 )
-from dryscope.llm_backend import completion
+from dryscope.llm_backend import completion, model_identity
 
 DOC_PAIR_VERSION = "docpair_v2"
+
+
+def _doc_pair_key(doc_a: str, doc_b: str) -> str:
+    """Return a resume key that does not serialize machine-specific paths."""
+    return hashlib.sha256(f"{doc_a}\0{doc_b}".encode()).hexdigest()
 
 
 def _strip_code_fences(text: str) -> str:
@@ -31,7 +36,7 @@ def _strip_code_fences(text: str) -> str:
 
 
 def call_llm_cached(
-    model: str,
+    model: str | None,
     prompt: str,
     cache: Cache | None,
     cache_key: str,
@@ -41,10 +46,12 @@ def call_llm_cached(
     cli_strip_api_key: bool = True,
     cli_permission_mode: str | None = None,
     cli_dangerously_skip_permissions: bool = False,
+    timeout: int = 300,
 ) -> str:
     """Call LLM with caching."""
+    cache_model = model_identity(backend, model)
     if cache is not None:
-        cached = cache.get_coding(cache_key, model, prompt_version)
+        cached = cache.get_coding(cache_key, cache_model, prompt_version)
         if cached is not None:
             return cached
 
@@ -56,10 +63,11 @@ def call_llm_cached(
         cli_strip_api_key=cli_strip_api_key,
         cli_permission_mode=cli_permission_mode,
         cli_dangerously_skip_permissions=cli_dangerously_skip_permissions,
+        timeout=timeout,
     )
 
     if cache is not None:
-        cache.set_coding(cache_key, model, prompt_version, text)
+        cache.set_coding(cache_key, cache_model, prompt_version, text)
 
     return text
 
@@ -85,8 +93,14 @@ def _build_overlap_evidence(pairs: list[OverlapPair]) -> str:
         heading_a = " > ".join(pair.chunk_a.heading_path) or "(no heading)"
         heading_b = " > ".join(pair.chunk_b.heading_path) or "(no heading)"
         scores = ""
-        if pair.embedding_similarity is not None:
-            scores = f"similarity={pair.embedding_similarity:.3f}"
+        if pair.combined_score is not None:
+            scores = (
+                f"embedding_cosine={pair.embedding_cosine:.3f}, "
+                f"token_similarity={pair.token_similarity:.3f}, "
+                f"combined_score={pair.combined_score:.3f}"
+                if pair.embedding_cosine is not None and pair.token_similarity is not None
+                else f"combined_score={pair.combined_score:.3f}"
+            )
         lines.append(f"{i}. [{scores}] A: {heading_a} <-> B: {heading_b}")
     return "\n".join(lines) if lines else "(no evidence)"
 
@@ -140,7 +154,7 @@ def analyze_doc_pair(
     doc_a_chunks: list[Chunk],
     doc_b_chunks: list[Chunk],
     overlap_pairs: list[OverlapPair],
-    model: str,
+    model: str | None,
     cache: Cache | None,
     backend: str = "litellm",
     intent_evidence: list[dict] | None = None,
@@ -148,6 +162,7 @@ def analyze_doc_pair(
     cli_strip_api_key: bool = True,
     cli_permission_mode: str | None = None,
     cli_dangerously_skip_permissions: bool = False,
+    timeout: int = 300,
 ) -> dict:
     """Analyze overlap between two documents via a single LLM call.
 
@@ -250,6 +265,7 @@ Guidelines:
             cli_strip_api_key=cli_strip_api_key,
             cli_permission_mode=cli_permission_mode,
             cli_dangerously_skip_permissions=cli_dangerously_skip_permissions,
+            timeout=timeout,
         )
     except Exception as exc:
         return {
@@ -264,7 +280,7 @@ Guidelines:
     try:
         text = _strip_code_fences(text)
         return json.loads(text)
-    except (json.JSONDecodeError, IndexError, ValueError):
+    except (json.JSONDecodeError, IndexError, ValueError) as exc:
         # Fallback: return a minimal valid result
         return {
             "doc_a_purpose": "unknown",
@@ -272,6 +288,7 @@ Guidelines:
             "relationship": "complementary",
             "topics": [],
             "confidence": "low",
+            "analysis_error": f"{type(exc).__name__}: {exc}"[:500],
         }
 
 
@@ -398,13 +415,14 @@ def _build_analysis_from_raw(
         topics=topics,
         confidence=raw.get("confidence", "medium"),
         overlap_pairs=pairs,
+        analysis_error=raw.get("analysis_error"),
     )
 
 
 def run_doc_pair_pipeline(
     doc_pair_groups: dict[tuple[str, str], list[OverlapPair]],
     doc_chunks_map: dict[str, list[Chunk]],
-    model: str,
+    model: str | None,
     cache: Cache | None,
     on_progress: Callable[..., None] | None = None,
     backend: str = "litellm",
@@ -416,6 +434,7 @@ def run_doc_pair_pipeline(
     cli_strip_api_key: bool = True,
     cli_permission_mode: str | None = None,
     cli_dangerously_skip_permissions: bool = False,
+    timeout: int = 300,
 ) -> tuple[list[DocPairAnalysis], list[Code], list[Category], list[dict]]:
     """Run doc-pair level LLM analysis pipeline.
 
@@ -446,9 +465,11 @@ def run_doc_pair_pipeline(
     # Handle resumed pairs first (no LLM call needed)
     pending_items: list[tuple[int, tuple[str, str], list[OverlapPair]]] = []
     for idx, ((doc_a, doc_b), pairs) in enumerate(items):
-        pair_key = f"{doc_a}|{doc_b}"
-        if pair_key in prior_analyses:
-            results[pair_key] = (prior_analyses[pair_key], doc_a, doc_b, pairs)
+        pair_key = _doc_pair_key(doc_a, doc_b)
+        legacy_key = f"{doc_a}|{doc_b}"
+        prior = prior_analyses.get(pair_key) or prior_analyses.get(legacy_key)
+        if prior is not None:
+            results[pair_key] = (prior, doc_a, doc_b, pairs)
             done_count += 1
         else:
             pending_items.append((idx, (doc_a, doc_b), pairs))
@@ -476,8 +497,9 @@ def run_doc_pair_pipeline(
             cli_strip_api_key=cli_strip_api_key,
             cli_permission_mode=cli_permission_mode,
             cli_dangerously_skip_permissions=cli_dangerously_skip_permissions,
+            timeout=timeout,
         )
-        return f"{doc_a}|{doc_b}", raw
+        return _doc_pair_key(doc_a, doc_b), raw
 
     if concurrency > 1 and pending_items:
         with ThreadPoolExecutor(max_workers=concurrency) as executor:
@@ -508,7 +530,7 @@ def run_doc_pair_pipeline(
     # Build analyses list preserving original pair order
     analyses: list[DocPairAnalysis] = []
     for (doc_a, doc_b), pairs in items:
-        pair_key = f"{doc_a}|{doc_b}"
+        pair_key = _doc_pair_key(doc_a, doc_b)
         raw, _, _, _ = results[pair_key]
         analyses.append(_build_analysis_from_raw(doc_a, doc_b, raw, pairs))
 

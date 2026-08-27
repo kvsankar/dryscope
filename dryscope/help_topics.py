@@ -205,9 +205,9 @@ HELP_TOPICS: tuple[HelpTopic, ...] = (
 
             Main sections:
               [code]      code thresholds, min size filters, embedding model
-              [docs]      docs include/exclude rules, thresholds, stage limits
+              [docs]      strict/candidate thresholds, scoring, scope, stage limits
               [docs.map]  generic facet seed dimensions for Docs Map
-              [llm]       model, backend, max cost, concurrency
+              [llm]       optional model override, backend, timeout, cost, concurrency
               [cache]     cache enablement and path
 
             More detail:

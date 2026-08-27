@@ -46,7 +46,8 @@ class TestSettingsDefaults:
 
     def test_default_model(self):
         s = Settings()
-        assert s.model == "claude-haiku-4-5-20251001"
+        assert s.model is None
+        assert s.llm_model_identity == "cli:configured-default"
 
     def test_default_concurrency(self):
         s = Settings()

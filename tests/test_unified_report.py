@@ -126,7 +126,8 @@ class TestFormatUnifiedTerminal:
     def test_doc_pairs_empty(self):
         result = format_unified_terminal(doc_pairs=[])
         assert "Section Match" in result
-        assert "No matched documentation sections found" in result
+        assert "above the configured threshold" in result
+        assert "does not establish that the corpus has no overlap" in result
 
 
 # ── format_unified_json with doc_pairs ─────────────────────────────────

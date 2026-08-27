@@ -12,7 +12,7 @@ import urllib.request
 
 def completion(
     prompt: str,
-    model: str,
+    model: str | None,
     backend: str,
     *,
     api_key: str | None = None,
@@ -20,12 +20,14 @@ def completion(
     cli_strip_api_key: bool = True,
     cli_permission_mode: str | None = None,
     cli_dangerously_skip_permissions: bool = False,
+    timeout: int = 300,
 ) -> str:
     """Get a completion from the LLM.
 
     Args:
         prompt: The user message to send.
-        model: Model name (used by litellm backend, ignored by cli).
+        model: Optional model override. CLI backends use their configured
+            default when omitted; API/local providers require a model.
         backend: "litellm", "cli", "codex-cli", or "ollama".
         api_key: Optional provider API key for litellm.
         ollama_host: Optional Ollama base URL. Defaults to ``OLLAMA_HOST`` or
@@ -44,21 +46,37 @@ def completion(
             cli_strip_api_key=cli_strip_api_key,
             cli_permission_mode=cli_permission_mode,
             cli_dangerously_skip_permissions=cli_dangerously_skip_permissions,
+            timeout=timeout,
         )
     if backend == "codex-cli":
-        return _codex_cli_completion(prompt, model)
+        return _codex_cli_completion(prompt, model, timeout=timeout)
     if backend == "ollama":
-        return _ollama_completion(prompt, model, ollama_host=ollama_host)
-    return _litellm_completion(prompt, model, api_key=api_key)
+        return _ollama_completion(prompt, model, ollama_host=ollama_host, timeout=timeout)
+    return _litellm_completion(prompt, model, api_key=api_key, timeout=timeout)
 
 
-def _litellm_completion(prompt: str, model: str, api_key: str | None = None) -> str:
+def model_identity(backend: str, model: str | None) -> str:
+    """Return a reproducible identity even when a CLI chooses its default model."""
+    return model or f"{backend}:configured-default"
+
+
+def _litellm_completion(
+    prompt: str,
+    model: str | None,
+    api_key: str | None = None,
+    *,
+    timeout: int = 300,
+) -> str:
     """Call LLM via litellm."""
     import litellm
+
+    if not model:
+        raise ValueError("litellm backend requires an explicit model")
 
     kwargs: dict = {
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
+        "timeout": timeout,
     }
     if api_key:
         kwargs["api_key"] = api_key
@@ -73,6 +91,7 @@ def _cli_completion(
     cli_strip_api_key: bool = True,
     cli_permission_mode: str | None = None,
     cli_dangerously_skip_permissions: bool = False,
+    timeout: int = 300,
 ) -> str:
     """Call LLM via ``claude -p --output-format json``.
 
@@ -94,7 +113,7 @@ def _cli_completion(
         input=prompt,
         capture_output=True,
         text=True,
-        timeout=120,
+        timeout=timeout,
         env=env,
     )
     if result.returncode != 0:
@@ -109,11 +128,14 @@ def _cli_completion(
 
 def _ollama_completion(
     prompt: str,
-    model: str,
+    model: str | None,
     *,
     ollama_host: str | None = None,
+    timeout: int = 300,
 ) -> str:
     """Call LLM via the local Ollama chat API."""
+    if not model:
+        raise ValueError("ollama backend requires an explicit model")
     host = (ollama_host or os.environ.get("OLLAMA_HOST") or "http://localhost:11434").rstrip("/")
     url = f"{host}/api/chat"
     body = json.dumps(
@@ -130,7 +152,7 @@ def _ollama_completion(
         method="POST",
     )
     try:
-        with urllib.request.urlopen(request, timeout=120) as response:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
             payload = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
@@ -146,7 +168,12 @@ def _ollama_completion(
     raise RuntimeError(f"ollama API returned unexpected response: {payload!r}")
 
 
-def _codex_cli_completion(prompt: str, model: str | None = None) -> str:
+def _codex_cli_completion(
+    prompt: str,
+    model: str | None = None,
+    *,
+    timeout: int = 300,
+) -> str:
     """Call LLM via ``codex exec`` in non-interactive mode."""
     with tempfile.NamedTemporaryFile(mode="w+", delete=False) as out_file:
         out_path = out_file.name
@@ -157,6 +184,7 @@ def _codex_cli_completion(prompt: str, model: str | None = None) -> str:
         "--skip-git-repo-check",
         "--sandbox",
         "read-only",
+        "--ephemeral",
         "--output-last-message",
         out_path,
     ]
@@ -170,7 +198,7 @@ def _codex_cli_completion(prompt: str, model: str | None = None) -> str:
             input=prompt,
             capture_output=True,
             text=True,
-            timeout=180,
+            timeout=timeout,
         )
         if result.returncode != 0:
             stderr = result.stderr.strip() or result.stdout.strip()

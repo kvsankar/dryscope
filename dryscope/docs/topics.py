@@ -23,7 +23,8 @@ DESCRIPTORS_VERSION = "doc_descriptors_v1"
 
 def _document_content(chunks: list[Chunk], max_chars: int = 16000) -> str:
     """Build bounded document content from chunks."""
-    content = "\n\n".join(c.content for c in chunks)
+    primary_chunks = [chunk for chunk in chunks if chunk.parent_id is None] or chunks
+    content = "\n\n".join(c.content for c in primary_chunks)
     if len(content) > max_chars:
         content = content[:max_chars]
     return content
@@ -33,7 +34,8 @@ def _document_headings(chunks: list[Chunk], max_headings: int = 40) -> list[str]
     """Return a compact list of document headings."""
     headings: list[str] = []
     seen: set[str] = set()
-    for chunk in chunks:
+    primary_chunks = [chunk for chunk in chunks if chunk.parent_id is None] or chunks
+    for chunk in primary_chunks:
         heading = " > ".join(chunk.heading_path).strip()
         if heading and heading not in seen:
             seen.add(heading)
@@ -160,13 +162,14 @@ def descriptor_labels(descriptor: dict) -> list[str]:
 def extract_document_descriptor(
     doc_path: str,
     chunks: list[Chunk],
-    model: str,
+    model: str | None,
     cache: Cache | None,
     backend: str = "litellm",
     ollama_host: str | None = None,
     cli_strip_api_key: bool = True,
     cli_permission_mode: str | None = None,
     cli_dangerously_skip_permissions: bool = False,
+    timeout: int = 300,
     facet_dimensions: list[str] | None = None,
     facet_values: dict[str, list[str]] | None = None,
 ) -> dict:
@@ -242,27 +245,35 @@ Rules:
             cli_strip_api_key=cli_strip_api_key,
             cli_permission_mode=cli_permission_mode,
             cli_dangerously_skip_permissions=cli_dangerously_skip_permissions,
+            timeout=timeout,
         )
     except Exception as exc:
         return _descriptor_error_fallback(doc_path, chunks, exc)
 
     try:
         data = json.loads(_strip_code_fences(text))
-    except (json.JSONDecodeError, ValueError, TypeError):
-        data = {}
+    except (json.JSONDecodeError, ValueError, TypeError) as exc:
+        return _descriptor_error_fallback(doc_path, chunks, exc)
+    if not isinstance(data, dict) or not data:
+        return _descriptor_error_fallback(
+            doc_path,
+            chunks,
+            ValueError("LLM returned an empty or non-object descriptor"),
+        )
     return _normalize_descriptor(data, doc_path, chunks)
 
 
 def extract_topics(
     doc_path: str,
     chunks: list[Chunk],
-    model: str,
+    model: str | None,
     cache: Cache | None,
     backend: str = "litellm",
     ollama_host: str | None = None,
     cli_strip_api_key: bool = True,
     cli_permission_mode: str | None = None,
     cli_dangerously_skip_permissions: bool = False,
+    timeout: int = 300,
 ) -> list[str]:
     """Extract granular topic phrases from a document via LLM.
 
@@ -307,6 +318,7 @@ JSON array:"""
             cli_strip_api_key=cli_strip_api_key,
             cli_permission_mode=cli_permission_mode,
             cli_dangerously_skip_permissions=cli_dangerously_skip_permissions,
+            timeout=timeout,
         )
     except Exception:
         return []
@@ -427,7 +439,7 @@ def find_intent_doc_pairs(
 
 def run_topic_extraction(
     documents: dict[str, list[Chunk]],
-    model: str,
+    model: str | None,
     cache: Cache | None,
     backend: str = "litellm",
     concurrency: int = 1,
@@ -437,6 +449,7 @@ def run_topic_extraction(
     cli_strip_api_key: bool = True,
     cli_permission_mode: str | None = None,
     cli_dangerously_skip_permissions: bool = False,
+    timeout: int = 300,
 ) -> dict[str, list[str]]:
     """Orchestrate parallel topic extraction across all documents.
 
@@ -477,6 +490,7 @@ def run_topic_extraction(
             cli_strip_api_key=cli_strip_api_key,
             cli_permission_mode=cli_permission_mode,
             cli_dangerously_skip_permissions=cli_dangerously_skip_permissions,
+            timeout=timeout,
         )
         return doc_path, topics
 
@@ -503,7 +517,7 @@ def run_topic_extraction(
 
 def run_document_descriptor_extraction(
     documents: dict[str, list[Chunk]],
-    model: str,
+    model: str | None,
     cache: Cache | None,
     backend: str = "litellm",
     concurrency: int = 1,
@@ -513,6 +527,7 @@ def run_document_descriptor_extraction(
     cli_strip_api_key: bool = True,
     cli_permission_mode: str | None = None,
     cli_dangerously_skip_permissions: bool = False,
+    timeout: int = 300,
     facet_dimensions: list[str] | None = None,
     facet_values: dict[str, list[str]] | None = None,
 ) -> dict[str, dict]:
@@ -552,6 +567,7 @@ def run_document_descriptor_extraction(
             cli_strip_api_key=cli_strip_api_key,
             cli_permission_mode=cli_permission_mode,
             cli_dangerously_skip_permissions=cli_dangerously_skip_permissions,
+            timeout=timeout,
             facet_dimensions=facet_dimensions,
             facet_values=facet_values,
         )

@@ -432,6 +432,6 @@ def test_report_uses_full_collapsible_lists_without_samples() -> None:
     assert "similarity_pairs" not in data
     section_by_id = {section["id"]: section for section in data["report_structure"]}
     cluster_docs = section_by_id["docs_map_clusters"]["data"][0]["documents"]
-    assert "/tmp/project/docs/g.md" in cluster_docs
+    assert "docs/g.md" in cluster_docs
     pair_rows = section_by_id["docs_section_match"]["children"][1]["data"]
     assert len(pair_rows) == 1

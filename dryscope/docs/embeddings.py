@@ -139,6 +139,9 @@ def refine_with_embeddings(
         else:
             sim = float(np.dot(vec_a, vec_b) / (norm_a * norm_b))
         pair.embedding_similarity = sim
+        pair.embedding_cosine = sim
+        pair.token_similarity = _token_jaccard(pair.chunk_a.content, pair.chunk_b.content)
+        pair.combined_similarity = sim
         if sim >= threshold:
             refined.append(pair)
 
@@ -228,7 +231,32 @@ def find_similar_pairs(
     include_intra: bool = False,
     token_weight: float = 0.3,
 ) -> list[OverlapPair]:
-    """Cosine similarity matrix -> pairs above threshold.
+    """Return strict Section Match pairs above the configured threshold."""
+    strict_pairs, _candidate_pairs = find_similarity_bands(
+        chunks,
+        embeddings,
+        threshold=threshold,
+        candidate_threshold=None,
+        min_content_words=min_content_words,
+        boilerplate_headings=boilerplate_headings,
+        include_intra=include_intra,
+        token_weight=token_weight,
+    )
+    return strict_pairs
+
+
+def find_similarity_bands(
+    chunks: list[Chunk],
+    embeddings: dict[str, list[float]],
+    threshold: float = 0.7,
+    candidate_threshold: float | None = 0.60,
+    max_candidates: int = 20,
+    min_content_words: int = 15,
+    boilerplate_headings: set[str] | None = None,
+    include_intra: bool = False,
+    token_weight: float = 0.3,
+) -> tuple[list[OverlapPair], list[OverlapPair]]:
+    """Return strict hybrid matches and a bounded semantic-candidate band.
 
     Uses hybrid similarity: (1 - token_weight) * embedding_cosine + token_weight * token_jaccard.
     This reduces false positives where embeddings match on topic but actual words differ
@@ -239,25 +267,35 @@ def find_similar_pairs(
     By default only returns cross-document pairs.  When include_intra=True,
     also returns same-document pairs (different sections within one file).
 
-    Returns OverlapPair objects with embedding_similarity set to the combined score.
+    The strict band applies ``threshold`` to the combined score. The candidate
+    band is deliberately separate: it retains the strongest pairs whose pure
+    embedding cosine exceeds ``candidate_threshold`` even when the lexical
+    component suppresses the combined score. Candidate output is capped to keep
+    boilerplate and broad topical similarity from flooding a preflight report.
+
+    ``embedding_similarity`` remains a deprecated alias for the combined score.
     """
     filtered = _filter_embedded_chunks(chunks, embeddings, min_content_words)
 
     if len(filtered) < 2:
-        return []
+        return [], []
 
     # Build matrix and compute cosine similarity via shared helper
     matrix = np.array([embeddings[c.id] for c in filtered])
     sim_matrix = cosine_similarity_matrix(matrix)
 
-    # Pre-compute minimum embedding similarity needed for hybrid to reach threshold
-    if token_weight > 0:
-        min_embed_sim = (threshold - token_weight) / (1 - token_weight)
-    else:
-        min_embed_sim = threshold
-
-    # Find pairs above threshold
-    pairs: list[OverlapPair] = []
+    strict_pairs: list[OverlapPair] = []
+    candidate_pairs: list[OverlapPair] = []
+    strict_minimum_cosine = (
+        max(-1.0, (threshold - token_weight) / (1 - token_weight))
+        if 0 < token_weight < 1
+        else (-1.0 if token_weight >= 1 else threshold)
+    )
+    minimum_cosine = (
+        min(strict_minimum_cosine, candidate_threshold)
+        if candidate_threshold is not None
+        else strict_minimum_cosine
+    )
     for i in range(len(filtered)):
         for j in range(i + 1, len(filtered)):
             chunk_a = filtered[i]
@@ -266,28 +304,37 @@ def find_similar_pairs(
                 continue
 
             embed_sim = float(sim_matrix[i, j])
-            # Early exit: if embedding alone can't reach threshold even with perfect token match
-            if embed_sim < min_embed_sim:
+            if embed_sim < minimum_cosine:
                 continue
 
+            tok_sim = _token_jaccard(chunk_a.content, chunk_b.content)
             if token_weight > 0:
-                tok_sim = _token_jaccard(chunk_a.content, chunk_b.content)
                 combined = (1 - token_weight) * embed_sim + token_weight * tok_sim
             else:
                 combined = embed_sim
 
+            pair = OverlapPair(
+                chunk_a=chunk_a,
+                chunk_b=chunk_b,
+                embedding_similarity=combined,
+                embedding_cosine=embed_sim,
+                token_similarity=tok_sim,
+                combined_similarity=combined,
+            )
             if combined >= threshold:
-                pairs.append(
-                    OverlapPair(
-                        chunk_a=chunk_a,
-                        chunk_b=chunk_b,
-                        embedding_similarity=combined,
-                    )
-                )
+                pair.confidence = "strict-match"
+                strict_pairs.append(pair)
+            elif candidate_threshold is not None and embed_sim >= candidate_threshold:
+                pair.confidence = "semantic-candidate"
+                candidate_pairs.append(pair)
 
-    # Sort by similarity descending
-    pairs.sort(key=lambda p: -(p.embedding_similarity or 0))
-    return pairs
+    strict_pairs.sort(key=lambda pair: -(pair.combined_score or 0))
+    candidate_pairs.sort(
+        key=lambda pair: (-(pair.embedding_cosine or 0), -(pair.combined_score or 0))
+    )
+    if max_candidates >= 0:
+        candidate_pairs = candidate_pairs[:max_candidates]
+    return strict_pairs, candidate_pairs
 
 
 def _filter_embedded_chunks(
@@ -297,7 +344,10 @@ def _filter_embedded_chunks(
 ) -> list[Chunk]:
     """Keep chunks with embeddings and enough words for section matching."""
     filtered: list[Chunk] = []
+    fragmented_parent_ids = {chunk.parent_id for chunk in chunks if chunk.parent_id}
     for chunk in chunks:
+        if chunk.id in fragmented_parent_ids:
+            continue
         if chunk.id not in embeddings:
             continue
         if min_content_words > 0 and len(chunk.content.split()) < min_content_words:

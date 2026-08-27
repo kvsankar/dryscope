@@ -72,6 +72,8 @@ keep_same_file_refactors = false
 include = ["*.md", "*.mdx", "*.rst", "*.txt", "*.adoc"]
 exclude = ["node_modules", "venv", ".git", ".dryscope", "*.lock"]
 threshold_similarity = 0.9
+candidate_threshold = 0.60
+max_semantic_candidates = 20
 threshold_intent = 0.8
 min_content_words = 15
 include_intra = false
@@ -96,10 +98,11 @@ surface = ["public", "internal", "generated", "extension", "package", "integrati
 canonicality = ["primary", "supporting", "archive", "duplicate", "index", "unknown"]
 
 [llm]
-model = "claude-haiku-4-5-20251001"
 backend = "cli"
 max_cost = 5.00
 concurrency = 8
+timeout = 300
+# model = "claude-haiku-4-5-20251001"
 # For backend = "ollama", optionally set:
 # ollama_host = "http://localhost:11434"
 # For backend = "codex-cli", the configured model is passed to `codex exec -m`
@@ -135,6 +138,8 @@ class Settings:
     include: list[str] = field(default_factory=lambda: list(DEFAULT_INCLUDE))
     exclude: list[str] = field(default_factory=lambda: list(DEFAULT_EXCLUDE))
     threshold_similarity: float = 0.9
+    docs_candidate_threshold: float = 0.60
+    docs_max_semantic_candidates: int = 20
     threshold_intent: float = 0.8
     min_content_words: int = 15
     include_intra: bool = False
@@ -153,10 +158,11 @@ class Settings:
     )
 
     # LLM settings
-    model: str = "claude-haiku-4-5-20251001"
+    model: str | None = None
     backend: str = "cli"
     max_cost: float = 5.00
     concurrency: int = 8
+    llm_timeout: int = 300
     ollama_host: str | None = None
     cli_strip_api_key: bool = True
     cli_permission_mode: str | None = None
@@ -169,6 +175,16 @@ class Settings:
     @property
     def resolved_cache_path(self) -> Path:
         return Path(self.cache_path).expanduser()
+
+    @property
+    def llm_enabled(self) -> bool:
+        """Whether an LLM backend is configured independently of a model override."""
+        return self.backend in {"cli", "codex-cli", "litellm", "ollama"}
+
+    @property
+    def llm_model_identity(self) -> str:
+        """Stable cache/provenance identity for explicit or CLI-default models."""
+        return self.model or f"{self.backend}:configured-default"
 
 
 def load_toml(path: Path) -> dict:
@@ -217,6 +233,13 @@ def _apply_scalar_options(settings: Settings, cfg: dict, mapping: dict[str, str]
             setattr(settings, attr, cfg[key])
 
 
+def _apply_non_null_options(settings: Settings, options: dict[str, object | None]) -> None:
+    """Apply CLI attribute values that were supplied explicitly."""
+    for attr, value in options.items():
+        if value is not None:
+            setattr(settings, attr, value)
+
+
 def _apply_code_config(settings: Settings, code_cfg: dict) -> None:
     _apply_scalar_options(
         settings,
@@ -263,6 +286,8 @@ def _apply_docs_config(settings: Settings, docs_cfg: dict) -> None:
             "include": "include",
             "exclude": "exclude",
             "threshold_similarity": "threshold_similarity",
+            "candidate_threshold": "docs_candidate_threshold",
+            "max_semantic_candidates": "docs_max_semantic_candidates",
             "threshold_intent": "threshold_intent",
             "min_content_words": "min_content_words",
             "include_intra": "include_intra",
@@ -285,6 +310,7 @@ def _apply_llm_config(settings: Settings, llm_cfg: dict) -> None:
             "backend": "backend",
             "max_cost": "max_cost",
             "concurrency": "concurrency",
+            "timeout": "llm_timeout",
             "ollama_host": "ollama_host",
             "cli_strip_api_key": "cli_strip_api_key",
             "cli_permission_mode": "cli_permission_mode",
@@ -317,6 +343,8 @@ def _apply_cli_overrides(
     docs_embedding_model: str | None,
     backend: str | None,
     threshold: float | None,
+    candidate_threshold: float | None,
+    max_semantic_candidates: int | None,
     threshold_intent: float | None,
     include: str | Sequence[str] | None,
     exclude: str | Sequence[str] | None,
@@ -326,44 +354,37 @@ def _apply_cli_overrides(
     concurrency: int | None,
     intra: bool | None,
     token_weight: float | None,
+    llm_timeout: int | None,
 ) -> None:
     """Apply CLI overrides to settings."""
-    if code_threshold is not None:
-        settings.code_threshold = code_threshold
-    if code_min_lines is not None:
-        settings.code_min_lines = code_min_lines
-    if code_min_tokens is not None:
-        settings.code_min_tokens = code_min_tokens
-    if code_max_cluster_size is not None:
-        settings.code_max_cluster_size = code_max_cluster_size
-    if code_embedding_model is not None:
-        settings.code_embedding_model = code_embedding_model
-    if model is not None:
-        settings.model = model
-    if docs_embedding_model is not None:
-        settings.docs_embedding_model = docs_embedding_model
-    if threshold is not None:
-        settings.threshold_similarity = threshold
-    if threshold_intent is not None:
-        settings.threshold_intent = threshold_intent
+    _apply_non_null_options(
+        settings,
+        {
+            "code_threshold": code_threshold,
+            "code_min_lines": code_min_lines,
+            "code_min_tokens": code_min_tokens,
+            "code_max_cluster_size": code_max_cluster_size,
+            "code_embedding_model": code_embedding_model,
+            "model": model,
+            "docs_embedding_model": docs_embedding_model,
+            "threshold_similarity": threshold,
+            "docs_candidate_threshold": candidate_threshold,
+            "docs_max_semantic_candidates": max_semantic_candidates,
+            "threshold_intent": threshold_intent,
+            "backend": backend,
+            "max_cost": max_cost,
+            "min_content_words": min_words,
+            "docs_llm_max_doc_pairs": llm_max_doc_pairs,
+            "concurrency": concurrency,
+            "include_intra": intra,
+            "token_weight": token_weight,
+            "llm_timeout": llm_timeout,
+        },
+    )
     if include is not None:
         settings.include = _pattern_list(include)
     if exclude is not None:
         settings.exclude = [*settings.exclude, *_pattern_list(exclude)]
-    if backend is not None:
-        settings.backend = backend
-    if max_cost is not None:
-        settings.max_cost = max_cost
-    if min_words is not None:
-        settings.min_content_words = min_words
-    if llm_max_doc_pairs is not None:
-        settings.docs_llm_max_doc_pairs = llm_max_doc_pairs
-    if concurrency is not None:
-        settings.concurrency = concurrency
-    if intra is not None:
-        settings.include_intra = intra
-    if token_weight is not None:
-        settings.token_weight = token_weight
 
 
 def load_settings(
@@ -380,6 +401,8 @@ def load_settings(
     docs_embedding_model: str | None = None,
     backend: str | None = None,
     threshold: float | None = None,
+    candidate_threshold: float | None = None,
+    max_semantic_candidates: int | None = None,
     threshold_intent: float | None = None,
     include: str | Sequence[str] | None = None,
     exclude: str | Sequence[str] | None = None,
@@ -389,6 +412,7 @@ def load_settings(
     concurrency: int | None = None,
     intra: bool | None = None,
     token_weight: float | None = None,
+    llm_timeout: int | None = None,
 ) -> Settings:
     """Load settings with merge order: defaults -> .dryscope.toml -> CLI flags."""
     settings = Settings()
@@ -410,6 +434,8 @@ def load_settings(
         docs_embedding_model=docs_embedding_model,
         backend=backend,
         threshold=threshold,
+        candidate_threshold=candidate_threshold,
+        max_semantic_candidates=max_semantic_candidates,
         threshold_intent=threshold_intent,
         include=include,
         exclude=exclude,
@@ -419,6 +445,7 @@ def load_settings(
         concurrency=concurrency,
         intra=intra,
         token_weight=token_weight,
+        llm_timeout=llm_timeout,
     )
 
     return settings

@@ -15,6 +15,8 @@ class Chunk:
     content: str
     line_start: int
     line_end: int
+    kind: str = "heading-section"
+    parent_id: str | None = None
     id: str = field(default="", init=False)
 
     def __post_init__(self) -> None:
@@ -29,8 +31,33 @@ class OverlapPair:
 
     chunk_a: Chunk
     chunk_b: Chunk
+    # ``embedding_similarity`` is retained as the backward-compatible name for
+    # the score used by older JSON consumers. New code should use the explicit
+    # component fields and ``combined_score``.
     embedding_similarity: float | None = None
+    embedding_cosine: float | None = None
+    token_similarity: float | None = None
+    combined_similarity: float | None = None
+    confidence: str = "strict"
     shared_codes: list[str] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        """Fill explicit score fields when loading legacy pair data."""
+        if self.combined_similarity is None:
+            self.combined_similarity = self.embedding_similarity
+        if self.embedding_similarity is None:
+            self.embedding_similarity = self.combined_similarity
+        if self.embedding_cosine is None and self.token_similarity is None:
+            self.embedding_cosine = self.combined_similarity
+
+    @property
+    def combined_score(self) -> float | None:
+        """Return the thresholded score, including legacy serialized pairs."""
+        return (
+            self.combined_similarity
+            if self.combined_similarity is not None
+            else self.embedding_similarity
+        )
 
 
 @dataclass
@@ -94,6 +121,7 @@ class DocPairAnalysis:
     topics: list[TopicAnalysis] = field(default_factory=list)
     confidence: str = "medium"  # "high" | "medium" | "low"
     overlap_pairs: list[OverlapPair] = field(default_factory=list)
+    analysis_error: str | None = None
 
 
 @dataclass
@@ -103,8 +131,10 @@ class AnalysisResult:
     documents: list[Document] = field(default_factory=list)
     chunks: list[Chunk] = field(default_factory=list)
     overlaps: list[OverlapPair] = field(default_factory=list)
+    candidate_overlaps: list[OverlapPair] = field(default_factory=list)
     codes: list[Code] = field(default_factory=list)
     categories: list[Category] = field(default_factory=list)
     doc_pair_analyses: list[DocPairAnalysis] = field(default_factory=list)
     document_descriptors: dict[str, dict] = field(default_factory=dict)
     topic_taxonomy: dict | None = None
+    stage_status: dict[str, dict] = field(default_factory=dict)
