@@ -138,8 +138,7 @@ def _parse_env_file(path: Path, *, strict: bool) -> dict[str, str]:
         if not _ENV_NAME.fullmatch(key):
             if strict:
                 raise EnvironmentFileError(
-                    f"Invalid environment variable name at "
-                    f"{_display_path(path)}:{line_number}."
+                    f"Invalid environment variable name at {_display_path(path)}:{line_number}."
                 )
             continue
         if value[:1] in {"'", '"'}:

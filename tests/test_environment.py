@@ -102,9 +102,7 @@ def test_override_selects_explicit_env_file(monkeypatch, tmp_path) -> None:
     assert user_env_file() == selected
 
 
-def test_macos_loads_legacy_home_config_when_native_file_is_absent(
-    monkeypatch, tmp_path
-) -> None:
+def test_macos_loads_legacy_home_config_when_native_file_is_absent(monkeypatch, tmp_path) -> None:
     legacy = _write_private(
         tmp_path / ".config" / "dryscope" / "env",
         "OPENAI_API_KEY=legacy-value\n",
@@ -182,9 +180,7 @@ def test_process_environment_wins_over_user_and_project_files(monkeypatch, tmp_p
     )
     project = tmp_path / "project"
     project.mkdir()
-    (project / ".env").write_text(
-        "OPENAI_API_KEY=project-file\nVOYAGE_API_KEY=project-voyage\n"
-    )
+    (project / ".env").write_text("OPENAI_API_KEY=project-file\nVOYAGE_API_KEY=project-voyage\n")
     monkeypatch.setenv(ENV_FILE_OVERRIDE, str(user_file))
     monkeypatch.setenv("OPENAI_API_KEY", "process-value")
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
