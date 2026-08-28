@@ -311,7 +311,7 @@ def _run_code_scan(
 
     Returns a list of Cluster objects, or None if no units were found.
     """
-    from dryscope.code.embedder import Embedder
+    from dryscope.code.embedder import Embedder, EmbeddingError
     from dryscope.code.normalizer import normalize
     from dryscope.code.parser import parse_directory
     from dryscope.code.reporter import build_clusters
@@ -350,8 +350,11 @@ def _run_code_scan(
     units, normalized = filtered_units
 
     click.echo(f"Generating embeddings (model: {model})...", err=True)
-    embedder = Embedder(model_name=model)
-    embeddings = embedder.embed(normalized)
+    try:
+        embedder = Embedder(model_name=model)
+        embeddings = embedder.embed(normalized)
+    except EmbeddingError as exc:
+        raise click.ClickException(str(exc)) from None
 
     click.echo(f"Finding duplicates (threshold: {threshold})...", err=True)
     line_counts = [u.line_count for u in units]
@@ -583,7 +586,10 @@ def _emit_scan_output(
 @click.option("--exclude", "-e", multiple=True, help="Glob patterns to exclude")
 @click.option("--exclude-type", multiple=True, help="Base class types to exclude")
 @click.option(
-    "--embedding-model", "model", default="text-embedding-3-small", help="Embedding model name"
+    "--embedding-model",
+    "model",
+    default="text-embedding-3-small",
+    help=("Embedding model; API models require provider credentials independently of --backend"),
 )
 # Docs-specific options
 @click.option(
@@ -613,7 +619,7 @@ def _emit_scan_output(
     "--backend",
     type=click.Choice(["litellm", "cli", "codex-cli", "ollama"]),
     default=None,
-    help="LLM backend for --verify",
+    help="LLM backend for --verify; does not configure or authenticate embeddings",
 )
 @click.option(
     "--token-weight",

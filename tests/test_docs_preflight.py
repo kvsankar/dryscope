@@ -5,14 +5,16 @@ from __future__ import annotations
 import json
 import math
 import subprocess
+from io import StringIO
 from pathlib import Path
 
 import pytest
 from rich.console import Console
 
+from dryscope.code.embedder import EmbeddingRequestError
 from dryscope.config import Settings
 from dryscope.docs.chunker import chunk_file, detect_boilerplate_headings
-from dryscope.docs.embeddings import find_similarity_bands
+from dryscope.docs.embeddings import embed_chunks, find_similarity_bands
 from dryscope.docs.models import (
     AnalysisResult,
     Chunk,
@@ -22,7 +24,13 @@ from dryscope.docs.models import (
     TopicAnalysis,
 )
 from dryscope.docs.pipeline import run_pipeline
-from dryscope.docs.report import render_json, render_markdown, serialize_section_match_stage
+from dryscope.docs.report import (
+    render_html,
+    render_json,
+    render_markdown,
+    render_terminal,
+    serialize_section_match_stage,
+)
 from dryscope.docs.taxonomy import TopicTaxonomy, build_canonical_taxonomy, build_docs_map
 
 
@@ -91,6 +99,25 @@ def test_boilerplate_headings_do_not_flood_candidate_band() -> None:
 
     assert strict == []
     assert candidates == []
+
+
+def test_api_embedding_failure_is_probed_once_before_parallel_work(monkeypatch) -> None:
+    chunks = [
+        _chunk(f"docs/{index}.md", "# Details", f"content for chunk {index}") for index in range(8)
+    ]
+    calls = 0
+
+    def fail_once(_texts, _model):
+        nonlocal calls
+        calls += 1
+        raise EmbeddingRequestError("concise provider failure")
+
+    monkeypatch.setattr("dryscope.docs.embeddings.embed_api_texts", fail_once)
+
+    with pytest.raises(EmbeddingRequestError, match="concise provider failure"):
+        embed_chunks(chunks, "text-embedding-3-small", concurrency=8)
+
+    assert calls == 1
 
 
 def test_large_table_and_list_sections_get_line_accurate_secondary_chunks(tmp_path) -> None:
@@ -345,6 +372,186 @@ def test_timed_out_ia_is_degraded_not_clean(monkeypatch, tmp_path) -> None:
     assert docs_map["stage_status"]["exception_category"] == "TimeoutExpired"
     assert report["summary"]["outcome"]["status"] == "degraded"
     assert "not clean-negative evidence" in report["summary"]["outcome"]["statement"].lower()
+
+
+def test_diagnostics_only_outcome_names_docs_map_diagnostics(tmp_path) -> None:
+    diagnostics = [
+        {
+            "kind": "navigation_gap",
+            "severity": "medium",
+            "message": f"Diagnostic {index}",
+            "recommendation": "Review the information architecture.",
+        }
+        for index in range(4)
+    ]
+    result = AnalysisResult(
+        topic_taxonomy={
+            "docs_map": {
+                "method": "llm",
+                "topic_tree": [],
+                "facets": {},
+                "diagnostics": diagnostics,
+            }
+        },
+        stage_status={
+            "docs-section-match": {"status": "completed", "fallback": None},
+            "docs-map": {"status": "completed", "fallback": None},
+            "docs-pair-review": {
+                "status": "skipped",
+                "fallback": None,
+                "reason": "no candidate document pairs",
+                "unavailable_conclusions": [],
+            },
+        },
+    )
+    settings = Settings()
+    stages = ["docs-section-match", "docs-map"]
+
+    json_report = json.loads(
+        render_json(
+            result,
+            [],
+            None,
+            settings=settings,
+            project_root=tmp_path,
+            stages_run=stages,
+        )
+    )
+    markdown = render_markdown(
+        result,
+        [],
+        None,
+        settings=settings,
+        project_root=tmp_path,
+        stages_run=stages,
+    )
+    html = render_html(markdown)
+    terminal_output = StringIO()
+    render_terminal(
+        result,
+        [],
+        None,
+        Console(file=terminal_output, force_terminal=False, color_system=None),
+        settings=settings,
+        project_root=tmp_path,
+        stages_run=stages,
+    )
+
+    outcome = json_report["summary"]["outcome"]
+    expected = "The preflight surfaced 4 Docs Map diagnostics for review."
+    assert outcome["status"] == "findings"
+    assert outcome["statement"] == expected
+    assert outcome["signals"] == {
+        "strict_section_pairs": 0,
+        "semantic_candidates": 0,
+        "docs_map_clusters": 0,
+        "docs_map_diagnostics": 4,
+        "document_intent_relationships": 0,
+        "refactoring_reference_suggestions": 0,
+    }
+    assert expected in markdown
+    assert expected in html
+    assert expected in terminal_output.getvalue()
+    assert "candidates or document-intent relationships" not in markdown
+
+
+def test_embedding_failure_detail_is_visible_and_sanitized_in_human_reports(tmp_path) -> None:
+    private_path = tmp_path / "private" / "config.json"
+    status = {
+        "status": "degraded",
+        "exception_category": "EmbeddingConfigurationError",
+        "exception_message": (
+            "Embedding model requires OPENAI_API_KEY; use all-MiniLM-L6-v2 "
+            f"instead of {private_path}."
+        ),
+        "fallback": "no Section Match pairs or semantic candidates",
+        "unavailable_conclusions": ["section similarity conclusions"],
+    }
+    result = AnalysisResult(stage_status={"docs-section-match": status})
+    settings = Settings()
+    markdown = render_markdown(
+        result,
+        [],
+        None,
+        settings=settings,
+        project_root=tmp_path,
+        stages_run=["docs-section-match"],
+    )
+    html = render_html(markdown)
+    terminal_output = StringIO()
+    render_terminal(
+        result,
+        [],
+        None,
+        Console(file=terminal_output, force_terminal=False, color_system=None),
+        settings=settings,
+        project_root=tmp_path,
+        stages_run=["docs-section-match"],
+    )
+
+    for rendered in (markdown, html, terminal_output.getvalue()):
+        assert "OPENAI_API_KEY" in rendered
+        assert "all-MiniLM-L6-v2" in rendered
+        assert str(tmp_path) not in rendered
+
+
+def test_failed_doc_pair_fallback_is_not_counted_as_relationship(tmp_path) -> None:
+    failed = DocPairAnalysis(
+        str(tmp_path / "a.md"),
+        str(tmp_path / "b.md"),
+        "unknown",
+        "unknown",
+        "complementary",
+        [],
+        "low",
+        analysis_error="TimeoutExpired: review timed out",
+    )
+    result = AnalysisResult(
+        doc_pair_analyses=[failed],
+        stage_status={
+            "docs-pair-review": {
+                "status": "degraded",
+                "exception_category": "DocPairAnalysisError",
+                "fallback": "low-confidence empty analysis",
+                "unavailable_conclusions": ["document relationship classification"],
+            }
+        },
+    )
+    settings = Settings()
+    json_report = json.loads(
+        render_json(
+            result,
+            [],
+            None,
+            settings=settings,
+            project_root=tmp_path,
+            stages_run=["docs-pair-review"],
+        )
+    )
+    markdown = render_markdown(
+        result,
+        [],
+        None,
+        settings=settings,
+        project_root=tmp_path,
+        stages_run=["docs-pair-review"],
+    )
+    terminal_output = StringIO()
+    render_terminal(
+        result,
+        [],
+        None,
+        Console(file=terminal_output, force_terminal=False, color_system=None),
+        settings=settings,
+        project_root=tmp_path,
+        stages_run=["docs-pair-review"],
+    )
+
+    assert json_report["summary"]["document_intent_relationships_found"] == 0
+    assert json_report["summary"]["outcome"]["signals"]["document_intent_relationships"] == 0
+    assert "Analysis status**: unavailable" in markdown
+    assert "**Relationship**: complementary" not in markdown
+    assert "analysis unavailable" in terminal_output.getvalue()
 
 
 def test_dashboard_and_summary_count_doc_relationships_and_suggestions(tmp_path) -> None:

@@ -103,6 +103,7 @@ overlap.
 - optional local sentence-transformers models such as `all-MiniLM-L6-v2`
 - Batch embedding with L2 normalization for dot-product cosine similarity
 - Suppresses noisy model loading output via OS-level fd redirection
+- Validates common provider credentials before concurrent calls and raises one concise, actionable embedding error
 
 **Profiles** (`code/profiles.py`)
 - Auto-detects Django and pytest-factories projects
@@ -140,6 +141,8 @@ overlap.
 
 **Embeddings** (`docs/embeddings.py`)
 - LiteLLM for API embedding models and optional sentence-transformers for local models
+- Embedding model/authentication is independent of the LLM backend; Codex CLI supplies completions, not embeddings
+- Probes the first uncached API request before parallel work so provider failures are not repeated per worker
 - Hybrid similarity: `(1 - token_weight) * cosine + token_weight * Jaccard`
 - Exposes embedding cosine, token Jaccard, and combined score separately
 - Uses a strict combined-score band plus a bounded lower cosine-based semantic-candidate band
@@ -172,6 +175,7 @@ overlap.
 - Run persistence via RunStore, with cleanup support for keeping the newest N runs or runs newer than a date cutoff
 - Progress tracking with rich console
 - Separates backend enablement, optional model override, and reproducible model identity; Codex CLI stages remain enabled when no model override is supplied
+- Persists embedding failures as degraded Section Match/intent-matching stages while allowing independent Docs Map completion stages to continue
 - Carries explicit stage status, exception category, fallback, and unavailable conclusions through saved artifacts and final reports
 
 **Report Generation** (`docs/report.py`)

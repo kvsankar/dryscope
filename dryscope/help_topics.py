@@ -210,6 +210,12 @@ HELP_TOPICS: tuple[HelpTopic, ...] = (
               [llm]       optional model override, backend, timeout, cost, concurrency
               [cache]     cache enablement and path
 
+            Embeddings are independent of [llm].backend. `codex-cli` can
+            authenticate completion/review calls, but the default
+            text-embedding-3-small model still requires OPENAI_API_KEY. For a
+            no-provider-key run, install dryscope[local-embeddings] and select
+            all-MiniLM-L6-v2 with --embedding-model.
+
             More detail:
               README.md#configuration
             """

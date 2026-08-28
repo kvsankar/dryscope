@@ -26,6 +26,9 @@ class TestScanHelp:
         result = runner.invoke(main, ["scan", "--help"])
         assert result.exit_code == 0
         assert "Scan PATH" in result.output
+        normalized = " ".join(result.output.split())
+        assert "API models require provider credentials independently of --backend" in normalized
+        assert "does not configure or authenticate embeddings" in normalized
 
 
 class TestProgressiveHelp:
@@ -95,6 +98,47 @@ class TestScanCode:
         data = json.loads(json_str)
         assert "dryscope_version" in data
         assert "findings" in data
+
+    def test_missing_api_embedding_key_is_concise(self, runner, monkeypatch):
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        monkeypatch.delenv("OPENAI_ADMIN_KEY", raising=False)
+
+        result = runner.invoke(
+            main,
+            ["scan", FIXTURES, "--code", "--embedding-model", "text-embedding-3-small"],
+        )
+
+        assert result.exit_code == 1
+        assert "Error: Embedding model 'text-embedding-3-small' requires" in result.output
+        assert "codex-cli" in result.output
+        assert "Traceback" not in result.output
+
+    def test_local_embedding_loader_failure_is_concise(self, runner, monkeypatch):
+        import sys
+        import types
+
+        class FakeSentenceTransformer:
+            def __init__(self, *_args, **_kwargs):
+                raise ValueError("private loader detail")
+
+        monkeypatch.setitem(
+            sys.modules,
+            "sentence_transformers",
+            types.SimpleNamespace(SentenceTransformer=FakeSentenceTransformer),
+        )
+
+        result = runner.invoke(
+            main,
+            ["scan", FIXTURES, "--code", "--embedding-model", "all-MiniLM-L6-v2"],
+        )
+
+        assert result.exit_code == 1
+        assert (
+            "Error: Local embedding model 'all-MiniLM-L6-v2' could not be loaded" in result.output
+        )
+        assert "dryscope[local-embeddings]" in result.output
+        assert "private loader detail" not in result.output
+        assert "Traceback" not in result.output
 
 
 class TestScanDocs:

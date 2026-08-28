@@ -7,6 +7,7 @@ from pathlib import Path
 from rich.console import Console
 
 from dryscope.cache import Cache
+from dryscope.code.embedder import EmbeddingError
 from dryscope.config import Settings
 from dryscope.docs.chunker import chunk_documents, chunk_file_list, detect_boilerplate_headings
 from dryscope.docs.coding import run_doc_pair_pipeline
@@ -351,9 +352,17 @@ def _load_section_match_stage(
     saved = run_store.load_stage("docs_section_match.json")
     if not saved:
         return None
+    saved_status = saved.get("stage_status") or {}
+    if saved_status.get("status") in {"degraded", "failed"}:
+        result.stage_status[DOCS_SECTION_MATCH_SLUG] = saved_status
+        console.print(
+            "[yellow]The saved Section Match stage was degraded; retrying it with the "
+            "current embedding configuration.[/yellow]"
+        )
+        return None
     similarity_pairs = _deserialize_pairs(saved.get("matched_section_pairs", []), result.chunks)
     candidate_pairs = _deserialize_pairs(saved.get("semantic_candidates", []), result.chunks)
-    result.stage_status[DOCS_SECTION_MATCH_SLUG] = saved.get("stage_status") or {
+    result.stage_status[DOCS_SECTION_MATCH_SLUG] = saved_status or {
         "status": "completed",
         "fallback": None,
     }
@@ -393,14 +402,41 @@ def _run_section_match_stage(
     def emb_progress(done: int, total: int) -> None:
         console.print(f"  Embedding {done}/{total} chunks...", end="\r")
 
-    with console.status("[bold green]Embedding all chunks..."):
-        embeddings = embed_chunks(
-            result.chunks,
-            settings.docs_embedding_model,
-            cache,
-            on_progress=emb_progress,
-            concurrency=settings.concurrency,
-        )
+    try:
+        with console.status("[bold green]Embedding all chunks..."):
+            embeddings = embed_chunks(
+                result.chunks,
+                settings.docs_embedding_model,
+                cache,
+                on_progress=emb_progress,
+                concurrency=settings.concurrency,
+            )
+    except EmbeddingError as exc:
+        result.stage_status[DOCS_SECTION_MATCH_SLUG] = {
+            "status": "degraded",
+            "failure_kind": "embedding",
+            "exception_category": type(exc).__name__,
+            "exception_message": str(exc),
+            "fallback": "no Section Match pairs or semantic candidates",
+            "unavailable_conclusions": [
+                "section-level similarity pairs, semantic candidates, and Section Match recommendations"
+            ],
+        }
+        console.print(f"{DOCS_SECTION_MATCH} degraded: {exc}", style="yellow", markup=False)
+        if run_store:
+            from dryscope.docs.report import serialize_section_match_stage
+
+            run_store.save_stage(
+                "docs_section_match.json",
+                serialize_section_match_stage(
+                    result,
+                    [],
+                    settings,
+                    scan_path,
+                    candidate_pairs=[],
+                ),
+            )
+        return [], []
 
     if cache:
         cache.commit()
@@ -464,9 +500,37 @@ def _load_docs_map_stage(
     if not saved:
         return False, {}, {}, None
 
+    saved_statuses = saved.get("stage_status", {})
+    docs_map_status_names = {
+        DOCS_MAP_SLUG,
+        "document-descriptors",
+        "canonical-taxonomy",
+        "ia-synthesis",
+        "intent-matching",
+    }
+    relevant_statuses = {
+        name: status for name, status in saved_statuses.items() if name in docs_map_status_names
+    }
+    unavailable_statuses = [
+        name
+        for name, status in relevant_statuses.items()
+        if status.get("status") in {"degraded", "failed"}
+        or (status.get("status") == "skipped" and status.get("unavailable_conclusions"))
+    ]
+    if unavailable_statuses:
+        console.print(
+            "[yellow]The saved Docs Map stage had unavailable conclusions "
+            f"({', '.join(sorted(unavailable_statuses))}); retrying it with the current "
+            "configuration.[/yellow]"
+        )
+        return False, {}, {}, saved
+
     result.document_descriptors = saved.get("document_descriptors", {})
     result.topic_taxonomy = saved.get("topic_taxonomy")
-    result.stage_status.update(saved.get("stage_status", {}))
+    # A docs_map artifact is saved after Section Match, so older payloads also
+    # contain that stage's status. Restore only Docs Map-owned statuses: a
+    # freshly retried Section Match must not be overwritten by stale metadata.
+    result.stage_status.update(relevant_statuses)
     if not (
         saved.get("descriptor_based") and result.document_descriptors and result.topic_taxonomy
     ):
@@ -532,7 +596,12 @@ def _discover_docs_map(
 
 def _update_docs_map_track_status(result: AnalysisResult) -> None:
     """Aggregate descriptor, taxonomy, and IA synthesis status for reports."""
-    component_names = ("document-descriptors", "canonical-taxonomy", "ia-synthesis")
+    component_names = (
+        "document-descriptors",
+        "canonical-taxonomy",
+        "ia-synthesis",
+        "intent-matching",
+    )
     components = [
         result.stage_status[name] for name in component_names if name in result.stage_status
     ]
@@ -719,11 +788,48 @@ def _extract_docs_map_stage(
 
     all_topics = list({t for topics in doc_topics.values() for t in topics})
     intent_evidence = {}
-    if all_topics:
-        topic_embeddings = embed_topics(all_topics, settings.docs_embedding_model, cache)
-        intent_evidence = find_intent_doc_pairs(
-            doc_topics, topic_embeddings, settings.threshold_intent
+    section_status = result.stage_status.get(DOCS_SECTION_MATCH_SLUG, {})
+    if all_topics and section_status.get("failure_kind") == "embedding":
+        result.stage_status["intent-matching"] = {
+            "status": "degraded",
+            "failure_kind": "embedding",
+            "exception_category": section_status.get("exception_category"),
+            "exception_message": section_status.get("exception_message"),
+            "fallback": "exact canonical topic clusters remain available",
+            "unavailable_conclusions": ["embedding-based document-intent relationships"],
+        }
+        console.print(
+            "[yellow]Skipping embedding-based intent matching because the embedding "
+            "configuration is unavailable.[/yellow]"
         )
+    elif all_topics:
+        try:
+            topic_embeddings = embed_topics(all_topics, settings.docs_embedding_model, cache)
+            intent_evidence = find_intent_doc_pairs(
+                doc_topics, topic_embeddings, settings.threshold_intent
+            )
+            result.stage_status["intent-matching"] = {
+                "status": "completed",
+                "fallback": None,
+            }
+        except EmbeddingError as exc:
+            result.stage_status["intent-matching"] = {
+                "status": "degraded",
+                "failure_kind": "embedding",
+                "exception_category": type(exc).__name__,
+                "exception_message": str(exc),
+                "fallback": "exact canonical topic clusters remain available",
+                "unavailable_conclusions": ["embedding-based document-intent relationships"],
+            }
+            console.print(f"Intent matching degraded: {exc}", style="yellow", markup=False)
+    else:
+        result.stage_status["intent-matching"] = {
+            "status": "skipped",
+            "fallback": None,
+            "reason": "no canonical topics to compare",
+            "unavailable_conclusions": [],
+        }
+    _update_docs_map_track_status(result)
 
     console.print(
         f"Found [bold]{len(intent_evidence)}[/bold] intent-overlap document pairs "
@@ -1132,11 +1238,23 @@ def run_pipeline(
                     ],
                 }
         else:
+            upstream_embedding_degraded = any(
+                result.stage_status.get(name, {}).get("failure_kind") == "embedding"
+                for name in (DOCS_SECTION_MATCH_SLUG, "intent-matching")
+            )
             result.stage_status[DOCS_PAIR_REVIEW_SLUG] = {
                 "status": "skipped",
                 "fallback": None,
-                "reason": "no strict, semantic-candidate, or intent document pairs",
-                "unavailable_conclusions": [],
+                "reason": (
+                    "no candidate document pairs because embedding stages degraded"
+                    if upstream_embedding_degraded
+                    else "no strict, semantic-candidate, or intent document pairs"
+                ),
+                "unavailable_conclusions": (
+                    ["document-pair review candidate selection"]
+                    if upstream_embedding_degraded
+                    else []
+                ),
             }
 
         return _finish_pipeline(

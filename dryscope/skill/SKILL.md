@@ -115,7 +115,11 @@ Backend options:
 For `codex-cli`, omit `--llm-model` to use the authenticated Codex CLI's
 configured default. Dryscope still runs every enabled LLM stage and records the
 effective identity as `codex-cli:configured-default`; no provider API key is
-needed when Codex CLI is already logged in.
+needed for those LLM completion calls when Codex CLI is already logged in.
+Embeddings are independent: the default `text-embedding-3-small` still requires
+`OPENAI_API_KEY`. For a full no-provider-key run, install
+`dryscope[local-embeddings]` and pass
+`--embedding-model all-MiniLM-L6-v2` together with `--backend codex-cli`.
 
 Saved report cleanup:
 - `{{DRYSCOPE_BIN}} reports clean /path/to/project --keep-last 10` previews deleting all but the newest 10 saved runs

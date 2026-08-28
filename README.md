@@ -242,6 +242,12 @@ pipx install "dryscope[local-embeddings]"
 python -m pip install "dryscope[local-embeddings]"
 ```
 
+Embedding selection and authentication are independent of the LLM review
+backend. In particular, `--backend codex-cli` uses Codex authentication for
+descriptor/review completions but does not make embeddings. The default
+`text-embedding-3-small` still requires `OPENAI_API_KEY`; use a local embedding
+model when you want the entire preflight to run without a provider API key.
+
 For repository development from a source checkout:
 
 ```bash
@@ -402,7 +408,7 @@ threshold_intent = 0.8
 min_content_words = 15
 include_intra = false
 token_weight = 0.3
-# Same embedding backend choices as [code].
+# Embedding selection is independent of [llm].backend.
 embedding_model = "text-embedding-3-small"
 intent_max_docs = 0
 llm_max_doc_pairs = 250
@@ -485,13 +491,24 @@ dryscope scan /path/to/project --verify --backend codex-cli
 ```
 
 `codex-cli` shells out non-interactively to `codex exec --ephemeral`. It uses
-the existing Codex CLI login, so an API key is not required when that CLI is
-already authenticated. `--llm-model` is an override, not the switch that
-enables LLM stages: when it is omitted, descriptor extraction, taxonomy
-canonicalization, Docs Map discovery, and Doc Pair Review still run with the
-Codex configured default. Reports and cache keys record this as
-`codex-cli:configured-default` because Codex does not expose the resolved model
-name to Dryscope.
+the existing Codex CLI login, so no provider API key is required for those LLM
+completion calls when that CLI is already authenticated. Embeddings are a
+separate dependency: Codex CLI does not expose an embedding endpoint to
+Dryscope, and the default `text-embedding-3-small` requires `OPENAI_API_KEY`.
+`--llm-model` is an override, not the switch that enables LLM stages: when it is
+omitted, descriptor extraction, taxonomy canonicalization, Docs Map discovery,
+and Doc Pair Review still run with the Codex configured default. Reports and
+cache keys record this as `codex-cli:configured-default` because Codex does not
+expose the resolved model name to Dryscope.
+
+For a full docs preflight with Codex CLI and no provider API key, install local
+embeddings and select them explicitly:
+
+```bash
+uv tool install "dryscope[local-embeddings]"
+dryscope scan /path/to/project --docs --stage docs-report-pack \
+  --backend codex-cli --embedding-model all-MiniLM-L6-v2
+```
 
 ### LiteLLM Providers
 
@@ -580,7 +597,7 @@ dryscope scan <path> [OPTIONS]
 | `--threshold-intent` | `0.8` | Docs Map topic-pair threshold |
 | `--llm-max-doc-pairs` | config | Maximum document pairs for Doc Pair Review |
 | `--concurrency` | config | Max parallel LLM calls for docs full stage |
-| `--backend` | config | LLM backend: `cli`, `codex-cli`, `litellm`, or `ollama` |
+| `--backend` | config | LLM completion/review backend: `cli`, `codex-cli`, `litellm`, or `ollama`; independent of embeddings |
 
 Report cleanup:
 

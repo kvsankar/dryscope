@@ -11,9 +11,10 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import numpy as np
 
 from dryscope.cache import Cache
+from dryscope.code.embedder import embed_api_texts
 from dryscope.config import DEFAULT_DOCS_MAP_FACET_DIMENSIONS, DEFAULT_DOCS_MAP_FACET_VALUES
 from dryscope.docs.coding import _strip_code_fences, call_llm_cached
-from dryscope.docs.embeddings import _get_sentence_transformer, _is_api_model, get_embedding
+from dryscope.docs.embeddings import _get_sentence_transformer, _is_api_model
 from dryscope.docs.models import Chunk
 from dryscope.similarity import cosine_similarity_matrix
 
@@ -359,8 +360,11 @@ def embed_topics(
 
     if uncached:
         if _is_api_model(model_name):
-            for topic in uncached:
-                result[topic] = get_embedding(topic, model_name, cache)
+            vectors = embed_api_texts(uncached, model_name)
+            for topic, vector in zip(uncached, vectors, strict=True):
+                result[topic] = vector
+                if cache is not None:
+                    cache.set_embedding(topic, model_name, vector)
         else:
             embedder = _get_sentence_transformer(model_name)
             vectors = embedder.embed(uncached)

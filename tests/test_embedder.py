@@ -9,8 +9,11 @@ import pytest
 
 from dryscope.code.embedder import (
     Embedder,
+    EmbeddingConfigurationError,
+    EmbeddingRequestError,
     _has_local_huggingface_cache,
     is_api_embedding_model,
+    validate_embedding_configuration,
 )
 
 
@@ -56,6 +59,7 @@ def test_api_embedding_model_detection():
 
 def test_embedder_uses_litellm_for_api_models(monkeypatch):
     captured: dict = {}
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
 
     class FakeLiteLLM:
         @staticmethod
@@ -81,8 +85,79 @@ def test_embedder_uses_litellm_for_api_models(monkeypatch):
     assert vectors[1].tolist() == pytest.approx([0.0, 1.0, 0.0])
 
 
+def test_missing_api_embedding_credentials_explain_codex_boundary(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_ADMIN_KEY", raising=False)
+
+    with pytest.raises(EmbeddingConfigurationError) as raised:
+        validate_embedding_configuration("text-embedding-3-small")
+
+    message = str(raised.value)
+    assert "requires OPENAI_API_KEY or OPENAI_ADMIN_KEY" in message
+    assert "codex-cli" in message
+    assert "do not supply embeddings" in message
+    assert "all-MiniLM-L6-v2" in message
+
+
+def test_api_embedding_provider_failure_is_wrapped_without_raw_detail(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    class FakeLiteLLM:
+        @staticmethod
+        def embedding(**_kwargs):
+            raise ValueError("provider detail that should not reach the user")
+
+    monkeypatch.setitem(sys.modules, "litellm", FakeLiteLLM)
+
+    with pytest.raises(EmbeddingRequestError) as raised:
+        Embedder("text-embedding-3-small").embed(["alpha"])
+
+    message = str(raised.value)
+    assert "failed via LiteLLM (ValueError)" in message
+    assert "provider detail" not in message
+    assert "all-MiniLM-L6-v2" in message
+
+
 def test_missing_sentence_transformers_has_actionable_error(monkeypatch):
     monkeypatch.setitem(sys.modules, "sentence_transformers", None)
 
     with pytest.raises(RuntimeError, match=r"dryscope\[local-embeddings\]"):
         Embedder("all-MiniLM-L6-v2")
+
+
+def test_local_model_load_failure_is_wrapped_without_raw_detail(monkeypatch):
+    class FakeSentenceTransformer:
+        def __init__(self, *_args, **_kwargs):
+            raise ValueError("private loader detail")
+
+    fake_module = types.SimpleNamespace(SentenceTransformer=FakeSentenceTransformer)
+    monkeypatch.setitem(sys.modules, "sentence_transformers", fake_module)
+
+    with pytest.raises(EmbeddingConfigurationError) as raised:
+        Embedder("all-MiniLM-L6-v2")
+
+    message = str(raised.value)
+    assert "could not be loaded (ValueError)" in message
+    assert "dryscope[local-embeddings]" in message
+    assert "private loader detail" not in message
+
+
+def test_local_encode_failure_is_wrapped_without_raw_detail(monkeypatch):
+    class FakeSentenceTransformer:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def encode(self, *_args, **_kwargs):
+            raise ValueError("private encode detail")
+
+    fake_module = types.SimpleNamespace(SentenceTransformer=FakeSentenceTransformer)
+    monkeypatch.setitem(sys.modules, "sentence_transformers", fake_module)
+    embedder = Embedder("all-MiniLM-L6-v2")
+
+    with pytest.raises(EmbeddingRequestError) as raised:
+        embedder.embed(["alpha"])
+
+    message = str(raised.value)
+    assert "Local embedding generation" in message
+    assert "failed (ValueError)" in message
+    assert "private encode detail" not in message

@@ -31,7 +31,7 @@ Code scans and combined code/docs scans use the unified findings shape:
 
 ```json
 {
-  "dryscope_version": "0.1.2",
+  "dryscope_version": "0.1.3",
   "findings": [],
   "summary": {}
 }
@@ -41,7 +41,7 @@ Code-only scans also include the active report pack and track:
 
 ```json
 {
-  "dryscope_version": "0.1.2",
+  "dryscope_version": "0.1.3",
   "report_pack": {
     "label": "Code Report Pack",
     "slug": "code-report-pack"
@@ -211,7 +211,18 @@ scope are relative; an input outside that scope is labeled
 The summary outcome is `findings`, `clean-negative`, or `degraded`. Zero strict
 section matches is only “none above threshold.” It becomes `clean-negative`
 only if all relevant stages completed and document-intent, IA, candidate, and
-recommendation signals are also empty.
+recommendation signals are also empty. `summary.outcome.signals` gives explicit
+counts for strict section pairs, semantic candidates, Docs Map clusters, Docs
+Map diagnostics, document-intent relationships, and refactoring/reference
+suggestions; the human-readable statement names only the nonzero signal types.
+
+The LLM backend and embedding provider are independent. For example,
+`codex-cli:configured-default` authenticates completion/review stages but does
+not provide embeddings. If an API embedding model lacks credentials, Section
+Match is persisted as `degraded` with a concise remediation and unavailable
+conclusions instead of emitting a provider traceback. Independent Docs Map LLM
+stages may still complete, while embedding-based intent matching is likewise
+marked degraded.
 
 ## Docs Stage Artifacts
 

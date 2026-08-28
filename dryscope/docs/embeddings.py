@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import numpy as np
 
 from dryscope.cache import Cache
-from dryscope.code.embedder import Embedder, is_api_embedding_model
+from dryscope.code.embedder import Embedder, embed_api_texts, is_api_embedding_model
 from dryscope.docs.models import Chunk, OverlapPair
 from dryscope.similarity import cosine_similarity_matrix
 
@@ -63,20 +63,74 @@ def get_embedding(text: str, model: str, cache: Cache | None = None) -> list[flo
         if cached is not None:
             return cached
 
-    try:
-        import litellm
-    except ImportError as exc:
-        raise RuntimeError(
-            "API embedding model requires LiteLLM. Install dryscope with "
-            "API embedding support or install `litellm`."
-        ) from exc
-    response = litellm.embedding(model=model, input=[text])
-    vector = response.data[0]["embedding"]
+    vector = embed_api_texts([text], model)[0]
 
     if cache is not None:
         cache.set_embedding(text, model, vector)
 
     return vector
+
+
+def _embed_api_items(
+    items: list[tuple[str, str]],
+    model: str,
+    cache: Cache | None,
+    on_progress: Callable[..., None] | None,
+    concurrency: int,
+) -> dict[str, list[float]]:
+    """Embed text items after one synchronous provider probe.
+
+    The first uncached request runs before a worker pool is created. Invalid
+    credentials or provider setup therefore produce one concise failure rather
+    than one LiteLLM diagnostic per worker.
+    """
+    embeddings: dict[str, list[float]] = {}
+    pending: list[tuple[str, str]] = []
+    for item_id, text in items:
+        cached = cache.get_embedding(text, model) if cache is not None else None
+        if cached is None:
+            pending.append((item_id, text))
+        else:
+            embeddings[item_id] = cached
+
+    total = len(items)
+    done_count = len(embeddings)
+    if not pending:
+        if on_progress:
+            on_progress(done_count, total)
+        return embeddings
+
+    first_id, first_text = pending.pop(0)
+    embeddings[first_id] = get_embedding(first_text, model, cache)
+    done_count += 1
+    if on_progress:
+        on_progress(done_count, total)
+
+    if concurrency > 1 and pending:
+        progress_lock = threading.Lock()
+
+        def _embed_one(item_id: str, text: str) -> tuple[str, list[float]]:
+            return item_id, get_embedding(text, model, cache)
+
+        with ThreadPoolExecutor(max_workers=concurrency) as executor:
+            futures = {
+                executor.submit(_embed_one, item_id, text): item_id for item_id, text in pending
+            }
+            for future in as_completed(futures):
+                item_id, vector = future.result()
+                embeddings[item_id] = vector
+                with progress_lock:
+                    done_count += 1
+                    if on_progress:
+                        on_progress(done_count, total)
+    else:
+        for item_id, text in pending:
+            embeddings[item_id] = get_embedding(text, model, cache)
+            done_count += 1
+            if on_progress:
+                on_progress(done_count, total)
+
+    return embeddings
 
 
 def refine_with_embeddings(
@@ -99,33 +153,14 @@ def refine_with_embeddings(
         chunks_to_embed[pair.chunk_b.id] = pair.chunk_b
 
     # Compute embeddings
-    embeddings: dict[str, list[float]] = {}
-    total = len(chunks_to_embed)
     items = list(chunks_to_embed.items())
-
-    if concurrency > 1 and items:
-        progress_lock = threading.Lock()
-        done_count = 0
-
-        def _embed_one(chunk_id: str, chunk: Chunk) -> tuple[str, list[float]]:
-            return chunk_id, get_embedding(chunk.content, model, cache)
-
-        with ThreadPoolExecutor(max_workers=concurrency) as executor:
-            futures = {
-                executor.submit(_embed_one, chunk_id, chunk): chunk_id for chunk_id, chunk in items
-            }
-            for future in as_completed(futures):
-                chunk_id, vector = future.result()
-                embeddings[chunk_id] = vector
-                with progress_lock:
-                    done_count += 1
-                    if on_progress:
-                        on_progress(done_count, total)
-    else:
-        for i, (chunk_id, chunk) in enumerate(items):
-            embeddings[chunk_id] = get_embedding(chunk.content, model, cache)
-            if on_progress:
-                on_progress(i + 1, total)
+    embeddings = _embed_api_items(
+        [(chunk_id, chunk.content) for chunk_id, chunk in items],
+        model,
+        cache,
+        on_progress,
+        concurrency,
+    )
 
     # Compute similarity for each pair (numpy dot product on L2-normalized vectors)
     refined: list[OverlapPair] = []
@@ -169,29 +204,13 @@ def embed_chunks(
     embeddings: dict[str, list[float]] = {}
 
     if _is_api_model(model_name):
-        # API path: use litellm with concurrency and cache
-        total = len(chunks)
-        if concurrency > 1:
-            progress_lock = threading.Lock()
-            done_count = 0
-
-            def _embed_one(chunk: Chunk) -> tuple[str, list[float]]:
-                return chunk.id, get_embedding(chunk.content, model_name, cache)
-
-            with ThreadPoolExecutor(max_workers=concurrency) as executor:
-                futures = {executor.submit(_embed_one, chunk): chunk for chunk in chunks}
-                for future in as_completed(futures):
-                    chunk_id, vector = future.result()
-                    embeddings[chunk_id] = vector
-                    with progress_lock:
-                        done_count += 1
-                        if on_progress:
-                            on_progress(done_count, total)
-        else:
-            for i, chunk in enumerate(chunks):
-                embeddings[chunk.id] = get_embedding(chunk.content, model_name, cache)
-                if on_progress:
-                    on_progress(i + 1, total)
+        embeddings = _embed_api_items(
+            [(chunk.id, chunk.content) for chunk in chunks],
+            model_name,
+            cache,
+            on_progress,
+            concurrency,
+        )
     else:
         # Sentence-transformers path: batch encode locally
         # Check cache first for each chunk

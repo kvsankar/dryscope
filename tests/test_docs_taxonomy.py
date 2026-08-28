@@ -288,12 +288,18 @@ def test_build_docs_map_warning_includes_exception(monkeypatch, capsys) -> None:
 
 def test_embed_topics_uses_api_embedding_models(monkeypatch) -> None:
     calls: list[dict] = []
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
 
     class FakeLiteLLM:
         @staticmethod
         def embedding(**kwargs):
             calls.append(kwargs)
-            return SimpleNamespace(data=[{"embedding": [1.0, 2.0, 3.0]}])
+            return SimpleNamespace(
+                data=[
+                    {"embedding": [1.0, 2.0, 3.0]},
+                    {"embedding": [1.0, 2.0, 3.0]},
+                ]
+            )
 
     monkeypatch.setitem(__import__("sys").modules, "litellm", FakeLiteLLM)
 
@@ -303,5 +309,5 @@ def test_embed_topics_uses_api_embedding_models(monkeypatch) -> None:
         "alpha": [1.0, 2.0, 3.0],
         "beta": [1.0, 2.0, 3.0],
     }
-    assert [call["input"] for call in calls] == [["alpha"], ["beta"]]
+    assert [call["input"] for call in calls] == [["alpha", "beta"]]
     assert all(call["model"] == "text-embedding-3-small" for call in calls)

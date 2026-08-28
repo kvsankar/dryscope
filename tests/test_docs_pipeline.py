@@ -1,21 +1,25 @@
 """Tests for docs pipeline scaling helpers."""
 
 import json
+from io import StringIO
 
 import pytest
 from rich.console import Console
 
+from dryscope.code.embedder import EmbeddingConfigurationError
 from dryscope.config import Settings
 from dryscope.docs.models import AnalysisResult, Chunk, Document, OverlapPair
 from dryscope.docs.pipeline import (
     _filter_doc_chunks_map,
     _group_pairs_by_doc_pair,
+    _load_docs_map_stage,
     _output_results,
     _rank_doc_paths_by_similarity_evidence,
     _restrict_doc_pair_groups,
     _should_skip_intent_extraction,
     run_pipeline,
 )
+from dryscope.run_store import RunStore
 
 
 def _pair(doc_a: str, doc_b: str, line_a: int, line_b: int, similarity: float) -> OverlapPair:
@@ -112,6 +116,156 @@ def test_should_not_skip_intent_extraction_for_small_negative_repo() -> None:
 def test_run_pipeline_rejects_unknown_stage(tmp_path) -> None:
     with pytest.raises(ValueError, match="Unknown docs stage"):
         run_pipeline(tmp_path, Settings(), stage="similarity", console=Console(stderr=True))
+
+
+def test_embedding_failure_is_persisted_as_degraded_report(monkeypatch, tmp_path) -> None:
+    (tmp_path / "a.md").write_text(
+        "# A\n\n## Details\n\nEnough words to create a documentation section for embedding failure coverage.\n"
+    )
+    (tmp_path / "b.md").write_text(
+        "# B\n\n## Details\n\nEnough other words to create a second documentation section for coverage.\n"
+    )
+    monkeypatch.setattr(
+        "dryscope.docs.pipeline.embed_chunks",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            EmbeddingConfigurationError(
+                "Embedding model requires OPENAI_API_KEY; use all-MiniLM-L6-v2."
+            )
+        ),
+    )
+    report_path = tmp_path / "degraded.json"
+    console_output = StringIO()
+    store = RunStore(tmp_path)
+
+    result = run_pipeline(
+        tmp_path,
+        Settings(cache_enabled=False),
+        stage="docs-section-match",
+        output_format="json",
+        output_file=str(report_path),
+        console=Console(file=console_output, force_terminal=False, color_system=None),
+        run_store=store,
+    )
+
+    status = result.stage_status["docs-section-match"]
+    assert status["status"] == "degraded"
+    assert status["exception_category"] == "EmbeddingConfigurationError"
+    assert status["fallback"] == "no Section Match pairs or semantic candidates"
+    assert status["unavailable_conclusions"]
+    assert "Traceback" not in console_output.getvalue()
+    assert console_output.getvalue().count("OPENAI_API_KEY") == 1
+    assert "all-MiniLM-L6-v2" in console_output.getvalue()
+
+    report = json.loads(report_path.read_text())
+    assert report["summary"]["outcome"]["status"] == "degraded"
+    saved = store.load_stage("docs_section_match.json")
+    assert saved is not None
+    assert saved["stage_status"]["status"] == "degraded"
+
+
+def test_docs_map_can_continue_after_section_embedding_degrades(monkeypatch, tmp_path) -> None:
+    (tmp_path / "a.md").write_text(
+        "# A\n\n## Details\n\nEnough words to create a documentation section for degraded coverage.\n"
+    )
+    monkeypatch.setattr(
+        "dryscope.docs.pipeline.embed_chunks",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            EmbeddingConfigurationError("Embedding setup unavailable.")
+        ),
+    )
+    docs_map_calls = 0
+
+    def fake_docs_map_stage(result, *_args, **_kwargs):
+        nonlocal docs_map_calls
+        docs_map_calls += 1
+        result.topic_taxonomy = {
+            "docs_map": {
+                "method": "llm",
+                "topic_tree": [],
+                "facets": {},
+                "diagnostics": [{"kind": "navigation_gap", "message": "Review navigation."}],
+            }
+        }
+        result.stage_status["docs-map"] = {"status": "completed", "fallback": None}
+        return {}, {}
+
+    monkeypatch.setattr("dryscope.docs.pipeline._run_docs_map_stage", fake_docs_map_stage)
+    report_path = tmp_path / "full-report.json"
+
+    result = run_pipeline(
+        tmp_path,
+        Settings(cache_enabled=False),
+        stage="docs-report-pack",
+        output_format="json",
+        output_file=str(report_path),
+        console=Console(file=StringIO(), force_terminal=False, color_system=None),
+    )
+
+    assert docs_map_calls == 1
+    assert result.stage_status["docs-section-match"]["status"] == "degraded"
+    assert result.stage_status["docs-map"]["status"] == "completed"
+    assert result.stage_status["docs-pair-review"]["status"] == "skipped"
+    assert result.stage_status["docs-pair-review"]["unavailable_conclusions"]
+    outcome = json.loads(report_path.read_text())["summary"]["outcome"]
+    assert outcome["status"] == "degraded"
+    assert "1 Docs Map diagnostic" in outcome["statement"]
+
+
+def test_resume_retries_degraded_docs_map_without_restoring_stale_section_status(
+    tmp_path,
+) -> None:
+    doc_path = tmp_path / "a.md"
+    doc_path.write_text("# A\n\nEnough documentation content for a resumable stage.\n")
+    document = Document(str(doc_path), [])
+    store = RunStore(tmp_path)
+    saved = {
+        "descriptor_based": True,
+        "document_descriptors": {"a.md": {"about": ["publication hardening"]}},
+        "topic_taxonomy": {"canonical_topics": []},
+        "doc_topics": {"a.md": ["publication hardening"]},
+        "intent_matches": [],
+        "stage_status": {
+            "docs-section-match": {
+                "status": "degraded",
+                "unavailable_conclusions": ["stale Section Match conclusion"],
+            },
+            "document-descriptors": {"status": "completed", "fallback": None},
+            "canonical-taxonomy": {"status": "completed", "fallback": None},
+            "ia-synthesis": {"status": "completed", "fallback": None},
+            "intent-matching": {
+                "status": "degraded",
+                "unavailable_conclusions": ["embedding-based intent relationships"],
+            },
+            "docs-map": {
+                "status": "degraded",
+                "unavailable_conclusions": ["embedding-based intent relationships"],
+            },
+        },
+    }
+    store.save_stage("docs_map.json", saved)
+    result = AnalysisResult(
+        documents=[document],
+        stage_status={"docs-section-match": {"status": "completed", "fallback": None}},
+    )
+    output = StringIO()
+    console = Console(file=output, force_terminal=False, color_system=None)
+
+    resumed, _topics, _intent, _saved = _load_docs_map_stage(result, store, console)
+
+    assert resumed is False
+    assert result.stage_status["docs-section-match"]["status"] == "completed"
+    assert "retrying" in output.getvalue()
+
+    saved["stage_status"]["intent-matching"] = {"status": "completed", "fallback": None}
+    saved["stage_status"]["docs-map"] = {"status": "completed", "fallback": None}
+    store.save_stage("docs_map.json", saved)
+
+    resumed, doc_topics, intent_evidence, _saved = _load_docs_map_stage(result, store, console)
+
+    assert resumed is True
+    assert doc_topics == {str(doc_path): ["publication hardening"]}
+    assert intent_evidence == {}
+    assert result.stage_status["docs-section-match"]["status"] == "completed"
 
 
 def test_output_results_json_stdout_is_parseable(capsys, tmp_path) -> None:

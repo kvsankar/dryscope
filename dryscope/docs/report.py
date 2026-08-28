@@ -15,6 +15,7 @@ from typing import cast
 from urllib.parse import unquote, urlparse
 
 from rich.console import Console
+from rich.markup import escape as escape_markup
 from rich.panel import Panel
 from rich.table import Table
 
@@ -103,9 +104,34 @@ def _doc_pair_action_count(result: AnalysisResult) -> int:
     return sum(
         1
         for analysis in result.doc_pair_analyses
+        if not analysis.analysis_error
         for topic in analysis.topics
         if topic.action_for_other != "keep"
     )
+
+
+def _doc_pair_relationship_count(result: AnalysisResult) -> int:
+    """Count successfully synthesized document relationships."""
+    return sum(1 for analysis in result.doc_pair_analyses if not analysis.analysis_error)
+
+
+def _status_exception_detail(status: dict, project_root: Path | None = None) -> str:
+    """Return one report-safe line of actionable stage failure detail."""
+    detail = " ".join(str(status.get("exception_message") or "").split())
+    if not detail:
+        return "-"
+    if project_root is not None:
+        detail = detail.replace(str(project_root.resolve()), ".")
+    return _redact_machine_paths(detail)
+
+
+def _join_count_phrases(phrases: list[str]) -> str:
+    """Join counted report signals into one readable clause."""
+    if len(phrases) < 2:
+        return phrases[0] if phrases else ""
+    if len(phrases) == 2:
+        return " and ".join(phrases)
+    return f"{', '.join(phrases[:-1])}, and {phrases[-1]}"
 
 
 def _report_outcome(result: AnalysisResult, strict_pairs: list[OverlapPair]) -> dict:
@@ -117,25 +143,51 @@ def _report_outcome(result: AnalysisResult, strict_pairs: list[OverlapPair]) -> 
         if status.get("status") in {"degraded", "failed"}
         or (status.get("status") == "skipped" and status.get("unavailable_conclusions"))
     ]
-    relationship_count = len(result.doc_pair_analyses)
+    relationship_count = _doc_pair_relationship_count(result)
     action_count = _doc_pair_action_count(result)
-    finding_count = (
-        len(strict_pairs)
-        + len(result.candidate_overlaps)
-        + len(_topic_document_clusters(result))
-        + len(docs_map.get("diagnostics", []))
-        + relationship_count
-        + action_count
+    signal_counts = {
+        "strict_section_pairs": len(strict_pairs),
+        "semantic_candidates": len(result.candidate_overlaps),
+        "docs_map_clusters": len(_topic_document_clusters(result)),
+        "docs_map_diagnostics": len(docs_map.get("diagnostics", [])),
+        "document_intent_relationships": relationship_count,
+        "refactoring_reference_suggestions": action_count,
+    }
+    signal_phrases = [
+        _plural(signal_counts["strict_section_pairs"], "strict section pair"),
+        _plural(signal_counts["semantic_candidates"], "semantic candidate"),
+        _plural(signal_counts["docs_map_clusters"], "Docs Map coverage cluster"),
+        _plural(signal_counts["docs_map_diagnostics"], "Docs Map diagnostic"),
+        _plural(
+            signal_counts["document_intent_relationships"],
+            "document-intent relationship",
+        ),
+        _plural(
+            signal_counts["refactoring_reference_suggestions"],
+            "refactoring/reference suggestion",
+        ),
+    ]
+    surfaced = _join_count_phrases(
+        [
+            phrase
+            for phrase, count in zip(signal_phrases, signal_counts.values(), strict=True)
+            if count
+        ]
     )
     if unavailable:
         status = "degraded"
         statement = (
-            "The run is degraded; some conclusions are unavailable. Empty outputs from "
-            "affected stages are not clean-negative evidence."
+            (
+                f"The run surfaced {surfaced}, but is degraded; "
+                if surfaced
+                else "The run is degraded; "
+            )
+            + "some conclusions are unavailable. Empty outputs from affected stages are not "
+            "clean-negative evidence."
         )
-    elif finding_count:
+    elif surfaced:
         status = "findings"
-        statement = "The preflight surfaced candidates or document-intent relationships for review."
+        statement = f"The preflight surfaced {surfaced} for review."
     else:
         status = "clean-negative"
         statement = (
@@ -150,6 +202,7 @@ def _report_outcome(result: AnalysisResult, strict_pairs: list[OverlapPair]) -> 
             "pairs below it may still appear in the semantic-candidate or document-intent tracks."
         ),
         "degraded_stages": unavailable,
+        "signals": signal_counts,
     }
 
 
@@ -192,7 +245,7 @@ def _build_run_overview(
                     f"{_plural(len(result.chunks), 'section')}, "
                     f"{_plural(len(similarity_pairs), 'matched section pair')}, "
                     f"{_plural(len(result.candidate_overlaps), 'semantic candidate')}, "
-                    f"{_plural(len(result.doc_pair_analyses), 'document-intent relationship')}, "
+                    f"{_plural(_doc_pair_relationship_count(result), 'document-intent relationship')}, "
                     f"{_plural(doc_pair_actions, 'document-level suggestion')}."
                 ),
             },
@@ -245,7 +298,7 @@ def _build_run_overview(
                 "label": DOCS_PAIR_REVIEW,
                 "slug": DOCS_PAIR_REVIEW_SLUG,
                 "pairs_analyzed": len(result.doc_pair_analyses),
-                "relationships_found": len(result.doc_pair_analyses),
+                "relationships_found": _doc_pair_relationship_count(result),
                 "recommendations_found": doc_pair_actions,
             },
             "stages_run": stages_run or [],
@@ -547,6 +600,16 @@ def _render_terminal_doc_pair_review(console: Console, result: AnalysisResult) -
     console.print()
 
     for analysis in result.doc_pair_analyses:
+        if analysis.analysis_error:
+            detail = _redact_machine_paths(analysis.analysis_error)
+            console.print(
+                f"  [bold]{_short_path(analysis.doc_a_path)}[/bold] -> "
+                f"[bold]{_short_path(analysis.doc_b_path)}[/bold] "
+                "([yellow]analysis unavailable[/yellow])"
+            )
+            console.print(f"    Failure: {detail}", markup=False)
+            console.print()
+            continue
         rel = analysis.relationship
         conf = analysis.confidence
         console.print(
@@ -686,9 +749,11 @@ def render_terminal(
     style = "yellow" if outcome["status"] == "degraded" else "cyan"
     console.print(f"[{style}]{outcome['statement']}[/{style}]")
     for stage_name, status in result.stage_status.items():
+        detail = _status_exception_detail(status, project_root)
         console.print(
             f"  {stage_name}: [bold]{status.get('status', 'unknown')}[/bold]"
             + (f"; fallback={status.get('fallback')}" if status.get("fallback") else "")
+            + (f"; details={escape_markup(detail)}" if detail != "-" else "")
         )
     console.print()
 
@@ -753,7 +818,7 @@ def _append_markdown_dashboard(
     n_docs_map_facets = len(context.docs_map.get("facets", {}))
     n_consolidation_clusters = len(_topic_document_clusters(result))
     n_candidates = len(result.candidate_overlaps)
-    n_doc_relationships = len(result.doc_pair_analyses)
+    n_doc_relationships = _doc_pair_relationship_count(result)
     n_doc_actions = _doc_pair_action_count(result)
     outcome = _report_outcome(result, similarity_pairs)
     docs_map_ran = bool(context.docs_map or result.document_descriptors or result.topic_taxonomy)
@@ -828,17 +893,18 @@ def _append_markdown_run_overview(
     lines.append(f"{outcome['strict_threshold_result']}\n")
 
     lines.append("### Stage Status\n")
-    lines.append("| Stage | Status | Exception | Fallback | Unavailable Conclusions |")
-    lines.append("|-------|--------|-----------|----------|-------------------------|")
+    lines.append("| Stage | Status | Exception | Details | Fallback | Unavailable Conclusions |")
+    lines.append("|-------|--------|-----------|---------|----------|-------------------------|")
     for stage_name, status in result.stage_status.items():
         unavailable = "; ".join(status.get("unavailable_conclusions", [])) or "-"
+        detail = _status_exception_detail(status, project_root).replace("|", "\\|")
         lines.append(
             f"| {stage_name} | {status.get('status', 'unknown')} "
             f"| {status.get('exception_category') or '-'} "
-            f"| {status.get('fallback') or '-'} | {unavailable} |"
+            f"| {detail} | {status.get('fallback') or '-'} | {unavailable} |"
         )
     if not result.stage_status:
-        lines.append("| (not recorded) | unknown | - | - | stage availability is unknown |")
+        lines.append("| (not recorded) | unknown | - | - | - | stage availability is unknown |")
     lines.append("")
 
     lines.append("### Capabilities Exercised\n")
@@ -1209,6 +1275,11 @@ def _append_markdown_doc_pair_review(
         name_a = _short_path(analysis.doc_a_path)
         name_b = _short_path(analysis.doc_b_path)
         lines.append(f"### `{name_a}` / `{name_b}`\n")
+        if analysis.analysis_error:
+            detail = _redact_machine_paths(analysis.analysis_error).replace("|", "\\|")
+            lines.append("- **Analysis status**: unavailable")
+            lines.append(f"- **Failure**: {detail}\n")
+            continue
         lines.append(
             f"- **Relationship**: {analysis.relationship} ({analysis.confidence} confidence)"
         )
@@ -1438,7 +1509,7 @@ def render_json(
             "matched_section_pairs_found": len(similarity_pairs),
             "semantic_candidates_found": len(result.candidate_overlaps),
             "section_match_recommendations_found": len(recommendations),
-            "document_intent_relationships_found": len(result.doc_pair_analyses),
+            "document_intent_relationships_found": _doc_pair_relationship_count(result),
             "document_level_suggestions_found": _doc_pair_action_count(result),
             "recommendations_count": len(recommendations) + _doc_pair_action_count(result),
             "outcome": _report_outcome(result, similarity_pairs),
@@ -2455,7 +2526,7 @@ def render_final_report(
             "semantic_candidates_found": len(result.candidate_overlaps),
             "recommendations_count": len(recommendations) + _doc_pair_action_count(result),
             "section_match_recommendations_found": len(recommendations),
-            "document_intent_relationships_found": len(result.doc_pair_analyses),
+            "document_intent_relationships_found": _doc_pair_relationship_count(result),
             "document_level_suggestions_found": _doc_pair_action_count(result),
             "outcome": _report_outcome(result, similarity_pairs),
         },
