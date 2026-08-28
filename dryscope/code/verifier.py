@@ -2,48 +2,20 @@
 
 Uses litellm for provider-agnostic LLM calls. Supports any model that litellm
 supports (Anthropic, OpenAI, Azure, Bedrock, Ollama, etc.). Auth is handled
-via environment variables (ANTHROPIC_API_KEY, OPENAI_API_KEY, etc.) or a .env
-file in the current directory.
+via environment variables, the per-user Dryscope environment file, or a
+project .env fallback.
 """
 
 from __future__ import annotations
 
 import json
 import logging
-import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from dryscope.code.reporter import Cluster
+from dryscope.environment import load_environment
 from dryscope.llm_backend import completion as llm_completion
-
-
-def _load_dotenv() -> None:
-    """Load .env file, searching current dir then upward to find one."""
-    env_file = None
-    candidate = Path.cwd()
-    while True:
-        if (candidate / ".env").exists():
-            env_file = candidate / ".env"
-            break
-        parent = candidate.parent
-        if parent == candidate:
-            break
-        candidate = parent
-
-    if env_file is None:
-        return
-    for line in env_file.read_text().splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        if "=" in line:
-            key, _, value = line.partition("=")
-            key = key.strip()
-            value = value.strip().strip("'\"")
-            if key and key not in os.environ:
-                os.environ[key] = value
-
 
 logger = logging.getLogger(__name__)
 
@@ -249,7 +221,7 @@ def verify_clusters(
 
     Returns list of (cluster, verdict, reason).
     """
-    _load_dotenv()
+    load_environment(Path.cwd())
     results: list[tuple[Cluster, str, str]] = []
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:

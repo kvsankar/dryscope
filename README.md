@@ -242,6 +242,71 @@ pipx install "dryscope[local-embeddings]"
 python -m pip install "dryscope[local-embeddings]"
 ```
 
+### Provider credentials
+
+Dryscope loads provider credentials from the process environment or a
+platform-conventional per-user file:
+
+| Platform | Default file |
+| --- | --- |
+| Linux and WSL | `$XDG_CONFIG_HOME/dryscope/env`, or `~/.config/dryscope/env` when XDG is unset |
+| macOS | `~/Library/Application Support/dryscope/env` |
+| Windows | `%APPDATA%\dryscope\env` |
+
+An explicitly set absolute `XDG_CONFIG_HOME` is honored on every platform.
+`DRYSCOPE_ENV_FILE` may select a different file directly. On macOS and Windows,
+the former `~/.config/dryscope/env` default remains a fallback when the native
+file does not exist.
+
+On Linux or WSL, create the file without placing the key in shell history:
+
+```bash
+mkdir -p "${XDG_CONFIG_HOME:-$HOME/.config}/dryscope"
+chmod 700 "${XDG_CONFIG_HOME:-$HOME/.config}/dryscope"
+touch "${XDG_CONFIG_HOME:-$HOME/.config}/dryscope/env"
+chmod 600 "${XDG_CONFIG_HOME:-$HOME/.config}/dryscope/env"
+${EDITOR:-vi} "${XDG_CONFIG_HOME:-$HOME/.config}/dryscope/env"
+```
+
+On macOS:
+
+```bash
+config_dir="${XDG_CONFIG_HOME:-$HOME/Library/Application Support}/dryscope"
+mkdir -p "$config_dir"
+chmod 700 "$config_dir"
+touch "$config_dir/env"
+chmod 600 "$config_dir/env"
+${EDITOR:-vi} "$config_dir/env"
+```
+
+On Windows PowerShell:
+
+```powershell
+$configDir = Join-Path $env:APPDATA "dryscope"
+$envFile = Join-Path $configDir "env"
+New-Item -ItemType Directory -Force -Path $configDir | Out-Null
+New-Item -ItemType File -Force -Path $envFile | Out-Null
+$currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+& icacls.exe $envFile /inheritance:r /grant:r "${currentUser}:(F)" | Out-Null
+notepad $envFile
+```
+
+The file uses simple `KEY=VALUE` entries:
+
+```dotenv
+OPENAI_API_KEY=<your-key>
+```
+
+Blank lines, comments, optional `export`, and matching single or double quotes
+are accepted. The file is parsed as data; shell expansion and commands are not
+evaluated. On POSIX systems, Dryscope refuses a user credential file readable
+by group or other users. Windows relies on the file ACL; the PowerShell example
+restricts it to the current account.
+
+For environment sources, precedence is: an already-set process variable, then
+the user Dryscope file, then the nearest project `.env` fallback. Credential
+values are never included in report provenance. Do not commit credential files.
+
 Embedding selection and authentication are independent of the LLM review
 backend. In particular, `--backend codex-cli` uses Codex authentication for
 descriptor/review completions but does not make embeddings. The default
@@ -443,7 +508,8 @@ enabled = true
 path = "~/.cache/dryscope/cache.db"
 ```
 
-Configuration layers: defaults → `.dryscope.toml` → CLI flags.
+Configuration layers: defaults → `.dryscope.toml` → CLI flags. Provider
+credentials use the separate environment-file precedence documented above.
 
 ## LLM Backend Configuration
 

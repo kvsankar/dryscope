@@ -112,6 +112,16 @@ Backend options:
 - `backend = "litellm"` uses provider API keys such as `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`
 - `backend = "ollama"` uses the local Ollama API at `OLLAMA_HOST` or `http://localhost:11434`
 
+Provider keys may be set in the process environment or in a per-user file using
+`KEY=VALUE` lines. Defaults are `$XDG_CONFIG_HOME/dryscope/env` (or
+`~/.config/dryscope/env`) on Linux/WSL,
+`~/Library/Application Support/dryscope/env` on macOS, and
+`%APPDATA%\dryscope\env` on Windows. An absolute `XDG_CONFIG_HOME` works on
+every platform, and `DRYSCOPE_ENV_FILE` may select an alternate file. Existing
+process variables win; the user file is next, followed by the nearest project
+`.env` fallback. Protect the file with mode 600 on POSIX or a current-user ACL
+on Windows. Credential values are not written to reports.
+
 For `codex-cli`, omit `--llm-model` to use the authenticated Codex CLI's
 configured default. Dryscope still runs every enabled LLM stage and records the
 effective identity as `codex-cli:configured-default`; no provider API key is

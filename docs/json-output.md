@@ -31,7 +31,7 @@ Code scans and combined code/docs scans use the unified findings shape:
 
 ```json
 {
-  "dryscope_version": "0.1.3",
+  "dryscope_version": "0.1.4",
   "findings": [],
   "summary": {}
 }
@@ -41,7 +41,7 @@ Code-only scans also include the active report pack and track:
 
 ```json
 {
-  "dryscope_version": "0.1.3",
+  "dryscope_version": "0.1.4",
   "report_pack": {
     "label": "Code Report Pack",
     "slug": "code-report-pack"

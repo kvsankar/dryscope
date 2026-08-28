@@ -1,6 +1,7 @@
 """Tests for dryscope.cli — CLI entry point."""
 
 import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -99,7 +100,9 @@ class TestScanCode:
         assert "dryscope_version" in data
         assert "findings" in data
 
-    def test_missing_api_embedding_key_is_concise(self, runner, monkeypatch):
+    def test_missing_api_embedding_key_is_concise(self, runner, monkeypatch, tmp_path):
+        monkeypatch.delenv("DRYSCOPE_ENV_FILE", raising=False)
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "empty-config"))
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
         monkeypatch.delenv("OPENAI_ADMIN_KEY", raising=False)
 
@@ -112,6 +115,52 @@ class TestScanCode:
         assert "Error: Embedding model 'text-embedding-3-small' requires" in result.output
         assert "codex-cli" in result.output
         assert "Traceback" not in result.output
+
+    def test_api_embedding_key_loads_from_xdg_env_without_entering_output(
+        self, runner, monkeypatch, tmp_path
+    ):
+        import sys
+        import types
+
+        secret = "test-openai-key-from-xdg"
+        config_file = tmp_path / "config" / "dryscope" / "env"
+        config_file.parent.mkdir(parents=True)
+        config_file.write_text(f"OPENAI_API_KEY={secret}\n")
+        config_file.chmod(0o600)
+        monkeypatch.delenv("DRYSCOPE_ENV_FILE", raising=False)
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        monkeypatch.delenv("OPENAI_ADMIN_KEY", raising=False)
+        observed: dict[str, str] = {}
+
+        class FakeLiteLLM:
+            suppress_debug_info = False
+
+            @staticmethod
+            def embedding(**kwargs):
+                observed["key"] = os.environ["OPENAI_API_KEY"]
+                return types.SimpleNamespace(
+                    data=[{"embedding": [1.0, 0.0]} for _ in kwargs["input"]]
+                )
+
+        monkeypatch.setitem(sys.modules, "litellm", FakeLiteLLM)
+
+        result = runner.invoke(
+            main,
+            [
+                "scan",
+                FIXTURES,
+                "--code",
+                "--embedding-model",
+                "text-embedding-3-small",
+                "--format",
+                "json",
+            ],
+        )
+
+        assert result.exit_code == 0
+        assert observed["key"] == secret
+        assert secret not in result.output
 
     def test_local_embedding_loader_failure_is_concise(self, runner, monkeypatch):
         import sys
@@ -142,6 +191,65 @@ class TestScanCode:
 
 
 class TestScanDocs:
+    def test_section_match_uses_openai_key_from_xdg_env(self, runner, tmp_path, monkeypatch):
+        import sys
+        import types
+
+        secret = "test-docs-openai-key-from-xdg"
+        config_file = tmp_path / "config" / "dryscope" / "env"
+        config_file.parent.mkdir(parents=True)
+        config_file.write_text(f"OPENAI_API_KEY={secret}\n")
+        config_file.chmod(0o600)
+        corpus = tmp_path / "corpus"
+        corpus.mkdir()
+        (corpus / ".dryscope.toml").write_text("[cache]\nenabled = false\n")
+        (corpus / "a.md").write_text(
+            "# Alpha\n\nShared documentation content for the first API embedding section.\n"
+        )
+        (corpus / "b.md").write_text(
+            "# Beta\n\nShared documentation content for the second API embedding section.\n"
+        )
+        monkeypatch.delenv("DRYSCOPE_ENV_FILE", raising=False)
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        monkeypatch.delenv("OPENAI_ADMIN_KEY", raising=False)
+        observed: dict[str, str] = {}
+
+        class FakeLiteLLM:
+            suppress_debug_info = False
+
+            @staticmethod
+            def embedding(**kwargs):
+                observed["key"] = os.environ["OPENAI_API_KEY"]
+                return types.SimpleNamespace(
+                    data=[{"embedding": [1.0, 0.0]} for _ in kwargs["input"]]
+                )
+
+        monkeypatch.setitem(sys.modules, "litellm", FakeLiteLLM)
+
+        result = runner.invoke(
+            main,
+            [
+                "scan",
+                str(corpus),
+                "--docs",
+                "--stage",
+                "docs-section-match",
+                "--embedding-model",
+                "text-embedding-3-small",
+                "--min-words",
+                "1",
+                "--format",
+                "json",
+            ],
+        )
+
+        assert result.exit_code == 0
+        assert observed["key"] == secret
+        assert secret not in result.output
+        report, _end = json.JSONDecoder().raw_decode(result.output[result.output.index("{") :])
+        assert report["metadata"]["config"]["embedding_model"] == "text-embedding-3-small"
+
     def test_embedding_model_option_applies_to_docs(self, runner, tmp_path, monkeypatch):
         captured = {}
 

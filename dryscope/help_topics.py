@@ -203,6 +203,18 @@ HELP_TOPICS: tuple[HelpTopic, ...] = (
             Settings are resolved in this order:
               defaults -> .dryscope.toml -> CLI flags
 
+            Provider credentials are loaded without entering report metadata:
+              process environment
+              Linux/WSL: $XDG_CONFIG_HOME/dryscope/env or ~/.config/dryscope/env
+              macOS: ~/Library/Application Support/dryscope/env
+              Windows: %APPDATA%\\dryscope\\env
+              nearest project .env fallback
+
+            An absolute XDG_CONFIG_HOME is honored on every platform.
+            DRYSCOPE_ENV_FILE selects an alternate file. The user file must be
+            private: mode 600 on POSIX or a current-user ACL on Windows.
+            Existing process variables always win.
+
             Main sections:
               [code]      code thresholds, min size filters, embedding model
               [docs]      strict/candidate thresholds, scoring, scope, stage limits

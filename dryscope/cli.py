@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 import click
 
 from dryscope import __version__
+from dryscope.environment import EnvironmentFileError, load_environment
 from dryscope.help_topics import OUTPUT_FORMATS, get_topic, render_topic, topic_summaries
 from dryscope.terminology import (
     CODE_MATCH,
@@ -685,6 +686,11 @@ def scan(
     """
     code, docs = _resolve_scan_modes(code, docs)
     _validate_scan_modes(code, docs, output_format)
+
+    try:
+        load_environment(Path(path))
+    except EnvironmentFileError as exc:
+        raise click.ClickException(str(exc)) from None
 
     # Build a single Settings object with all CLI overrides
     settings = _load_scan_settings(
