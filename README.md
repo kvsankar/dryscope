@@ -549,11 +549,13 @@ dryscope scan /path/to/project --verify --backend cli --llm-model claude-haiku-4
 [llm]
 backend = "codex-cli"
 # model is optional; omitting it uses the Codex CLI configured default.
+# reasoning_effort = "high"  # optional: "low", "medium" or "high"
 timeout = 300
 ```
 
 ```bash
 dryscope scan /path/to/project --verify --backend codex-cli
+dryscope scan /path/to/project --verify --backend codex-cli --llm-model <codex-model> --reasoning-effort high
 ```
 
 `codex-cli` shells out non-interactively to `codex exec --ephemeral`. It uses
@@ -566,6 +568,13 @@ omitted, descriptor extraction, taxonomy canonicalization, Docs Map discovery,
 and Doc Pair Review still run with the Codex configured default. Reports and
 cache keys record this as `codex-cli:configured-default` because Codex does not
 expose the resolved model name to Dryscope.
+
+`--reasoning-effort low|medium|high` (or `reasoning_effort` under `[llm]`) is
+passed to `codex exec` as `model_reasoning_effort` and to LiteLLM as
+`reasoning_effort`; the `cli` and `ollama` backends cannot carry it and refuse
+it. The effort is part of the model identity in reports and cache keys, for
+example `codex-cli:configured-default|effort=high`, so answers at different
+efforts are never reused for each other.
 
 For a full docs preflight with Codex CLI and no provider API key, install local
 embeddings and select them explicitly:
@@ -664,6 +673,7 @@ dryscope scan <path> [OPTIONS]
 | `--llm-max-doc-pairs` | config | Maximum document pairs for Doc Pair Review |
 | `--concurrency` | config | Max parallel LLM calls for docs full stage |
 | `--backend` | config | LLM completion/review backend: `cli`, `codex-cli`, `litellm`, or `ollama`; independent of embeddings |
+| `--reasoning-effort` | config | Reasoning effort for `codex-cli` or `litellm`: `low`, `medium`, or `high` |
 
 Report cleanup:
 

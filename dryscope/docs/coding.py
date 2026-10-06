@@ -46,10 +46,11 @@ def call_llm_cached(
     cli_strip_api_key: bool = True,
     cli_permission_mode: str | None = None,
     cli_dangerously_skip_permissions: bool = False,
+    reasoning_effort: str | None = None,
     timeout: int = 300,
 ) -> str:
     """Call LLM with caching."""
-    cache_model = model_identity(backend, model)
+    cache_model = model_identity(backend, model, reasoning_effort)
     if cache is not None:
         cached = cache.get_coding(cache_key, cache_model, prompt_version)
         if cached is not None:
@@ -63,6 +64,7 @@ def call_llm_cached(
         cli_strip_api_key=cli_strip_api_key,
         cli_permission_mode=cli_permission_mode,
         cli_dangerously_skip_permissions=cli_dangerously_skip_permissions,
+        reasoning_effort=reasoning_effort,
         timeout=timeout,
     )
 
@@ -162,6 +164,7 @@ def analyze_doc_pair(
     cli_strip_api_key: bool = True,
     cli_permission_mode: str | None = None,
     cli_dangerously_skip_permissions: bool = False,
+    reasoning_effort: str | None = None,
     timeout: int = 300,
 ) -> dict:
     """Analyze overlap between two documents via a single LLM call.
@@ -265,6 +268,7 @@ Guidelines:
             cli_strip_api_key=cli_strip_api_key,
             cli_permission_mode=cli_permission_mode,
             cli_dangerously_skip_permissions=cli_dangerously_skip_permissions,
+            reasoning_effort=reasoning_effort,
             timeout=timeout,
         )
     except Exception as exc:
@@ -434,6 +438,7 @@ def run_doc_pair_pipeline(
     cli_strip_api_key: bool = True,
     cli_permission_mode: str | None = None,
     cli_dangerously_skip_permissions: bool = False,
+    reasoning_effort: str | None = None,
     timeout: int = 300,
 ) -> tuple[list[DocPairAnalysis], list[Code], list[Category], list[dict]]:
     """Run doc-pair level LLM analysis pipeline.
@@ -497,6 +502,7 @@ def run_doc_pair_pipeline(
             cli_strip_api_key=cli_strip_api_key,
             cli_permission_mode=cli_permission_mode,
             cli_dangerously_skip_permissions=cli_dangerously_skip_permissions,
+            reasoning_effort=reasoning_effort,
             timeout=timeout,
         )
         return _doc_pair_key(doc_a, doc_b), raw

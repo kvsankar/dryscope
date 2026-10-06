@@ -376,6 +376,7 @@ def _cluster_groups_with_llm(
     cli_strip_api_key: bool,
     cli_permission_mode: str | None,
     cli_dangerously_skip_permissions: bool,
+    reasoning_effort: str | None = None,
     concurrency: int = 1,
     timeout: int = 300,
     status: dict | None = None,
@@ -442,7 +443,7 @@ Respond with ONLY valid JSON:
 
         cache_key = hashlib.sha256(
             json.dumps(payload, sort_keys=True).encode()
-            + model_identity(backend, model).encode()
+            + model_identity(backend, model, reasoning_effort).encode()
             + TAXONOMY_LLM_VERSION.encode()
         ).hexdigest()
         try:
@@ -457,6 +458,7 @@ Respond with ONLY valid JSON:
                 cli_strip_api_key=cli_strip_api_key,
                 cli_permission_mode=cli_permission_mode,
                 cli_dangerously_skip_permissions=cli_dangerously_skip_permissions,
+                reasoning_effort=reasoning_effort,
                 timeout=timeout,
             )
             batch_mapping = _parse_mapping_response(text)
@@ -559,6 +561,7 @@ def build_canonical_taxonomy(
     cli_strip_api_key: bool = True,
     cli_permission_mode: str | None = None,
     cli_dangerously_skip_permissions: bool = False,
+    reasoning_effort: str | None = None,
     llm_concurrency: int = 1,
     llm_timeout: int = 300,
 ) -> TopicTaxonomy:
@@ -602,6 +605,7 @@ def build_canonical_taxonomy(
         cli_strip_api_key=cli_strip_api_key,
         cli_permission_mode=cli_permission_mode,
         cli_dangerously_skip_permissions=cli_dangerously_skip_permissions,
+        reasoning_effort=reasoning_effort,
         concurrency=llm_concurrency,
         timeout=llm_timeout,
         status=taxonomy_status,
@@ -815,6 +819,7 @@ def build_docs_map(
     cli_strip_api_key: bool = True,
     cli_permission_mode: str | None = None,
     cli_dangerously_skip_permissions: bool = False,
+    reasoning_effort: str | None = None,
     llm_timeout: int = 300,
 ) -> dict:
     """Infer a generic Docs Map view from topic evidence.
@@ -945,7 +950,7 @@ Respond with ONLY valid JSON:
 
     cache_key = hashlib.sha256(
         json.dumps(payload, sort_keys=True).encode()
-        + model_identity(backend, llm_model).encode()
+        + model_identity(backend, llm_model, reasoning_effort).encode()
         + DOCS_MAP_LLM_VERSION.encode()
     ).hexdigest()
     ia: dict[str, Any]
@@ -961,6 +966,7 @@ Respond with ONLY valid JSON:
             cli_strip_api_key=cli_strip_api_key,
             cli_permission_mode=cli_permission_mode,
             cli_dangerously_skip_permissions=cli_dangerously_skip_permissions,
+            reasoning_effort=reasoning_effort,
             timeout=llm_timeout,
         )
         ia = _parse_json_object_response(text)

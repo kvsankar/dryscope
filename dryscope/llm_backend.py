@@ -4,10 +4,16 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 import urllib.error
 import urllib.request
+
+REASONING_EFFORTS = ("low", "medium", "high")
+# Backends that can carry a reasoning effort to the model.
+EFFORT_BACKENDS = ("litellm", "codex-cli")
+_WINDOWS = os.name == "nt"
 
 
 def completion(
@@ -21,6 +27,7 @@ def completion(
     cli_permission_mode: str | None = None,
     cli_dangerously_skip_permissions: bool = False,
     timeout: int = 300,
+    reasoning_effort: str | None = None,
 ) -> str:
     """Get a completion from the LLM.
 
@@ -35,10 +42,16 @@ def completion(
         cli_strip_api_key: Whether to remove ANTHROPIC_API_KEY for Claude CLI.
         cli_permission_mode: Optional Claude CLI permission mode.
         cli_dangerously_skip_permissions: Whether to pass Claude CLI bypass flag.
+        reasoning_effort: Optional "low", "medium" or "high" for the litellm
+            and codex-cli backends; the others cannot carry it and refuse it.
 
     Returns:
         The assistant's response text.
     """
+    if reasoning_effort is not None and backend not in EFFORT_BACKENDS:
+        raise ValueError(
+            f"The {backend} backend cannot set a reasoning effort; use litellm or codex-cli."
+        )
     if backend == "cli":
         return _cli_completion(
             prompt,
@@ -49,15 +62,24 @@ def completion(
             timeout=timeout,
         )
     if backend == "codex-cli":
-        return _codex_cli_completion(prompt, model, timeout=timeout)
+        return _codex_cli_completion(
+            prompt, model, timeout=timeout, reasoning_effort=reasoning_effort
+        )
     if backend == "ollama":
         return _ollama_completion(prompt, model, ollama_host=ollama_host, timeout=timeout)
-    return _litellm_completion(prompt, model, api_key=api_key, timeout=timeout)
+    return _litellm_completion(
+        prompt, model, api_key=api_key, timeout=timeout, reasoning_effort=reasoning_effort
+    )
 
 
-def model_identity(backend: str, model: str | None) -> str:
-    """Return a reproducible identity even when a CLI chooses its default model."""
-    return model or f"{backend}:configured-default"
+def model_identity(backend: str, model: str | None, reasoning_effort: str | None = None) -> str:
+    """Return a reproducible identity even when a CLI chooses its default model.
+
+    The reasoning effort is part of the identity, so cached answers at one
+    effort are never reused for another.
+    """
+    identity = model or f"{backend}:configured-default"
+    return identity if reasoning_effort is None else f"{identity}|effort={reasoning_effort}"
 
 
 def _litellm_completion(
@@ -66,6 +88,7 @@ def _litellm_completion(
     api_key: str | None = None,
     *,
     timeout: int = 300,
+    reasoning_effort: str | None = None,
 ) -> str:
     """Call LLM via litellm."""
     import litellm
@@ -80,6 +103,8 @@ def _litellm_completion(
     }
     if api_key:
         kwargs["api_key"] = api_key
+    if reasoning_effort is not None:
+        kwargs["reasoning_effort"] = reasoning_effort
     response = litellm.completion(**kwargs)
     return response.choices[0].message.content
 
@@ -173,13 +198,16 @@ def _codex_cli_completion(
     model: str | None = None,
     *,
     timeout: int = 300,
+    reasoning_effort: str | None = None,
 ) -> str:
     """Call LLM via ``codex exec`` in non-interactive mode."""
     with tempfile.NamedTemporaryFile(mode="w+", delete=False) as out_file:
         out_path = out_file.name
 
+    # On Windows the npm launcher is codex.cmd, which subprocess does not find by bare name.
+    executable = (shutil.which("codex") or "codex") if _WINDOWS else "codex"
     cmd = [
-        "codex",
+        executable,
         "exec",
         "--skip-git-repo-check",
         "--sandbox",
@@ -190,6 +218,8 @@ def _codex_cli_completion(
     ]
     if model:
         cmd.extend(["-m", model])
+    if reasoning_effort is not None:
+        cmd.extend(["-c", f'model_reasoning_effort="{reasoning_effort}"'])
     cmd.append("-")
 
     try:

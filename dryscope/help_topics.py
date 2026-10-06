@@ -219,7 +219,8 @@ HELP_TOPICS: tuple[HelpTopic, ...] = (
               [code]      code thresholds, min size filters, embedding model
               [docs]      strict/candidate thresholds, scoring, scope, stage limits
               [docs.map]  generic facet seed dimensions for Docs Map
-              [llm]       optional model override, backend, timeout, cost, concurrency
+              [llm]       optional model override, backend, reasoning effort, timeout,
+                          cost, concurrency
               [cache]     cache enablement and path
 
             Embeddings are independent of [llm].backend. `codex-cli` can

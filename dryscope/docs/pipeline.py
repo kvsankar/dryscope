@@ -576,6 +576,7 @@ def _discover_docs_map(
             cli_strip_api_key=settings.cli_strip_api_key,
             cli_permission_mode=settings.cli_permission_mode,
             cli_dangerously_skip_permissions=settings.cli_dangerously_skip_permissions,
+            reasoning_effort=settings.reasoning_effort,
             llm_timeout=settings.llm_timeout,
             facet_dimensions=settings.docs_map_facet_dimensions,
             facet_values=settings.docs_map_facet_values,
@@ -721,6 +722,7 @@ def _extract_docs_map_stage(
         cli_strip_api_key=settings.cli_strip_api_key,
         cli_permission_mode=settings.cli_permission_mode,
         cli_dangerously_skip_permissions=settings.cli_dangerously_skip_permissions,
+        reasoning_effort=settings.reasoning_effort,
         timeout=settings.llm_timeout,
         facet_dimensions=settings.docs_map_facet_dimensions,
         facet_values=settings.docs_map_facet_values,
@@ -769,6 +771,7 @@ def _extract_docs_map_stage(
             cli_strip_api_key=settings.cli_strip_api_key,
             cli_permission_mode=settings.cli_permission_mode,
             cli_dangerously_skip_permissions=settings.cli_dangerously_skip_permissions,
+            reasoning_effort=settings.reasoning_effort,
         )
     doc_topics = taxonomy.doc_topics
     result.topic_taxonomy = taxonomy.to_dict()
@@ -1057,6 +1060,7 @@ def _run_doc_pair_review_stage(
             cli_strip_api_key=settings.cli_strip_api_key,
             cli_permission_mode=settings.cli_permission_mode,
             cli_dangerously_skip_permissions=settings.cli_dangerously_skip_permissions,
+            reasoning_effort=settings.reasoning_effort,
             timeout=settings.llm_timeout,
         )
         result.doc_pair_analyses = analyses

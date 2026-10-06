@@ -175,6 +175,7 @@ def verify_cluster(
     cli_permission_mode: str | None = None,
     cli_dangerously_skip_permissions: bool = False,
     timeout: int = 300,
+    reasoning_effort: str | None = None,
 ) -> tuple[str, str]:
     """Verify a single cluster using an LLM.
 
@@ -201,6 +202,7 @@ def verify_cluster(
         cli_permission_mode=cli_permission_mode,
         cli_dangerously_skip_permissions=cli_dangerously_skip_permissions,
         timeout=timeout,
+        reasoning_effort=reasoning_effort,
     )
     return _parse_verdict(response_text)
 
@@ -216,6 +218,7 @@ def verify_clusters(
     cli_permission_mode: str | None = None,
     cli_dangerously_skip_permissions: bool = False,
     timeout: int = 300,
+    reasoning_effort: str | None = None,
 ) -> list[tuple[Cluster, str, str]]:
     """Verify all clusters in parallel.
 
@@ -237,6 +240,7 @@ def verify_clusters(
                 cli_permission_mode,
                 cli_dangerously_skip_permissions,
                 timeout,
+                reasoning_effort,
             ): cluster
             for cluster in clusters
         }

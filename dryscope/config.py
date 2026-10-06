@@ -105,6 +105,7 @@ timeout = 300
 # model = "claude-haiku-4-5-20251001"
 # For backend = "ollama", optionally set:
 # ollama_host = "http://localhost:11434"
+# reasoning_effort = "high"  # "low", "medium" or "high"; litellm and codex-cli only
 # For backend = "codex-cli", the configured model is passed to `codex exec -m`
 # if your Codex auth supports it. With ChatGPT-account auth, the default Codex
 # model may be the only supported option.
@@ -167,6 +168,7 @@ class Settings:
     cli_strip_api_key: bool = True
     cli_permission_mode: str | None = None
     cli_dangerously_skip_permissions: bool = False
+    reasoning_effort: str | None = None
 
     # Cache settings
     cache_enabled: bool = True
@@ -184,7 +186,10 @@ class Settings:
     @property
     def llm_model_identity(self) -> str:
         """Stable cache/provenance identity for explicit or CLI-default models."""
-        return self.model or f"{self.backend}:configured-default"
+        identity = self.model or f"{self.backend}:configured-default"
+        if self.reasoning_effort is None:
+            return identity
+        return f"{identity}|effort={self.reasoning_effort}"
 
 
 def load_toml(path: Path) -> dict:
@@ -311,6 +316,7 @@ def _apply_llm_config(settings: Settings, llm_cfg: dict) -> None:
             "max_cost": "max_cost",
             "concurrency": "concurrency",
             "timeout": "llm_timeout",
+            "reasoning_effort": "reasoning_effort",
             "ollama_host": "ollama_host",
             "cli_strip_api_key": "cli_strip_api_key",
             "cli_permission_mode": "cli_permission_mode",
@@ -355,6 +361,7 @@ def _apply_cli_overrides(
     intra: bool | None,
     token_weight: float | None,
     llm_timeout: int | None,
+    reasoning_effort: str | None = None,
 ) -> None:
     """Apply CLI overrides to settings."""
     _apply_non_null_options(
@@ -379,6 +386,7 @@ def _apply_cli_overrides(
             "include_intra": intra,
             "token_weight": token_weight,
             "llm_timeout": llm_timeout,
+            "reasoning_effort": reasoning_effort,
         },
     )
     if include is not None:
@@ -413,6 +421,7 @@ def load_settings(
     intra: bool | None = None,
     token_weight: float | None = None,
     llm_timeout: int | None = None,
+    reasoning_effort: str | None = None,
 ) -> Settings:
     """Load settings with merge order: defaults -> .dryscope.toml -> CLI flags."""
     settings = Settings()
@@ -446,6 +455,25 @@ def load_settings(
         intra=intra,
         token_weight=token_weight,
         llm_timeout=llm_timeout,
+        reasoning_effort=reasoning_effort,
     )
+    _validate_reasoning_effort(settings)
 
     return settings
+
+
+def _validate_reasoning_effort(settings: Settings) -> None:
+    """Refuse an unknown effort, or one the selected backend cannot carry."""
+    from dryscope.llm_backend import EFFORT_BACKENDS, REASONING_EFFORTS
+
+    effort = settings.reasoning_effort
+    if effort is None:
+        return
+    if effort not in REASONING_EFFORTS:
+        raise ValueError(
+            f"reasoning_effort must be one of {', '.join(REASONING_EFFORTS)}, not {effort!r}"
+        )
+    if settings.backend not in EFFORT_BACKENDS:
+        raise ValueError(
+            f"reasoning_effort needs the litellm or codex-cli backend, not {settings.backend!r}"
+        )

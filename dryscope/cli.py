@@ -268,6 +268,7 @@ def _verify_code_clusters(
         cli_strip_api_key=settings.cli_strip_api_key,
         cli_permission_mode=settings.cli_permission_mode,
         cli_dangerously_skip_permissions=settings.cli_dangerously_skip_permissions,
+        reasoning_effort=settings.reasoning_effort,
         timeout=settings.llm_timeout,
     )
 
@@ -474,6 +475,7 @@ def _load_scan_settings(
     candidate_threshold: float | None,
     max_semantic_candidates: int | None,
     llm_timeout: int | None,
+    reasoning_effort: str | None = None,
 ) -> Settings:
     from dryscope.config import load_settings
 
@@ -498,6 +500,7 @@ def _load_scan_settings(
         intra=_explicit_flag(ctx, "intra"),
         token_weight=token_weight,
         llm_timeout=llm_timeout,
+        reasoning_effort=reasoning_effort,
     )
 
 
@@ -623,6 +626,12 @@ def _emit_scan_output(
     help="LLM backend for --verify; does not configure or authenticate embeddings",
 )
 @click.option(
+    "--reasoning-effort",
+    type=click.Choice(["low", "medium", "high"]),
+    default=None,
+    help="Reasoning effort for the litellm or codex-cli backend",
+)
+@click.option(
     "--token-weight",
     default=None,
     type=click.FloatRange(0.0, 1.0),
@@ -671,6 +680,7 @@ def scan(
     token_weight: float | None,
     candidate_threshold: float | None,
     max_semantic_candidates: int | None,
+    reasoning_effort: str | None,
 ) -> None:
     """Scan PATH with Code Match and/or docs tracks.
 
@@ -693,26 +703,30 @@ def scan(
         raise click.ClickException(str(exc)) from None
 
     # Build a single Settings object with all CLI overrides
-    settings = _load_scan_settings(
-        ctx,
-        path,
-        threshold,
-        min_lines,
-        min_tokens,
-        max_cluster_size,
-        model,
-        llm_model,
-        exclude,
-        threshold_intent,
-        backend,
-        min_words,
-        llm_max_doc_pairs,
-        concurrency,
-        token_weight,
-        candidate_threshold,
-        max_semantic_candidates,
-        llm_timeout,
-    )
+    try:
+        settings = _load_scan_settings(
+            ctx,
+            path,
+            threshold,
+            min_lines,
+            min_tokens,
+            max_cluster_size,
+            model,
+            llm_model,
+            exclude,
+            threshold_intent,
+            backend,
+            min_words,
+            llm_max_doc_pairs,
+            concurrency,
+            token_weight,
+            candidate_threshold,
+            max_semantic_candidates,
+            llm_timeout,
+            reasoning_effort,
+        )
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from None
 
     code_clusters = None
     docs_result = None

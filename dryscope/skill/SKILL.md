@@ -130,6 +130,9 @@ Embeddings are independent: the default `text-embedding-3-small` still requires
 `OPENAI_API_KEY`. For a full no-provider-key run, install
 `dryscope[local-embeddings]` and pass
 `--embedding-model all-MiniLM-L6-v2` together with `--backend codex-cli`.
+Add `--reasoning-effort high` (or `low`/`medium`) to set the Codex model's
+reasoning effort; it also works with `litellm` and is refused by `cli` and
+`ollama`.
 
 Saved report cleanup:
 - `{{DRYSCOPE_BIN}} reports clean /path/to/project --keep-last 10` previews deleting all but the newest 10 saved runs

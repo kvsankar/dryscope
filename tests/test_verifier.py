@@ -63,12 +63,14 @@ def test_run_code_scan_passes_backend_to_verifier(monkeypatch):
         cli_permission_mode=None,
         cli_dangerously_skip_permissions=False,
         timeout=300,
+        reasoning_effort=None,
     ):
         captured["max_workers"] = max_workers
         captured["backend"] = backend
         captured["ollama_host"] = ollama_host
         captured["cli_strip_api_key"] = cli_strip_api_key
         captured["cli_permission_mode"] = cli_permission_mode
+        captured["reasoning_effort"] = reasoning_effort
         captured["cli_dangerously_skip_permissions"] = cli_dangerously_skip_permissions
         captured["timeout"] = timeout
         return [(cluster, "review", "ok") for cluster in clusters]
@@ -98,6 +100,7 @@ def test_run_code_scan_passes_backend_to_verifier(monkeypatch):
     assert captured["ollama_host"] is None
     assert captured["cli_strip_api_key"] is True
     assert captured["cli_permission_mode"] == "bypassPermissions"
+    assert captured["reasoning_effort"] is None
     assert captured["cli_dangerously_skip_permissions"] is True
     assert captured["timeout"] == 300
 
@@ -156,6 +159,7 @@ def test_run_code_scan_applies_escalation_policy(monkeypatch):
         cli_permission_mode=None,
         cli_dangerously_skip_permissions=False,
         timeout=300,
+        reasoning_effort=None,
     ):
         return [
             (clusters[0], "refactor", "low-priority same-file helper"),

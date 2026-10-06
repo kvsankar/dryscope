@@ -170,6 +170,7 @@ def extract_document_descriptor(
     cli_strip_api_key: bool = True,
     cli_permission_mode: str | None = None,
     cli_dangerously_skip_permissions: bool = False,
+    reasoning_effort: str | None = None,
     timeout: int = 300,
     facet_dimensions: list[str] | None = None,
     facet_values: dict[str, list[str]] | None = None,
@@ -246,6 +247,7 @@ Rules:
             cli_strip_api_key=cli_strip_api_key,
             cli_permission_mode=cli_permission_mode,
             cli_dangerously_skip_permissions=cli_dangerously_skip_permissions,
+            reasoning_effort=reasoning_effort,
             timeout=timeout,
         )
     except Exception as exc:
@@ -274,6 +276,7 @@ def extract_topics(
     cli_strip_api_key: bool = True,
     cli_permission_mode: str | None = None,
     cli_dangerously_skip_permissions: bool = False,
+    reasoning_effort: str | None = None,
     timeout: int = 300,
 ) -> list[str]:
     """Extract granular topic phrases from a document via LLM.
@@ -319,6 +322,7 @@ JSON array:"""
             cli_strip_api_key=cli_strip_api_key,
             cli_permission_mode=cli_permission_mode,
             cli_dangerously_skip_permissions=cli_dangerously_skip_permissions,
+            reasoning_effort=reasoning_effort,
             timeout=timeout,
         )
     except Exception:
@@ -453,6 +457,7 @@ def run_topic_extraction(
     cli_strip_api_key: bool = True,
     cli_permission_mode: str | None = None,
     cli_dangerously_skip_permissions: bool = False,
+    reasoning_effort: str | None = None,
     timeout: int = 300,
 ) -> dict[str, list[str]]:
     """Orchestrate parallel topic extraction across all documents.
@@ -494,6 +499,7 @@ def run_topic_extraction(
             cli_strip_api_key=cli_strip_api_key,
             cli_permission_mode=cli_permission_mode,
             cli_dangerously_skip_permissions=cli_dangerously_skip_permissions,
+            reasoning_effort=reasoning_effort,
             timeout=timeout,
         )
         return doc_path, topics
@@ -531,6 +537,7 @@ def run_document_descriptor_extraction(
     cli_strip_api_key: bool = True,
     cli_permission_mode: str | None = None,
     cli_dangerously_skip_permissions: bool = False,
+    reasoning_effort: str | None = None,
     timeout: int = 300,
     facet_dimensions: list[str] | None = None,
     facet_values: dict[str, list[str]] | None = None,
@@ -571,6 +578,7 @@ def run_document_descriptor_extraction(
             cli_strip_api_key=cli_strip_api_key,
             cli_permission_mode=cli_permission_mode,
             cli_dangerously_skip_permissions=cli_dangerously_skip_permissions,
+            reasoning_effort=reasoning_effort,
             timeout=timeout,
             facet_dimensions=facet_dimensions,
             facet_values=facet_values,
