@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from dryscope import llm_backend
+from dryscope.cache import Cache
 from dryscope.config import load_settings
 from dryscope.docs import coding
 
@@ -101,30 +102,23 @@ class TestReasoningEffortSettings:
 
 
 class TestCachedCallsCarryEffort:
-    def test_effort_reaches_completion_and_separates_cache_entries(self, monkeypatch):
+    def test_effort_reaches_completion_and_separates_cache_entries(self, monkeypatch, tmp_path):
         seen: list = []
 
         def fake_completion(prompt, model, backend, **kwargs):
             seen.append(kwargs.get("reasoning_effort"))
             return f"answer-{kwargs.get('reasoning_effort')}"
 
-        class FakeCache:
-            def __init__(self):
-                self.store: dict = {}
-
-            def get_coding(self, key, model, version):
-                return self.store.get((key, model, version))
-
-            def set_coding(self, key, model, version, text):
-                self.store[(key, model, version)] = text
-
         monkeypatch.setattr(coding, "completion", fake_completion)
-        cache = FakeCache()
-        low = coding.call_llm_cached(
-            "gpt-luna", "p", cache, "k", "v1", backend="codex-cli", reasoning_effort="low"
-        )
-        high = coding.call_llm_cached(
-            "gpt-luna", "p", cache, "k", "v1", backend="codex-cli", reasoning_effort="high"
-        )
-        assert (low, high) == ("answer-low", "answer-high")
+        with Cache(tmp_path / "cache.db") as cache:
+            low = coding.call_llm_cached(
+                "gpt-luna", "p", cache, "k", "v1", backend="codex-cli", reasoning_effort="low"
+            )
+            high = coding.call_llm_cached(
+                "gpt-luna", "p", cache, "k", "v1", backend="codex-cli", reasoning_effort="high"
+            )
+            low_again = coding.call_llm_cached(
+                "gpt-luna", "p", cache, "k", "v1", backend="codex-cli", reasoning_effort="low"
+            )
+        assert (low, high, low_again) == ("answer-low", "answer-high", "answer-low")
         assert seen == ["low", "high"]
