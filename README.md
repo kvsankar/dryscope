@@ -790,7 +790,7 @@ For docs:
 
 - [Architecture](./docs/architecture.md) — how the code, docs, reporting, cache, and CLI pieces fit together
 - [Analysis](./docs/analysis.md) — positioning, alternatives, benchmark notes, and product-readiness context
-- [Process image brief](./docs/dryscope-process-image.md) — single-file brief for generating the dryscope engineering process diagram
+- [Infographic source](./docs/images/dryscope-infographic.html) — HTML source of the README infographic, rendered to `docs/images/dryscope-infographic.png`
 - [JSON output](./docs/json-output.md) — machine-readable output contracts for agents and scripts
 - [Roadmap](./docs/roadmap.md) — forward-looking planning notes kept separate from architecture
 - [Synthetic examples](./docs/synthetic-examples.md) — small exposition-only examples for similarity, Code Match, Docs Map, and Section Match
