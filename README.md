@@ -31,7 +31,7 @@ claim that every match should be refactored.
   - **Section Match** (`docs-section-match`): compares heading-based sections and ranks concrete section-level consolidation/link recommendations
   - **Doc Pair Review** (`docs-pair-review`): uses an LLM to review selected related document pairs
 
-![dryscope process diagram](./docs/images/dryscope-process.png)
+![How dryscope turns a large repository into a ranked shortlist of code and documentation findings](./docs/images/dryscope-infographic.png)
 
 ## Motivation
 

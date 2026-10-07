@@ -1,0 +1,170 @@
+<!doctype html>
+<!-- Infographic source. Render with the project-infographic skill:
+     render.py dryscope-infographic.html dryscope-infographic.png
+     Facts come from README.md; update both together. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="infographic.css">
+<style>
+  /* Layout only: columns are zone, arrow, zone, arrow, zone. */
+  .flow { grid-template-columns: 1fr 44px 2.8fr 44px 1fr; }
+  .core-grid { display: grid; grid-template-rows: 1fr 1fr auto; gap: 10px; flex: 1; min-height: 0; }
+  .steps { grid-template-columns: repeat(5, 1fr); }
+  .tiles { grid-template-columns: repeat(3, 1fr); }
+</style>
+</head>
+<body>
+
+<header class="title">
+  <h1>dryscope</h1>
+  <p>Code duplicate and documentation overlap detection</p>
+</header>
+
+<main class="flow">
+
+  <section class="zone input">
+    <h2>What goes in</h2>
+    <div class="card">
+      <i data-icon="folder-search"></i>
+      <div><h3>A large repository</h3>
+        <p>before you ask an agent, stronger model or reviewer to clean it up</p></div>
+    </div>
+    <div class="sub">
+      <h4>Code</h4>
+      <div class="chips">
+        <span class="chip">Python</span><span class="chip">Go</span><span class="chip">Java</span>
+        <span class="chip">JavaScript <small>JSX</small></span><span class="chip">TypeScript <small>TSX</small></span>
+      </div>
+    </div>
+    <div class="sub">
+      <h4>Docs</h4>
+      <div class="chips">
+        <span class="chip">Markdown</span><span class="chip">MDX</span><span class="chip">RST</span>
+        <span class="chip">AsciiDoc</span><span class="chip">plain text</span>
+      </div>
+    </div>
+    <div class="card">
+      <i data-icon="sliders-horizontal"></i>
+      <div><h3>Layered configuration</h3>
+        <p>built-in defaults, then a project config file, then CLI flags</p></div>
+    </div>
+    <div class="card">
+      <i data-icon="puzzle"></i>
+      <div><h3>Project profiles</h3>
+        <p>detects Django and pytest-factories and excludes their boilerplate</p></div>
+    </div>
+  </section>
+
+  <div class="arrow"><i data-icon="arrow-right"></i></div>
+
+  <section class="zone core">
+    <h2>What dryscope does</h2>
+    <div class="core-grid">
+      <div class="sub">
+        <h4>Code Match: repeated implementation shapes</h4>
+        <div class="steps">
+          <div class="step">
+            <div class="head"><span class="num">1</span><i data-icon="code"></i></div><h3>Parse</h3>
+            <p>tree-sitter extracts functions, classes, methods</p>
+          </div>
+          <div class="step">
+            <div class="head"><span class="num">2</span><i data-icon="eraser"></i></div><h3>Normalize</h3>
+            <p>identifiers and literals become placeholders</p>
+          </div>
+          <div class="step">
+            <div class="head"><span class="num">3</span><i data-icon="binary"></i></div><h3>Embed</h3>
+            <p>API embeddings via LiteLLM, or local models</p>
+          </div>
+          <div class="step">
+            <div class="head"><span class="num">4</span><i data-icon="git-compare"></i></div><h3>Compare</h3>
+            <p>cosine plus token overlap, size-ratio filtered</p>
+          </div>
+          <div class="step">
+            <div class="head"><span class="num">5</span><i data-icon="layers-2"></i></div><h3>Cluster</h3>
+            <p>groups similar pairs, scored by actionability</p>
+          </div>
+        </div>
+      </div>
+      <div class="sub">
+        <h4>Docs: Section Match and Docs Map</h4>
+        <div class="steps">
+          <div class="step">
+            <div class="head"><span class="num">1</span><i data-icon="scissors"></i></div><h3>Chunk</h3>
+            <p>split at headings into comparable sections</p>
+          </div>
+          <div class="step">
+            <div class="head"><span class="num">2</span><i data-icon="binary"></i></div><h3>Embed</h3>
+            <p>same embeddings, one vector per section</p>
+          </div>
+          <div class="step">
+            <div class="head"><span class="num">3</span><i data-icon="copy"></i></div><h3>Section Match</h3>
+            <p>strict matches plus bounded semantic leads</p>
+          </div>
+          <div class="step">
+            <div class="head"><span class="num">4</span><i data-icon="map"></i></div><h3>Docs Map</h3>
+            <p>descriptors, canonical labels, topic tree, clusters</p>
+          </div>
+          <div class="step">
+            <div class="head"><span class="num">5</span><i data-icon="link-2"></i></div><h3>Intent pairs</h3>
+            <p>embeds canonical labels to find related doc pairs</p>
+          </div>
+        </div>
+      </div>
+      <section class="zone caution">
+        <h2>Optional LLM review</h2>
+        <div class="tiles">
+          <div class="tile"><i data-icon="funnel"></i><div><b>Code Review</b><span>classifies each cluster as refactor, review or noise</span></div></div>
+          <div class="tile"><i data-icon="shield-check"></i><div><b>Escalation policy</b><span>keeps review and higher-value refactor findings</span></div></div>
+          <div class="tile"><i data-icon="message-square-text"></i><div><b>Doc Pair Review</b><span>relationship and action for selected related pairs</span></div></div>
+        </div>
+        <div class="sub">
+          <h4>LLM backends</h4>
+          <div class="chips">
+            <span class="chip">Claude CLI</span><span class="chip">Codex CLI</span>
+            <span class="chip">LiteLLM <small>provider APIs</small></span><span class="chip">Ollama <small>local</small></span>
+          </div>
+        </div>
+        <div class="note"><i data-icon="circle-dollar-sign"></i><span><b>Off by default.</b> Deterministic filtering runs first, so boilerplate does not consume expensive model attention.</span></div>
+      </section>
+    </div>
+  </section>
+
+  <div class="arrow"><i data-icon="arrow-right"></i></div>
+
+  <section class="zone output">
+    <h2>What comes out</h2>
+    <div class="card">
+      <i data-icon="list-ordered"></i>
+      <div><h3>A ranked shortlist</h3>
+        <p>files, sections and reasons worth reading first</p></div>
+    </div>
+    <div class="card">
+      <i data-icon="link-2"></i>
+      <div><h3>Section Match recommendations</h3>
+        <p>consolidate or cross-link; one recommendation for a family of sibling docs</p></div>
+    </div>
+    <div class="card">
+      <i data-icon="file-text"></i>
+      <div><h3>Docs Report Pack</h3>
+        <p>Markdown, HTML and JSON with the same numbered sections</p></div>
+    </div>
+    <div class="card">
+      <i data-icon="braces"></i>
+      <div><h3>JSON findings for agents</h3>
+        <p>one findings[] schema; also installs as a Claude Code and Codex skill</p></div>
+    </div>
+  </section>
+
+</main>
+
+<footer class="strip">
+  <span class="item"><i data-icon="scan-search"></i>A first-pass scanner, not a linter</span>
+  <span class="item"><i data-icon="list-ordered"></i>A shortlist, not a refactor oracle</span>
+  <span class="item"><i data-icon="funnel"></i>Deterministic first, LLM optional</span>
+  <span class="item"><i data-icon="circle-dollar-sign"></i>LLM spend capped</span>
+  <span class="item"><i data-icon="database"></i>Embeddings cached in SQLite</span>
+</footer>
+
+</body>
+</html>
